@@ -82,15 +82,9 @@ impl Plugin for LevelPlugin {
             .add_system(piece_setup.in_schedule(OnEnter(LevelState::Falling)))
 
             // updates
-            .add_systems((piece_fall, ghost_blocks, detect_placement).chain()
+            .add_systems((piece_fall, detect_placement, ghost_blocks)
                 .in_set(OnUpdate(LevelState::Falling))
             )
-
-            .add_system(clear_ghost_block.in_schedule(OnEnter(LevelState::Placing)))
-            // .add_system(piece_fall.in_set(OnUpdate(LevelState::Falling)))
-            // .add_system(piece_place.in_set(OnUpdate(LevelState::Placing)))
-            // .add_system(ghost_blocks.in_set(OnUpdate(LevelState::Falling)))
-
 
             .add_systems(
                 (handle_movements, handle_rotations, swap_hold)
@@ -99,7 +93,7 @@ impl Plugin for LevelPlugin {
             )
 
             .add_systems(
-                (handle_movements, handle_rotations, swap_hold, piece_place)
+                (handle_movements, handle_rotations, swap_hold, ghost_blocks, piece_place)
                     .chain()
                     .in_set(OnUpdate(LevelState::Placing))
             )
@@ -473,9 +467,6 @@ fn piece_fall(
         if let Ok(new_coords) = piece.try_move(&board, (coords.x, coords.y), MoveDirection::Down) {
             (coords.x, coords.y) = new_coords;
             transform.update_coords(coords.as_ref(), &config);
-        } else {
-            // switch to piece placement state
-            next_state.set(LevelState::Placing);
         }
     }
 }
@@ -486,8 +477,6 @@ fn piece_place(
     mut board_query: Query<(Entity, &mut Board, &Children)>,
     mut query_children: Query<(&mut Coords, &mut Transform), (With<FallingBlock>, Without<StaticBlock>, Without<Piece>)>,
     mut query_static_blocks: Query<Entity, With<StaticBlock>>,
-    mut query_ghost_piece: Query<Entity, With<GhostPiece>>,
-    // mut query_children: Query<(&mut Coords, &mut Transform), Without<PieceController>>,
     time: Res<Time>,
     config: Res<LevelConfig>,
     mut next_state: ResMut<NextState<LevelState>>,
@@ -504,6 +493,7 @@ fn piece_place(
 
         // switch to piece setup state and finalize piece
         next_state.set(LevelState::Falling);
+
 
         // hand over children to board
         commands.entity(board_entity).push_children(children);
@@ -536,9 +526,6 @@ fn piece_place(
                 commands.entity(*entity).despawn_recursive();
             }
 
-            for entity in query_ghost_piece.iter_mut() {
-                commands.entity(entity).despawn_recursive();
-            }
 
             for cell in board.cells() {
                 spawn_static_block(&mut commands, &config, cell); // redraw all static blocks
@@ -659,9 +646,8 @@ fn handle_rotations(
 
 fn ghost_blocks(
     mut commands: Commands,
-    mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
-    mut ghost_query: Query<Entity, With<GhostPiece>>,
-    mut children_query: Query<(&Transform, &Coords), Without<Piece>>,
+    mut query: Query<(&Coords, &Children, &Piece), (With<PieceController>)>, // either the piece or its coords changed
+    ghost_query: Query<Entity, With<GhostPiece>>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
 ) {
@@ -669,10 +655,8 @@ fn ghost_blocks(
         return;
     }
 
-    if !ghost_query.is_empty() {
-        for entity in ghost_query.iter() {
-            commands.entity(entity).despawn_recursive();
-        }
+    for entity in ghost_query.iter() {
+        commands.entity(entity).despawn_recursive();
     }
 
     let (coords, children, piece) = query.single_mut();
@@ -682,10 +666,17 @@ fn ghost_blocks(
     let mut ghost_transform = Transform::default();
     let mut ghost_piece = piece.clone();
 
+    let mut can_move = false;
+
     while let Ok(new_coords) = ghost_piece.try_move(&board, ghost_coords.into(), MoveDirection::Down) {
         ghost_coords = Coords::from(new_coords);
 
         ghost_transform.update_coords(&ghost_coords, &config);
+        can_move = true;
+    }
+
+    if !can_move {
+        return;
     }
 
 
@@ -704,21 +695,11 @@ fn ghost_blocks(
     commands.entity(piece_entity).push_children(&block_entities);
 }
 
-fn clear_ghost_block(mut commands: Commands, mut ghost_query: Query<(Entity, &mut Visibility), With<GhostPiece>>) {
-    for (entity, mut visibility) in ghost_query.iter_mut() {
-        visibility.set_if_neq(Visibility::Hidden);
-        commands.entity(entity).despawn_recursive();
-    }
-}
 
 fn detect_placement(
-    mut commands: Commands,
     mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
-    mut ghost_query: Query<Entity, With<GhostPiece>>,
-    mut children_query: Query<(&Transform, &Coords), Without<Piece>>,
     mut board_query: Query<&mut Board>,
     mut next_state: ResMut<NextState<LevelState>>,
-    config: Res<LevelConfig>,
 ) {
     if query.is_empty() {
         return;
