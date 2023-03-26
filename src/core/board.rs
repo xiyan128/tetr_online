@@ -19,11 +19,14 @@ impl Board {
         Self {
             width,
             height,
-            cells: Array2D::filled_with(Cell::dummy(0, 0), height, width),
+            cells: Array2D::filled_with(Cell::dummy(0, 0), height + 10, width),
         }
     }
 
     pub fn set(&mut self, x: i32, y: i32, cell_kind: CellKind) {
+        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+            return;
+        }
         self.cells[(y as usize, x as usize)] = Cell::new(x, y, cell_kind);
     }
 
@@ -72,7 +75,7 @@ impl Board {
         let mut cleared = Vec::new();
 
         for x in 0..self.width {
-            let cell = self.cells[(x, y)].clone();
+            let cell = self.cells[(y, x)].clone();
             self.set(x as i32, y as i32, CellKind::None);
             cleared.push(cell);
         }

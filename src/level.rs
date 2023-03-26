@@ -1,15 +1,18 @@
+use std::fs::hard_link;
 use std::iter::zip;
+use std::time::Duration;
 use bevy::app::{App, Plugin};
 use bevy::hierarchy::Children;
 use bevy::log::debug;
-use bevy::prelude::{BuildChildren, Bundle, Camera2dBundle, Color, Commands, Component, DespawnRecursiveExt, DetectChangesMut, Entity, IntoSystemAppConfig, IntoSystemConfig, IVec2, KeyCode, Mut, NextState, OnEnter, OnUpdate, Query, Res, ResMut, Resource, SpatialBundle, SpriteBundle, States, Time, Transform, Vec2, Vec3, With, Without};
+use bevy::prelude::*;
 use bevy::sprite::Sprite;
 use bevy::time::{Timer, TimerMode};
-use bevy::utils::default;
+use bevy::utils::{default, Instant};
 use crate::GameState;
 
 
 use leafwing_input_manager::{Actionlike, InputManagerBundle};
+use leafwing_input_manager::common_conditions::action_just_released;
 use leafwing_input_manager::input_map::InputMap;
 use leafwing_input_manager::prelude::{ActionState, InputManagerPlugin};
 use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceType};
@@ -54,24 +57,52 @@ pub enum GameControl {
     HardDrop,
     RotateClockwise,
     RotateCounterClockwise,
+    Hold,
 }
+
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+enum LevelSystemSet {
+    Control,
+    Logic,
+    Detection,
+}
+
 
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_state::<LevelState>()
+
+            .configure_set(LevelSystemSet::Control.before(LevelSystemSet::Logic))
+            .configure_set(LevelSystemSet::Logic.before(LevelSystemSet::Detection))
+
             .add_plugin(InputManagerPlugin::<GameControl>::default())
             // setup
             .add_system(level_setup.in_schedule(OnEnter(GameState::InGame)))
             .add_system(piece_setup.in_schedule(OnEnter(LevelState::Falling)))
 
             // updates
-            .add_system(piece_fall.in_set(OnUpdate(LevelState::Falling)))
-            .add_system(piece_place.in_set(OnUpdate(LevelState::Placing)))
+            .add_systems((piece_fall, ghost_blocks, detect_placement).chain()
+                .in_set(OnUpdate(LevelState::Falling))
+            )
 
-            // controls (TODO: also allow actions when placing)
-            .add_system(handle_movements.in_set(OnUpdate(LevelState::Falling)))
-            .add_system(handle_rotations.in_set(OnUpdate(LevelState::Falling)))
+            .add_system(clear_ghost_block.in_schedule(OnEnter(LevelState::Placing)))
+            // .add_system(piece_fall.in_set(OnUpdate(LevelState::Falling)))
+            // .add_system(piece_place.in_set(OnUpdate(LevelState::Placing)))
+            // .add_system(ghost_blocks.in_set(OnUpdate(LevelState::Falling)))
+
+
+            .add_systems(
+                (handle_movements, handle_rotations, swap_hold)
+                    .chain()
+                    .in_set(OnUpdate(LevelState::Falling))
+            )
+
+            .add_systems(
+                (handle_movements, handle_rotations, swap_hold, piece_place)
+                    .chain()
+                    .in_set(OnUpdate(LevelState::Placing))
+            )
 
             // resources
             .init_resource::<LevelConfig>()
@@ -97,15 +128,55 @@ impl Into<(i32, i32)> for Coords {
     }
 }
 
+enum BlockComponentKind {
+    Background,
+    Falling,
+    Static,
+    Ghost,
+}
+
+trait BlockComponent: Component {
+    fn kind(&self) -> BlockComponentKind;
+}
 
 #[derive(Component)]
 struct BackgroundBlock;
 
+impl BlockComponent for BackgroundBlock {
+    fn kind(&self) -> BlockComponentKind {
+        BlockComponentKind::Background
+    }
+}
+
 #[derive(Component)]
 struct FallingBlock;
 
+impl BlockComponent for FallingBlock {
+    fn kind(&self) -> BlockComponentKind {
+        BlockComponentKind::Falling
+    }
+}
+
 #[derive(Component)]
 struct StaticBlock;
+
+impl BlockComponent for StaticBlock {
+    fn kind(&self) -> BlockComponentKind {
+        BlockComponentKind::Static
+    }
+}
+
+#[derive(Component)]
+struct GhostBlock;
+
+#[derive(Component)]
+struct GhostPiece;
+
+impl BlockComponent for GhostBlock {
+    fn kind(&self) -> BlockComponentKind {
+        BlockComponentKind::Ghost
+    }
+}
 
 #[derive(Bundle)]
 struct BlockBundle {
@@ -119,6 +190,8 @@ struct PieceController {
     falling_timer: Timer,
     placing_timer: Timer,
     hard_dropped: bool,
+    should_detect_collision: bool,
+    used_hold: bool,
     movement_timer: Timer,
 }
 
@@ -129,6 +202,8 @@ impl Default for PieceController {
             placing_timer: Timer::from_seconds(0.5, TimerMode::Once),
             movement_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
             hard_dropped: false,
+            should_detect_collision: true,
+            used_hold: false,
         }
     }
 }
@@ -213,7 +288,25 @@ fn level_setup(
             transform: Transform::from_translation(Vec3::new(0., 0., 0.)),
             ..default()
         },
-    }).id();
+    }).insert(
+        InputManagerBundle::<GameControl> {
+            // Stores "which actions are currently pressed"
+            action_state: ActionState::default(),
+            // Describes how to convert from player inputs into those actions
+            input_map: InputMap::new([
+                (KeyCode::Space, GameControl::HardDrop),
+                (KeyCode::Left, GameControl::Left),
+                (KeyCode::Right, GameControl::Right),
+                (KeyCode::Up, GameControl::RotateClockwise),
+                (KeyCode::Z, GameControl::RotateCounterClockwise),
+                (KeyCode::X, GameControl::RotateClockwise),
+                (KeyCode::Down, GameControl::Down),
+                (KeyCode::LShift, GameControl::Hold),
+            ]),
+            ..default()
+        })
+        .insert(Holder::default())
+        .id();
 
     commands.entity(board_entity).push_children(&block_ids);
 
@@ -244,6 +337,59 @@ fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, cell: 
     commands.spawn((bundle, StaticBlock)).id()
 }
 
+#[derive(Component, Default)]
+struct Holder {
+    piece: Option<Piece>,
+}
+
+fn swap_hold(mut commands: Commands,
+             mut holder_query: Query<&mut Holder>,
+             mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
+             config: Res<LevelConfig>,
+             mut generator: ResMut<PieceGenerator>,
+             action_query: Query<&ActionState<GameControl>, With<Board>>,
+) {
+    let action_state = action_query.single();
+    let (current_piece_entity, current_piece, mut piece_controller) = piece_query.single_mut();
+    if !action_state.just_pressed(GameControl::Hold) || piece_controller.used_hold {
+        return;
+    }
+
+    let mut holder = holder_query.single_mut();
+
+
+    let next_piece = holder.piece.take().unwrap_or(Piece::from(generator.next().unwrap()));
+
+
+    // spawn the blocks
+    let block_ids: Vec<Entity> = next_piece.board().cells().iter().map(|&cell| {
+        spawn_free_block(&mut commands, &config, &next_piece, cell, FallingBlock)
+    }).collect();
+
+    let piece_entity = commands.spawn(next_piece).id();
+
+    // spawn new piece
+    commands.entity(piece_entity)
+        .insert(Coords::from(config.spawn_coords))
+        .insert(PieceController {
+            used_hold: true, // prevent hold from being used again
+            ..default()
+        })
+        .insert(SpatialBundle {
+            transform: Transform::from_translation(to_translation(config.spawn_coords.0, config.spawn_coords.1, &config)),
+            ..default()
+        });
+
+    commands.entity(piece_entity).push_children(&block_ids);
+
+    holder.piece = Some(current_piece.clone());
+
+    // remove old piece
+    commands.entity(current_piece_entity).despawn_recursive();
+
+    piece_controller.used_hold = true;
+}
+
 fn piece_setup(mut commands: Commands,
                config: Res<LevelConfig>,
                mut generator: ResMut<PieceGenerator>) {
@@ -251,28 +397,13 @@ fn piece_setup(mut commands: Commands,
     let next_piece_type = generator.next();
     let piece = Piece::from(next_piece_type.unwrap());
 
-    let block_ids: Vec<Entity> = piece.board().cells().iter().map(|cell| {
-        spawn_falling_block(&mut commands, &config, &piece, cell)
+    let block_ids: Vec<Entity> = piece.board().cells().iter().map(|&cell| {
+        spawn_free_block(&mut commands, &config, &piece, cell, FallingBlock)
     }).collect();
 
     let piece_entity = commands
         .spawn(piece)
-        .insert(
-            InputManagerBundle::<GameControl> {
-                // Stores "which actions are currently pressed"
-                action_state: ActionState::default(),
-                // Describes how to convert from player inputs into those actions
-                input_map: InputMap::new([
-                    (KeyCode::Space, GameControl::HardDrop),
-                    (KeyCode::Left, GameControl::Left),
-                    (KeyCode::Right, GameControl::Right),
-                    (KeyCode::Up, GameControl::RotateClockwise),
-                    (KeyCode::Z, GameControl::RotateCounterClockwise),
-                    (KeyCode::X, GameControl::RotateClockwise),
-                    (KeyCode::Down, GameControl::Down),
-                ]),
-                ..default()
-            }).id();
+        .id();
 
     commands.entity(piece_entity)
         .insert(Coords::from(config.spawn_coords))
@@ -285,11 +416,21 @@ fn piece_setup(mut commands: Commands,
     commands.entity(piece_entity).push_children(&block_ids);
 }
 
-fn spawn_falling_block(commands: &mut Commands, config: &Res<LevelConfig>, piece: &Piece, cell: &&Cell) -> Entity {
+fn spawn_free_block(commands: &mut Commands,
+                    config: &Res<LevelConfig>,
+                    piece: &Piece,
+                    cell: &Cell,
+                    block_component: impl BlockComponent,
+) -> Entity {
     let (x, y) = cell.coords();
     let piece_type = piece.board().get_cell_kind(x, y).unwrap();
 
-    let color = piece_color(piece_type);
+    let color = match block_component.kind() {
+        BlockComponentKind::Falling => piece_color(piece_type),
+        BlockComponentKind::Ghost => Color::GRAY.set_a(0.5).as_rgba(),
+        BlockComponentKind::Static => piece_color(piece_type),
+        _ => Color::rgb(0.1, 0.1, 0.1),
+    };
 
     let coords = Coords::from((x, y));
     let transform = Transform::from_coords(&coords, &config);
@@ -298,7 +439,7 @@ fn spawn_falling_block(commands: &mut Commands, config: &Res<LevelConfig>, piece
     // spawn falling block
     let entity = commands.spawn(bundle)
         .insert(coords)
-        .insert(FallingBlock)
+        .insert(block_component)
         .id();
     entity
 }
@@ -339,13 +480,13 @@ fn piece_fall(
     }
 }
 
-
 fn piece_place(
     mut commands: Commands,
     mut query: Query<(Entity, &Piece, &Coords, &mut PieceController, &Children)>,
     mut board_query: Query<(Entity, &mut Board, &Children)>,
     mut query_children: Query<(&mut Coords, &mut Transform), (With<FallingBlock>, Without<StaticBlock>, Without<Piece>)>,
     mut query_static_blocks: Query<Entity, With<StaticBlock>>,
+    mut query_ghost_piece: Query<Entity, With<GhostPiece>>,
     // mut query_children: Query<(&mut Coords, &mut Transform), Without<PieceController>>,
     time: Res<Time>,
     config: Res<LevelConfig>,
@@ -359,12 +500,13 @@ fn piece_place(
     if piece_controller.placing_timer.finished()
         || piece_controller.hard_dropped // after hard drop, place immediately
     {
+        piece_controller.hard_dropped = false; // reset hard drop flag
+
         // switch to piece setup state and finalize piece
         next_state.set(LevelState::Falling);
 
         // hand over children to board
         commands.entity(board_entity).push_children(children);
-
 
         commands.entity(piece_entity).despawn_recursive();
 
@@ -373,6 +515,7 @@ fn piece_place(
             let (mut child_coords, mut child_transform) = query_children.get_mut(*child).unwrap();
             child_coords.x += coords.x;
             child_coords.y += coords.y;
+
             board.set(child_coords.x, child_coords.y, CellKind::Some(piece.piece_type()));
 
             commands.entity(*child).insert(StaticBlock {}).remove::<FallingBlock>();
@@ -382,18 +525,19 @@ fn piece_place(
         // check for line clears
         let line_clear_count = board.clear_lines();
 
-        for child in board_children.iter() {
-            commands.entity(*child).log_components();
-        }
-
         if line_clear_count > 0 {
             // remove all static blocks
             for entity in query_static_blocks.iter_mut() {
                 commands.entity(entity).despawn_recursive();
             }
-            // also remove the falling piece children
-            for child in children.iter() {
-                commands.entity(*child).despawn_recursive();
+
+            // remove the current piece's children (which are added to the board but yet to be updated)
+            for entity in children.iter() {
+                commands.entity(*entity).despawn_recursive();
+            }
+
+            for entity in query_ghost_piece.iter_mut() {
+                commands.entity(entity).despawn_recursive();
             }
 
             for cell in board.cells() {
@@ -407,25 +551,27 @@ fn piece_place(
 
 
 fn handle_movements(
-    action_query: Query<&ActionState<GameControl>, With<Piece>>,
+    mut action_query: Query<&mut ActionState<GameControl>, With<Board>>,
     mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &mut PieceController)>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
     time: Res<Time>,
 ) {
-    let action_state = action_query.single();
+    let mut action_state = action_query.single_mut();
 
+    let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
+    let board = board_query.single_mut();
+
+    piece_controller.movement_timer.tick(time.delta());
 
     let movement = IVec2::new(
         action_state.pressed(GameControl::Right) as i32
             - action_state.pressed(GameControl::Left) as i32,
         action_state.pressed(GameControl::Down) as i32);
 
-    let hard_drop = action_state.just_pressed(GameControl::HardDrop);
 
-    if hard_drop {
-        debug!("hard drop")
-    }
+    // let hard_drop = action_state.
+    let hard_drop = action_state.just_pressed(GameControl::HardDrop);
 
     let movement =
         match movement {
@@ -435,10 +581,6 @@ fn handle_movements(
             _ => hard_drop.then(|| MoveDirection::Down),
         };
 
-    let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
-    let board = board_query.single_mut();
-
-    piece_controller.movement_timer.tick(time.delta());
 
     if piece_controller.movement_timer.finished() || hard_drop {
         if let Some(movement) = movement {
@@ -448,7 +590,9 @@ fn handle_movements(
             } else {
                 move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement);
             }
-            // move_piece_and_update(&config, &mut piece, coords, &mut transform, &board, movement);
+
+            piece_controller.should_detect_collision = true;
+            piece_controller.placing_timer.reset();
         }
         piece_controller.movement_timer.reset();
     }
@@ -470,13 +614,15 @@ fn move_piece_and_update(config: &Res<LevelConfig>,
 }
 
 fn handle_rotations(
-    action_query: Query<&ActionState<GameControl>, With<Piece>>,
+    action_query: Query<&ActionState<GameControl>, With<Board>>,
     mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &Children)>,
     mut children_query: Query<(&mut Coords, &mut Transform), Without<Piece>>,
     mut board_query: Query<&mut Board>,
+    mut piece_controller_query: Query<&mut PieceController>,
     config: Res<LevelConfig>,
 ) {
     let action_state = action_query.single();
+    let mut piece_controller = piece_controller_query.single_mut();
 
 
     let rotation = action_state.just_pressed(GameControl::RotateClockwise) as i32
@@ -503,6 +649,85 @@ fn handle_rotations(
             }
 
             transform.update_coords(coords.as_ref(), &config);
+
+            piece_controller.should_detect_collision = true;
+            piece_controller.placing_timer.reset();
         }
+    }
+}
+
+
+fn ghost_blocks(
+    mut commands: Commands,
+    mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
+    mut ghost_query: Query<Entity, With<GhostPiece>>,
+    mut children_query: Query<(&Transform, &Coords), Without<Piece>>,
+    mut board_query: Query<&mut Board>,
+    config: Res<LevelConfig>,
+) {
+    if query.is_empty() {
+        return;
+    }
+
+    if !ghost_query.is_empty() {
+        for entity in ghost_query.iter() {
+            commands.entity(entity).despawn_recursive();
+        }
+    }
+
+    let (coords, children, piece) = query.single_mut();
+    let board = board_query.single_mut();
+
+    let mut ghost_coords = coords.clone();
+    let mut ghost_transform = Transform::default();
+    let mut ghost_piece = piece.clone();
+
+    while let Ok(new_coords) = ghost_piece.try_move(&board, ghost_coords.into(), MoveDirection::Down) {
+        ghost_coords = Coords::from(new_coords);
+
+        ghost_transform.update_coords(&ghost_coords, &config);
+    }
+
+
+    let block_entities = ghost_piece.board().cells().iter().map(|cell| {
+        spawn_free_block(&mut commands, &config, &ghost_piece, cell, GhostBlock)
+    }).collect::<Vec<_>>();
+
+    let piece_entity = commands
+        .spawn(ghost_piece)
+        .insert(GhostPiece)
+        .insert(SpatialBundle {
+            transform: ghost_transform,
+            ..Default::default()
+        })
+        .id();
+    commands.entity(piece_entity).push_children(&block_entities);
+}
+
+fn clear_ghost_block(mut commands: Commands, mut ghost_query: Query<(Entity, &mut Visibility), With<GhostPiece>>) {
+    for (entity, mut visibility) in ghost_query.iter_mut() {
+        visibility.set_if_neq(Visibility::Hidden);
+        commands.entity(entity).despawn_recursive();
+    }
+}
+
+fn detect_placement(
+    mut commands: Commands,
+    mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
+    mut ghost_query: Query<Entity, With<GhostPiece>>,
+    mut children_query: Query<(&Transform, &Coords), Without<Piece>>,
+    mut board_query: Query<&mut Board>,
+    mut next_state: ResMut<NextState<LevelState>>,
+    config: Res<LevelConfig>,
+) {
+    if query.is_empty() {
+        return;
+    }
+
+    let (coords, children, piece) = query.single_mut();
+    let board = board_query.single_mut();
+
+    if piece.try_move(&board, (coords.x, coords.y), MoveDirection::Down).is_err() {
+        next_state.set(LevelState::Placing);
     }
 }

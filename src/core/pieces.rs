@@ -27,7 +27,7 @@ impl PieceType {
     }
 }
 
-#[derive(Copy, Clone, PartialEq, Eq, Hash)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PieceRotation {
     R0 = 0,
     R90 = 1,
@@ -53,7 +53,7 @@ pub enum MoveDirection {
     Down,
 }
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Debug)]
 pub struct Piece {
     piece_type: PieceType,
     rotation: PieceRotation,
@@ -149,7 +149,7 @@ impl Piece {
         false
     }
 
-    pub fn try_move(&mut self, board : &Board, offset: (i32, i32), direction: MoveDirection) -> Result<(i32, i32), ()> {
+    pub fn try_move(&self, board : &Board, offset: (i32, i32), direction: MoveDirection) -> Result<(i32, i32), ()> {
         let (x_offset, y_offset) = offset;
         let (x_offset, y_offset) = match direction {
             MoveDirection::Left => (x_offset - 1, y_offset),
