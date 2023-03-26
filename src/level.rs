@@ -5,7 +5,7 @@ use bevy::app::{App, Plugin};
 use bevy::hierarchy::Children;
 use bevy::log::debug;
 use bevy::prelude::*;
-use bevy::sprite::Sprite;
+use bevy::sprite::{Anchor, Sprite};
 use bevy::time::{Timer, TimerMode};
 use bevy::utils::{default, Instant};
 use crate::GameState;
@@ -15,7 +15,7 @@ use leafwing_input_manager::{Actionlike, InputManagerBundle};
 use leafwing_input_manager::common_conditions::action_just_released;
 use leafwing_input_manager::input_map::InputMap;
 use leafwing_input_manager::prelude::{ActionState, InputManagerPlugin};
-use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceType};
+use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 enum LevelState {
@@ -31,7 +31,7 @@ struct LevelConfig {
     block_size: f32,
     board_width: usize,
     board_height: usize,
-    spawn_coords: (i32, i32),
+    spawn_coords: (isize, isize),
 }
 
 impl Default for LevelConfig {
@@ -82,7 +82,7 @@ impl Plugin for LevelPlugin {
             .add_system(piece_setup.in_schedule(OnEnter(LevelState::Falling)))
 
             // updates
-            .add_systems((piece_fall, detect_placement, ghost_blocks)
+            .add_systems((/*piece_fall, */ detect_placement, ghost_blocks)
                 .in_set(OnUpdate(LevelState::Falling))
             )
 
@@ -93,9 +93,20 @@ impl Plugin for LevelPlugin {
             )
 
             .add_systems(
-                (handle_movements, handle_rotations, swap_hold, ghost_blocks, piece_place)
-                    .chain()
+                (handle_movements, handle_rotations, swap_hold, ghost_blocks, piece_place, detect_placement)
                     .in_set(OnUpdate(LevelState::Placing))
+            )
+
+
+            // start of UI
+            .add_system(
+                show_placement_timer_bar.in_schedule(OnEnter(LevelState::Placing))
+            )
+            .add_system(
+                update_placement_timer_bar.in_set(OnUpdate(LevelState::Placing))
+            )
+            .add_system(
+                hide_placement_timer_bar.in_schedule(OnExit(LevelState::Placing))
             )
 
             // resources
@@ -106,18 +117,18 @@ impl Plugin for LevelPlugin {
 
 #[derive(Component, PartialEq, Eq, Debug, Clone, Hash)]
 struct Coords {
-    x: i32,
-    y: i32,
+    x: isize,
+    y: isize,
 }
 
-impl From<(i32, i32)> for Coords {
-    fn from((x, y): (i32, i32)) -> Self {
+impl From<(isize           , isize)> for Coords {
+    fn from((x, y): (isize                     , isize    )) -> Self {
         Self { x, y }
     }
 }
 
-impl Into<(i32, i32)> for Coords {
-    fn into(self) -> (i32, i32) {
+impl Into<(isize           , isize)> for Coords {
+    fn into(self) -> (isize                      , isize    ) {
         (self.x, self.y)
     }
 }
@@ -184,7 +195,6 @@ struct PieceController {
     falling_timer: Timer,
     placing_timer: Timer,
     hard_dropped: bool,
-    should_detect_collision: bool,
     used_hold: bool,
     movement_timer: Timer,
 }
@@ -196,7 +206,6 @@ impl Default for PieceController {
             placing_timer: Timer::from_seconds(0.5, TimerMode::Once),
             movement_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
             hard_dropped: false,
-            should_detect_collision: true,
             used_hold: false,
         }
     }
@@ -215,10 +224,10 @@ trait MatchCoords {
     fn update_coords(&mut self, coords: &Coords, config: &LevelConfig);
 }
 
-fn to_translation(x: i32, y: i32, config: &LevelConfig) -> Vec3 {
+fn to_translation(x: isize                  , y: isize                  , config: &LevelConfig) -> Vec3 {
     IVec2::new(
-        x,
-        y,
+        x as i32,
+        y as i32,
     ).as_vec2().extend(0.0) * config.block_size
 }
 
@@ -237,6 +246,7 @@ impl BlockBundle {
         let sprite = Sprite {
             custom_size: Some(Vec2::new(config.block_size, config.block_size)),
             color,
+            anchor: Anchor::TopLeft,
             ..default()
         };
 
@@ -304,6 +314,23 @@ fn level_setup(
 
     commands.entity(board_entity).push_children(&block_ids);
 
+    // spawn the timer bar
+    let timer_bar_entity = commands
+        .spawn(SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(0., -config.block_size, 0.)),
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(config.block_size * config.board_width as f32, config.block_size * 0.2)),
+                color: Color::GRAY,
+                anchor: Anchor::TopLeft,
+                ..Default::default()
+            },
+            visibility: Visibility::Hidden,
+            ..Default::default()
+        })
+        .insert(PlacementTimerBar).id();
+
+    commands.entity(board_entity).add_child(timer_bar_entity);
+
     // look at center of the board
     commands.spawn(Camera2dBundle {
         transform: Transform::from_translation(Vec3::new(
@@ -313,6 +340,8 @@ fn level_setup(
         )),
         ..default()
     });
+
+
 
     // switch to falling state
     next_state.set(LevelState::Falling);
@@ -386,8 +415,16 @@ fn swap_hold(mut commands: Commands,
 
 fn piece_setup(mut commands: Commands,
                config: Res<LevelConfig>,
+               mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
                mut generator: ResMut<PieceGenerator>) {
-    debug!("piece_setup");
+
+    // if there is already a piece, don't spawn a new one
+    if piece_query.get_single().is_ok() {
+        info!("piece already exists");
+        return;
+    }
+
+    info!("piece_setup");
     let next_piece_type = generator.next();
     let piece = Piece::from(next_piece_type.unwrap());
 
@@ -494,7 +531,6 @@ fn piece_place(
         // switch to piece setup state and finalize piece
         next_state.set(LevelState::Falling);
 
-
         // hand over children to board
         commands.entity(board_entity).push_children(children);
 
@@ -553,8 +589,11 @@ fn handle_movements(
 
     let movement = IVec2::new(
         action_state.pressed(GameControl::Right) as i32
-            - action_state.pressed(GameControl::Left) as i32,
-        action_state.pressed(GameControl::Down) as i32);
+
+            - action_state.pressed(GameControl::Left) as i32
+        ,
+        action_state.pressed(GameControl::Down) as i32,
+    );
 
 
     // let hard_drop = action_state.
@@ -572,14 +611,16 @@ fn handle_movements(
     if piece_controller.movement_timer.finished() || hard_drop {
         if let Some(movement) = movement {
             if hard_drop {
-                while move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement) {}
+                while move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement) {
+                    piece_controller.placing_timer.reset();
+                }
                 piece_controller.hard_dropped = true;
             } else {
-                move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement);
+                if move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement) {
+                    piece_controller.placing_timer.reset();
+                }
             }
 
-            piece_controller.should_detect_collision = true;
-            piece_controller.placing_timer.reset();
         }
         piece_controller.movement_timer.reset();
     }
@@ -612,22 +653,23 @@ fn handle_rotations(
     let mut piece_controller = piece_controller_query.single_mut();
 
 
-    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as i32
-        - action_state.just_pressed(GameControl::RotateCounterClockwise) as i32;
+    let (mut piece, mut coords, mut transform, children) = query.single_mut();
+    let board = board_query.single_mut();
+
+    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as isize        - action_state.just_pressed(GameControl::RotateCounterClockwise) as isize;
 
     let rotation = match rotation {
-        1 => Some(1),
-        -1 => Some(3),
-        _ => None,
+        1 => Some(PieceRotation::R90 + piece.rotation()),
+        -1 => Some(PieceRotation::R270 + piece.rotation()),
+        _ => None
     };
 
 
-    let (mut piece, coords, mut transform, children) = query.single_mut();
-    let board = board_query.single_mut();
-
     if let Some(rotation_n) = rotation {
-        if let Ok(rotation) = piece.try_rotate(&board, (coords.x, coords.y), rotation_n) {
+        if let Ok((rotation, new_coords)) = piece.try_rotate_with_kicks(&board, (coords.x, coords.y), rotation_n) {
             piece.rotate_to(rotation);
+
+            (coords.x, coords.y) = new_coords;
 
             for (child_entity, cell) in zip(children.iter(), piece.board().cells().iter()) {
                 let (mut child_coords, mut child_transform) = children_query.get_mut(*child_entity).unwrap();
@@ -637,7 +679,6 @@ fn handle_rotations(
 
             transform.update_coords(coords.as_ref(), &config);
 
-            piece_controller.should_detect_collision = true;
             piece_controller.placing_timer.reset();
         }
     }
@@ -646,7 +687,7 @@ fn handle_rotations(
 
 fn ghost_blocks(
     mut commands: Commands,
-    mut query: Query<(&Coords, &Children, &Piece), (With<PieceController>)>, // either the piece or its coords changed
+    mut query: Query<(&Coords, &Children, &Piece), (With<PieceController>, Or<(Changed<Coords>, Changed<Piece>)>)>, // either the piece or its coords changed
     ghost_query: Query<Entity, With<GhostPiece>>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
@@ -700,6 +741,7 @@ fn detect_placement(
     mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
     mut board_query: Query<&mut Board>,
     mut next_state: ResMut<NextState<LevelState>>,
+    mut current_state: Res<State<LevelState>>,
 ) {
     if query.is_empty() {
         return;
@@ -708,7 +750,53 @@ fn detect_placement(
     let (coords, children, piece) = query.single_mut();
     let board = board_query.single_mut();
 
+    let current_state = &current_state.0;
+
     if piece.try_move(&board, (coords.x, coords.y), MoveDirection::Down).is_err() {
-        next_state.set(LevelState::Placing);
+        if current_state == &LevelState::Falling {
+            next_state.set(LevelState::Placing);
+            info!("Transitioning to Placing state.");
+        }
+    } else if current_state == &LevelState::Placing {
+        next_state.set(LevelState::Falling);
+        info!("Transitioning to Falling state.");
     }
+}
+
+#[derive(Component)]
+struct PlacementTimerBar;
+
+fn show_placement_timer_bar(
+    mut commands: Commands,
+    mut query: Query<&mut PieceController>,
+    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
+    config: Res<LevelConfig>,
+) {
+    let mut bar = bar_query.single_mut();
+    bar.set_if_neq(Visibility::Inherited);
+}
+
+// update_placement_timer_bar
+fn update_placement_timer_bar(
+    mut piece_controller_query: Query<&mut PieceController>,
+    mut bar_query: Query<&mut Sprite, With<PlacementTimerBar>>,
+    config: Res<LevelConfig>,
+) {
+    let mut piece_controller = piece_controller_query.single_mut();
+
+    let timer = &mut piece_controller.placing_timer;
+    let mut bar = bar_query.single_mut();
+
+    let progress = timer.percent();
+    let width = config.block_size * config.board_width as f32 * progress;
+
+    bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
+}
+
+// remove_placement_timer_bar
+fn hide_placement_timer_bar(
+    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
+) {
+    let mut bar = bar_query.single_mut();
+    bar.set_if_neq(Visibility::Hidden);
 }

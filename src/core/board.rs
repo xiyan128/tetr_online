@@ -23,8 +23,8 @@ impl Board {
         }
     }
 
-    pub fn set(&mut self, x: i32, y: i32, cell_kind: CellKind) {
-        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+    pub fn set(&mut self, x: isize, y: isize, cell_kind: CellKind) {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
             return;
         }
         self.cells[(y as usize, x as usize)] = Cell::new(x, y, cell_kind);
@@ -38,8 +38,8 @@ impl Board {
         self.cells.elements_row_major_iter().filter(|cell| cell.cell_kind.is_some()).collect()
     }
 
-    pub fn get(&self, x: i32, y: i32) -> Option<&Cell> {
-        if x < 0 || y < 0 || x >= self.width as i32 || y >= self.height as i32 {
+    pub fn get(&self, x: isize, y: isize) -> Option<&Cell> {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
             return None;
         }
 
@@ -47,8 +47,8 @@ impl Board {
             .then(|| &self.cells[(y as usize, x as usize)])
     }
 
-    pub fn get_cell_kind(&self, x: i32, y: i32) -> CellKind {
-        if x < 0 || y < 0 || x >= self.width as i32 {
+    pub fn get_cell_kind(&self, x: isize, y: isize) -> CellKind {
+        if x < 0 || y < 0 || x >= self.width as isize {
             return CellKind::Wall;
         }
 
@@ -59,16 +59,16 @@ impl Board {
         CellKind::None
     }
 
-    pub fn coords(&self) -> Product<Range<i32>, Range<i32>> {
-        iproduct!(0..self.width as i32, 0..self.height as i32)
+    pub fn coords(&self) -> Product<Range<isize>, Range<isize>> {
+        iproduct!(0..self.width as isize, 0..self.height as isize)
     }
 
-    pub fn cell_coords(&self) -> Vec<(i32, i32)> {
+    pub fn cell_coords(&self) -> Vec<(isize, isize)> {
         self.cells().iter().map(|cell| (cell.x, cell.y)).collect()
     }
 
     pub fn row_cells(&self, row: usize) -> impl Iterator<Item=&Cell> {
-        self.cells().into_iter().filter(move |cell| cell.y == row as i32)
+        self.cells().into_iter().filter(move |cell| cell.y == row as isize)
     }
 
     pub fn clear_line(&mut self, y: usize) -> Vec<Cell> {
@@ -76,7 +76,7 @@ impl Board {
 
         for x in 0..self.width {
             let cell = self.cells[(y, x)].clone();
-            self.set(x as i32, y as i32, CellKind::None);
+            self.set(x as isize, y as isize, CellKind::None);
             cleared.push(cell);
         }
 
@@ -84,15 +84,15 @@ impl Board {
         for y in (y + 1)..self.height {
             for x in 0..self.width {
                 let cell = self.cells[(y, x)].clone();
-                self.set(x as i32, y as i32, CellKind::None);
-                self.set(x as i32, y as i32 - 1, cell.cell_kind);
+                self.set(x as isize, y as isize, CellKind::None);
+                self.set(x as isize, y as isize - 1, cell.cell_kind);
             }
         }
 
         cleared
     }
 
-    pub fn clear_lines(&mut self) -> i32 {
+    pub fn clear_lines(&mut self) -> isize {
         for y in 0..self.height {
             if self.row_cells(y).count() == self.width {
                 self.clear_line(y);
@@ -148,8 +148,8 @@ impl CellKind {
 #[derive(Component, Debug, Clone)]
 pub struct Cell {
     // unique index
-    pub(crate) x: i32,
-    y: i32,
+    pub(crate) x: isize,
+    y: isize,
     pub(crate) cell_kind: CellKind,
 }
 
@@ -185,7 +185,7 @@ impl Default for Cell {
 }
 
 impl Cell {
-    pub fn new(x: i32, y: i32, cell_kind: CellKind) -> Self {
+    pub fn new(x: isize, y: isize, cell_kind: CellKind) -> Self {
         Self {
             x,
             y,
@@ -193,7 +193,7 @@ impl Cell {
         }
     }
 
-    pub fn dummy(x: i32, y: i32) -> Self {
+    pub fn dummy(x: isize, y: isize) -> Self {
         Self {
             x,
             y,
@@ -201,15 +201,15 @@ impl Cell {
         }
     }
 
-    pub fn x(&self) -> i32 {
+    pub fn x(&self) -> isize {
         self.x
     }
 
-    pub fn y(&self) -> i32 {
+    pub fn y(&self) -> isize {
         self.y
     }
 
-    pub fn coords(&self) -> (i32, i32) {
+    pub fn coords(&self) -> (isize, isize) {
         (self.x, self.y)
     }
 

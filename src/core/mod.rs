@@ -1,6 +1,7 @@
 mod pieces;
 mod board;
 mod generator;
+mod constants;
 
 
 pub use board::{Board, CellKind, Cell};

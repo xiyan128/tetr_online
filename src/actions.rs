@@ -30,6 +30,6 @@ impl GameControl {
     }
 }
 
-pub fn get_action(control: GameControl, input: &Res<Input<KeyCode>>) -> i32 {
-    control.pressed(input) as i32
+pub fn get_action(control: GameControl, input: &Res<Input<KeyCode>>) -> isize {
+    control.pressed(input) as isize
 }

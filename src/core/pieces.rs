@@ -1,6 +1,7 @@
 use std::fmt::{Debug, Display};
-use bevy::prelude::Component;
+use bevy::prelude::{Component, info};
 use crate::core::board::{Board, CellKind};
+
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PieceType {
@@ -46,6 +47,28 @@ impl PieceRotation {
     }
 }
 
+// add two PieceRotation
+impl std::ops::Add for PieceRotation {
+    type Output = PieceRotation;
+
+    fn add(self, other: PieceRotation) -> PieceRotation {
+        let sum = (self as u8 + other as u8).rem_euclid(4);
+        match sum {
+            0 => PieceRotation::R0,
+            1 => PieceRotation::R90,
+            2 => PieceRotation::R180,
+            3 => PieceRotation::R270,
+            _ => PieceRotation::R0,
+        }
+    }
+}
+
+impl std::ops::AddAssign for PieceRotation {
+    fn add_assign(&mut self, other: PieceRotation) {
+        *self = *self + other;
+    }
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum MoveDirection {
     Left,
@@ -67,13 +90,12 @@ impl Piece {
         }
     }
 
+    pub(crate) fn rotation(&self) -> PieceRotation {
+        self.rotation
+    }
+
     pub fn rotate(&mut self) {
-        self.rotation = match self.rotation {
-            PieceRotation::R0 => PieceRotation::R90,
-            PieceRotation::R90 => PieceRotation::R180,
-            PieceRotation::R180 => PieceRotation::R270,
-            PieceRotation::R270 => PieceRotation::R0,
-        }
+        self.rotation += PieceRotation::R90;
     }
 
     pub fn rotate_n(&mut self, n: u8) {
@@ -95,15 +117,16 @@ impl Piece {
         }
     }
 
-    fn get_shape(piece_type: PieceType) -> [(i32, i32); 4] {
+    fn get_shape(piece_type: PieceType) -> [(isize, isize); 4] {
+        use crate::core::constants::shapes::*;
         match piece_type {
-            PieceType::I => [(1, 0), (1, 1), (1, 2), (1, 3)],
-            PieceType::J => [(0, 2), (1, 0), (1, 1), (1, 2)],
-            PieceType::L => [(0, 0), (1, 0), (1, 1), (1, 2)],
-            PieceType::O => [(1, 1), (1, 2), (2, 1), (2, 2)],
-            PieceType::S => [(0, 1), (0, 2), (1, 0), (1, 1)],
-            PieceType::T => [(0, 1), (1, 0), (1, 1), (1, 2)],
-            PieceType::Z => [(0, 0), (0, 1), (1, 1), (1, 2)],
+            PieceType::I => I,
+            PieceType::J => J,
+            PieceType::L => L,
+            PieceType::O => O,
+            PieceType::S => S,
+            PieceType::T => T,
+            PieceType::Z => Z,
         }
     }
 
@@ -123,7 +146,7 @@ impl Piece {
         if self.piece_type != PieceType::O {
             // if piece is not O, rotate shape
             for _ in 0..n {
-                shape = shape.iter().map(|(x, y)| (*y, (height as i32) - x - 1)).collect();
+                shape = shape.iter().map(|(x, y)| (*y, (height as isize                ) - x - 1)).collect();
             }
         }
 
@@ -134,7 +157,7 @@ impl Piece {
         board
     }
 
-    pub fn collide_with(&self, board: &Board, offset: (i32, i32)) -> bool {
+    pub fn collide_with(&self, board: &Board, offset: (isize                                                       , isize    )) -> bool {
         let piece_board = self.board();
         let (x_offset, y_offset) = offset;
 
@@ -149,7 +172,8 @@ impl Piece {
         false
     }
 
-    pub fn try_move(&self, board : &Board, offset: (i32, i32), direction: MoveDirection) -> Result<(i32, i32), ()> {
+    pub fn try_move(&self, board: &Board, offset: (isize, isize), direction: MoveDirection)
+        -> Result<(isize, isize), ()> {
         let (x_offset, y_offset) = offset;
         let (x_offset, y_offset) = match direction {
             MoveDirection::Left => (x_offset - 1, y_offset),
@@ -164,15 +188,60 @@ impl Piece {
         }
     }
 
-    pub fn try_rotate(&mut self, board : &Board, offset: (i32, i32), rotation_n: u8) -> Result<PieceRotation, ()> {
+    pub fn try_rotate_with_kicks(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<(PieceRotation, (isize, isize)), ()>{
+        use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
+
+        if self.piece_type == PieceType::O {
+            return Ok((PieceRotation::R0, offset)); // O piece doesn't rotate
+        }
+
+        let kicks_table = match self.piece_type {
+            PieceType::I => &I_KICKS,
+            _ => &DEFAULT_KICKS,
+        };
+
+        let kicks_idx = match (self.rotation, rotation) {
+            //0->R
+            // R->0
+            // R->2
+            // 2->R
+            // 2->L
+            // L->2
+            // L->0
+            // 0->L
+            (PieceRotation::R0, PieceRotation::R90) => 0,
+            (PieceRotation::R90, PieceRotation::R0) => 1,
+            (PieceRotation::R90, PieceRotation::R180) => 2,
+            (PieceRotation::R180, PieceRotation::R90) => 3,
+            (PieceRotation::R180, PieceRotation::R270) => 4,
+            (PieceRotation::R270, PieceRotation::R180) => 5,
+            (PieceRotation::R270, PieceRotation::R0) => 6,
+            (PieceRotation::R0, PieceRotation::R270) => 7,
+            _ => unreachable!("Invalid rotation: {:?} -> {:?}", self.rotation, rotation)
+        };
+
+        let kicks = kicks_table[kicks_idx];
+
+        for (set_idx, (x_offset, y_offset)) in kicks.iter().enumerate() {
+            let new_offset = (offset.0 + x_offset, offset.1 - y_offset);
+            if let Ok(new_rotation) = self.try_rotate(board, new_offset, rotation) {
+                info!("Kicked to {:?} (set {:?})", (x_offset, y_offset), set_idx);
+                return Ok((new_rotation, new_offset));
+            }
+        }
+
+        Err(())
+    }
+
+    pub fn try_rotate(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<PieceRotation, ()> {
         let (x_offset, y_offset) = offset;
         let mut new_piece = self.clone();
-        new_piece.rotate_n(rotation_n);
+        new_piece.rotate_to(rotation);
 
         if new_piece.collide_with(board, (x_offset, y_offset)) {
             Err(())
         } else {
-            Ok(new_piece.rotation) // return new rotation
+            Ok(new_piece.rotation)// return new rotation
         }
     }
 }
@@ -191,11 +260,10 @@ impl Display for Piece {
 
         for row in board.rows() {
             for cell in row {
-
                 s.push_str(match cell.cell_kind {
                     CellKind::Some(_) => "X",
                     CellKind::None => "#",
-                     _ => " ",
+                    _ => " ",
                 });
             }
             s.push_str("\n");
