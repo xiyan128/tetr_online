@@ -5,6 +5,8 @@ use bevy::app::{App, Plugin};
 use bevy::hierarchy::Children;
 use bevy::log::debug;
 use bevy::prelude::*;
+use bevy::prelude::system_adapter::new;
+use bevy::render::texture::DEFAULT_IMAGE_HANDLE;
 use bevy::sprite::{Anchor, Sprite};
 use bevy::time::{Timer, TimerMode};
 use bevy::utils::{default, Instant};
@@ -16,6 +18,7 @@ use leafwing_input_manager::common_conditions::action_just_released;
 use leafwing_input_manager::input_map::InputMap;
 use leafwing_input_manager::prelude::{ActionState, InputManagerPlugin};
 use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
+use bevy_asset_loader::prelude::*;
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 enum LevelState {
@@ -26,12 +29,18 @@ enum LevelState {
     Placing,
 }
 
-#[derive(Resource)]
+#[derive(Resource, Debug)]
 struct LevelConfig {
     block_size: f32,
     board_width: usize,
     board_height: usize,
     spawn_coords: (isize, isize),
+}
+
+#[derive(AssetCollection, Resource)]
+struct TextureAssets {
+    #[asset(path = "textures/block_tile.png")]
+    block_texture: Handle<Image>,
 }
 
 impl Default for LevelConfig {
@@ -72,7 +81,7 @@ impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_state::<LevelState>()
-
+            .add_collection_to_loading_state::<_, TextureAssets>(GameState::Loading)
             .configure_set(LevelSystemSet::Control.before(LevelSystemSet::Logic))
             .configure_set(LevelSystemSet::Logic.before(LevelSystemSet::Detection))
 
@@ -121,14 +130,14 @@ struct Coords {
     y: isize,
 }
 
-impl From<(isize           , isize)> for Coords {
-    fn from((x, y): (isize                     , isize    )) -> Self {
+impl From<(isize, isize)> for Coords {
+    fn from((x, y): (isize, isize)) -> Self {
         Self { x, y }
     }
 }
 
-impl Into<(isize           , isize)> for Coords {
-    fn into(self) -> (isize                      , isize    ) {
+impl Into<(isize, isize)> for Coords {
+    fn into(self) -> (isize, isize) {
         (self.x, self.y)
     }
 }
@@ -224,7 +233,7 @@ trait MatchCoords {
     fn update_coords(&mut self, coords: &Coords, config: &LevelConfig);
 }
 
-fn to_translation(x: isize                  , y: isize                  , config: &LevelConfig) -> Vec3 {
+fn to_translation(x: isize, y: isize, config: &LevelConfig) -> Vec3 {
     IVec2::new(
         x as i32,
         y as i32,
@@ -242,7 +251,15 @@ impl MatchCoords for Transform {
 
 
 impl BlockBundle {
-    fn new(config: &LevelConfig, transform: Transform, color: Color) -> Self {
+    fn with_texture(config: &LevelConfig, texture_assets: &TextureAssets, transform: Transform, color: Color) -> Self {
+        return BlockBundle::new(config, transform, color, texture_assets.block_texture.clone());
+    }
+
+    fn transparent(config: &LevelConfig, color: Color, transform: Transform) -> Self {
+        return BlockBundle::new(config, transform, color,DEFAULT_IMAGE_HANDLE.typed(),);
+    }
+
+    fn new(config: &LevelConfig, transform: Transform, color: Color, texture: Handle<Image>) -> Self {
         let sprite = Sprite {
             custom_size: Some(Vec2::new(config.block_size, config.block_size)),
             color,
@@ -252,6 +269,7 @@ impl BlockBundle {
 
         Self {
             sprite_bundle: SpriteBundle {
+                texture,
                 sprite,
                 transform,
                 ..default()
@@ -264,8 +282,9 @@ fn level_setup(
     mut commands: Commands,
     config: Res<LevelConfig>,
     mut next_state: ResMut<NextState<LevelState>>,
+    texture_assets: Res<TextureAssets>,
 ) {
-    debug!("level_setup");
+    info!("level_setup");
 
     let board = Board::new(config.board_width, config.board_height);
 
@@ -274,17 +293,20 @@ fn level_setup(
     for (x, y) in board.coords()
     {
         block_ids.push(if let Some(cell) = board.get(x, y) {
-            spawn_static_block(&mut commands, &config, cell)
+            spawn_static_block(&mut commands, &config, &texture_assets, cell)
         } else {
             let coords = Coords::from((x, y));
             let transform = Transform::from_coords(&coords, &config);
 
-            let bundle = BlockBundle::new(&config, transform, Color::rgb(0.1, 0.1, 0.1));
+            // background block
+            let bundle = BlockBundle::transparent(&config, Color::rgb(0.1, 0.1, 0.1), transform);
 
             // spawn background block
             commands.spawn((bundle, BackgroundBlock)).id()
         });
     }
+
+    info!("config: {:?}", config);
 
     let board_entity = commands.spawn(BoardBundle {
         board,
@@ -341,20 +363,18 @@ fn level_setup(
         ..default()
     });
 
-
-
     // switch to falling state
     next_state.set(LevelState::Falling);
 }
 
-fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, cell: &Cell) -> Entity {
+fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, textual_assets: &Res<TextureAssets>, cell: &Cell) -> Entity {
     let piece_type = cell.cell_kind();
     let color = piece_color(piece_type.as_some().unwrap());
 
     let coords = Coords::from(cell.coords());
     let transform = Transform::from_coords(&coords, &config);
 
-    let bundle = BlockBundle::new(&config, transform, color);
+    let bundle = BlockBundle::with_texture(&config, &textual_assets, transform, color);
 
     // spawn static block
     commands.spawn((bundle, StaticBlock)).id()
@@ -369,6 +389,7 @@ fn swap_hold(mut commands: Commands,
              mut holder_query: Query<&mut Holder>,
              mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
              config: Res<LevelConfig>,
+             texture_assets: Res<TextureAssets>,
              mut generator: ResMut<PieceGenerator>,
              action_query: Query<&ActionState<GameControl>, With<Board>>,
 ) {
@@ -386,7 +407,7 @@ fn swap_hold(mut commands: Commands,
 
     // spawn the blocks
     let block_ids: Vec<Entity> = next_piece.board().cells().iter().map(|&cell| {
-        spawn_free_block(&mut commands, &config, &next_piece, cell, FallingBlock)
+        spawn_free_block(&mut commands, &config, &texture_assets, &next_piece, cell, FallingBlock)
     }).collect();
 
     let piece_entity = commands.spawn(next_piece).id();
@@ -415,6 +436,7 @@ fn swap_hold(mut commands: Commands,
 
 fn piece_setup(mut commands: Commands,
                config: Res<LevelConfig>,
+               texture_assets: Res<TextureAssets>,
                mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
                mut generator: ResMut<PieceGenerator>) {
 
@@ -429,7 +451,7 @@ fn piece_setup(mut commands: Commands,
     let piece = Piece::from(next_piece_type.unwrap());
 
     let block_ids: Vec<Entity> = piece.board().cells().iter().map(|&cell| {
-        spawn_free_block(&mut commands, &config, &piece, cell, FallingBlock)
+        spawn_free_block(&mut commands, &config, &texture_assets, &piece, cell, FallingBlock)
     }).collect();
 
     let piece_entity = commands
@@ -449,6 +471,7 @@ fn piece_setup(mut commands: Commands,
 
 fn spawn_free_block(commands: &mut Commands,
                     config: &Res<LevelConfig>,
+                    texture_assets: &Res<TextureAssets>,
                     piece: &Piece,
                     cell: &Cell,
                     block_component: impl BlockComponent,
@@ -466,7 +489,7 @@ fn spawn_free_block(commands: &mut Commands,
     let coords = Coords::from((x, y));
     let transform = Transform::from_coords(&coords, &config);
 
-    let bundle = BlockBundle::new(&config, transform, color);
+    let bundle = BlockBundle::with_texture(&config, &texture_assets, transform, color);
     // spawn falling block
     let entity = commands.spawn(bundle)
         .insert(coords)
@@ -516,6 +539,7 @@ fn piece_place(
     mut query_static_blocks: Query<Entity, With<StaticBlock>>,
     time: Res<Time>,
     config: Res<LevelConfig>,
+    texture_assets: Res<TextureAssets>,
     mut next_state: ResMut<NextState<LevelState>>,
 ) {
     let (piece_entity, piece, coords, mut piece_controller, children) = query.single_mut();
@@ -564,7 +588,7 @@ fn piece_place(
 
 
             for cell in board.cells() {
-                spawn_static_block(&mut commands, &config, cell); // redraw all static blocks
+                spawn_static_block(&mut commands, &config, &texture_assets, cell);
             }
 
             piece_controller.placing_timer.reset();
@@ -620,7 +644,6 @@ fn handle_movements(
                     piece_controller.placing_timer.reset();
                 }
             }
-
         }
         piece_controller.movement_timer.reset();
     }
@@ -656,7 +679,7 @@ fn handle_rotations(
     let (mut piece, mut coords, mut transform, children) = query.single_mut();
     let board = board_query.single_mut();
 
-    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as isize        - action_state.just_pressed(GameControl::RotateCounterClockwise) as isize;
+    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as isize - action_state.just_pressed(GameControl::RotateCounterClockwise) as isize;
 
     let rotation = match rotation {
         1 => Some(PieceRotation::R90 + piece.rotation()),
@@ -691,6 +714,7 @@ fn ghost_blocks(
     ghost_query: Query<Entity, With<GhostPiece>>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
+    texture_assets: Res<TextureAssets>,
 ) {
     if query.is_empty() {
         return;
@@ -720,9 +744,8 @@ fn ghost_blocks(
         return;
     }
 
-
     let block_entities = ghost_piece.board().cells().iter().map(|cell| {
-        spawn_free_block(&mut commands, &config, &ghost_piece, cell, GhostBlock)
+        spawn_free_block(&mut commands, &config, &texture_assets, &ghost_piece, cell, GhostBlock)
     }).collect::<Vec<_>>();
 
     let piece_entity = commands
@@ -767,10 +790,7 @@ fn detect_placement(
 struct PlacementTimerBar;
 
 fn show_placement_timer_bar(
-    mut commands: Commands,
-    mut query: Query<&mut PieceController>,
     mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
-    config: Res<LevelConfig>,
 ) {
     let mut bar = bar_query.single_mut();
     bar.set_if_neq(Visibility::Inherited);

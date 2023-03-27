@@ -13,7 +13,7 @@ fn main() {
         //     }),
         //     ..default()
         // }))
-        .add_plugins(DefaultPlugins)
+        .add_plugins(DefaultPlugins.set(ImagePlugin::default_nearest()))
         .add_plugin(GamePlugin)
         .run();
 }
