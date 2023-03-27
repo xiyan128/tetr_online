@@ -23,11 +23,12 @@ impl Board {
         }
     }
 
-    pub fn set(&mut self, x: isize, y: isize, cell_kind: CellKind) {
-        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
-            return;
+    pub fn set(&mut self, x: isize, y: isize, cell_kind: CellKind) -> bool {
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.cells.column_len() as isize {
+            return false;
         }
         self.cells[(y as usize, x as usize)] = Cell::new(x, y, cell_kind);
+        true
     }
 
     pub fn rows(&self) -> Vec<Vec<Cell>> {

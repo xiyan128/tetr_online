@@ -109,7 +109,7 @@ impl Piece {
         self.rotation = rotation;
     }
 
-    fn board_size(&self) -> (usize, usize) {
+    pub fn board_size(&self) -> (usize, usize) {
         match self.piece_type {
             PieceType::I => (4, 4),
             PieceType::O => (4, 3),
@@ -146,18 +146,18 @@ impl Piece {
         if self.piece_type != PieceType::O {
             // if piece is not O, rotate shape
             for _ in 0..n {
-                shape = shape.iter().map(|(x, y)| (*y, (height as isize                ) - x - 1)).collect();
+                shape = shape.iter().map(|(x, y)| (*y, (height as isize) - x - 1)).collect();
             }
         }
 
-        for (id, &(x, y)) in shape.iter().enumerate() {
+        for (x, y) in shape {
             board.set(x, y, CellKind::Some(self.piece_type));
         }
 
         board
     }
 
-    pub fn collide_with(&self, board: &Board, offset: (isize                                                       , isize    )) -> bool {
+    pub fn collide_with(&self, board: &Board, offset: (isize, isize)) -> bool {
         let piece_board = self.board();
         let (x_offset, y_offset) = offset;
 
@@ -173,7 +173,7 @@ impl Piece {
     }
 
     pub fn try_move(&self, board: &Board, offset: (isize, isize), direction: MoveDirection)
-        -> Result<(isize, isize), ()> {
+                    -> Result<(isize, isize), ()> {
         let (x_offset, y_offset) = offset;
         let (x_offset, y_offset) = match direction {
             MoveDirection::Left => (x_offset - 1, y_offset),
@@ -188,7 +188,7 @@ impl Piece {
         }
     }
 
-    pub fn try_rotate_with_kicks(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<(PieceRotation, (isize, isize)), ()>{
+    pub fn try_rotate_with_kicks(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<(PieceRotation, (isize, isize)), ()> {
         use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
 
         if self.piece_type == PieceType::O {

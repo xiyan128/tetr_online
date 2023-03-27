@@ -15,8 +15,8 @@ enum GameState {
     #[default]
     Loading,
     MainMenu,
-    // #[default]
     InGame,
+    GameOver,
 }
 
 
@@ -27,7 +27,8 @@ impl Plugin for GamePlugin {
         app.add_state::<GameState>()
             .add_loading_state(
                 LoadingState::new(GameState::Loading)
-                    .continue_to_state(GameState::InGame))
+                    .continue_to_state(GameState::InGame)
+            )
             .add_plugin(LevelPlugin);
         // .add_plugin(LoadingPlugin)
         // .add_plugin(MenuPlugin)

@@ -46,6 +46,10 @@ pub(crate) fn handle_movements(
     config: Res<LevelConfig>,
     time: Res<Time>,
 ) {
+    if query.get_single_mut().is_err() {
+        return;
+    }
+
     let mut action_state = action_query.single_mut();
 
     let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
@@ -96,6 +100,10 @@ pub(crate) fn handle_hard_drop(
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
 ) {
+    if query.get_single_mut().is_err() {
+        return;
+    }
+
     let action_state = action_query.single_mut();
 
     let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
@@ -120,6 +128,11 @@ pub(crate) fn handle_rotations(
     mut piece_controller_query: Query<&mut PieceController>,
     config: Res<LevelConfig>,
 ) {
+
+    if query.get_single_mut().is_err() {
+        return;
+    }
+
     let action_state = action_query.single();
     let mut piece_controller = piece_controller_query.single_mut();
 
@@ -163,6 +176,10 @@ fn swap_hold(mut commands: Commands,
              mut generator: ResMut<PieceGenerator>,
              action_query: Query<&ActionState<GameControl>, With<Board>>,
 ) {
+    if piece_query.get_single_mut().is_err() {
+        return;
+    }
+
     let action_state = action_query.single();
     let (current_piece_entity, current_piece, mut piece_controller) = piece_query.single_mut();
     if !action_state.just_pressed(GameControl::Hold) || piece_controller.used_hold {
@@ -180,17 +197,19 @@ fn swap_hold(mut commands: Commands,
         level::spawn_free_block(&mut commands, &config, &texture_assets, &next_piece, cell, FallingBlock)
     }).collect();
 
+
+    let spawn_coords = config.spawn_coords(&next_piece);
     let piece_entity = commands.spawn(next_piece).id();
 
     // spawn new piece
     commands.entity(piece_entity)
-        .insert(Coords::from(config.spawn_coords))
+        .insert(Coords::from(spawn_coords))
         .insert(PieceController {
             used_hold: true, // prevent hold from being used again
             ..default()
         })
         .insert(SpatialBundle {
-            transform: Transform::from_translation(level::to_translation(config.spawn_coords.0, config.spawn_coords.1, &config)),
+            transform: Transform::from_translation(level::to_translation(spawn_coords.0, spawn_coords.1, &config)),
             ..default()
         });
 

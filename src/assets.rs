@@ -22,6 +22,9 @@ pub struct GameAssets {
     #[asset(path = "sounds/drop.ogg")]
     pub hard_drop_sound: Handle<AudioSource>,
 
+    #[asset(path = "fonts/dogicabold.ttf")]
+    pub font: Handle<Font>,
+
     // #[asset(path = "sounds/hold.wav")]
     // pub hold_sound: Handle<AudioSource>,
 }
