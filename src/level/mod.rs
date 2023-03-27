@@ -1,24 +1,23 @@
-use std::fs::hard_link;
-use std::iter::zip;
 use std::time::Duration;
 use bevy::app::{App, Plugin};
 use bevy::hierarchy::Children;
-use bevy::log::debug;
 use bevy::prelude::*;
-use bevy::prelude::system_adapter::new;
 use bevy::render::texture::DEFAULT_IMAGE_HANDLE;
 use bevy::sprite::{Anchor, Sprite};
 use bevy::time::{Timer, TimerMode};
-use bevy::utils::{default, Instant};
-use crate::GameState;
+use bevy::utils::default;
+use crate::{GameState};
 
 
-use leafwing_input_manager::{Actionlike, InputManagerBundle};
-use leafwing_input_manager::common_conditions::action_just_released;
-use leafwing_input_manager::input_map::InputMap;
-use leafwing_input_manager::prelude::{ActionState, InputManagerPlugin};
-use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
+use leafwing_input_manager::prelude::*;
+use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, PieceType};
 use bevy_asset_loader::prelude::*;
+use crate::assets::GameAssets;
+use crate::level::actions::ActionsPlugin;
+use crate::level::placement_timer_bar::PlacementTimerBar;
+
+mod actions;
+mod placement_timer_bar;
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 enum LevelState {
@@ -30,17 +29,16 @@ enum LevelState {
 }
 
 #[derive(Resource, Debug)]
-struct LevelConfig {
-    block_size: f32,
-    board_width: usize,
+pub struct LevelConfig {
+    pub(crate) block_size: f32,
+    pub(crate) board_width: usize,
     board_height: usize,
     spawn_coords: (isize, isize),
-}
-
-#[derive(AssetCollection, Resource)]
-struct TextureAssets {
-    #[asset(path = "textures/block_tile.png")]
-    block_texture: Handle<Image>,
+    movement_duration: Duration,
+    movement_speedup: f64,
+    soft_drop_duration: Duration,
+    fall_duration: Duration,
+    placing_duration: Duration,
 }
 
 impl Default for LevelConfig {
@@ -50,6 +48,11 @@ impl Default for LevelConfig {
             board_width: 10,
             board_height: 20,
             spawn_coords: (5, 20),
+            movement_duration: Duration::from_millis(200),
+            soft_drop_duration: Duration::from_millis(50),
+            movement_speedup: 1./1.0_f64.exp(),
+            fall_duration: Duration::from_millis(500),
+            placing_duration: Duration::from_millis(500),
         }
     }
 }
@@ -69,6 +72,16 @@ pub enum GameControl {
     Hold,
 }
 
+impl From<MoveDirection> for GameControl {
+    fn from(direction: MoveDirection) -> Self {
+        match direction {
+            MoveDirection::Down => Self::Down,
+            MoveDirection::Left => Self::Left,
+            MoveDirection::Right => Self::Right,
+        }
+    }
+}
+
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
 enum LevelSystemSet {
     Control,
@@ -81,7 +94,8 @@ impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             .add_state::<LevelState>()
-            .add_collection_to_loading_state::<_, TextureAssets>(GameState::Loading)
+            .add_plugin(ActionsPlugin)
+            .add_collection_to_loading_state::<_, GameAssets>(GameState::Loading)
             .configure_set(LevelSystemSet::Control.before(LevelSystemSet::Logic))
             .configure_set(LevelSystemSet::Logic.before(LevelSystemSet::Detection))
 
@@ -96,26 +110,20 @@ impl Plugin for LevelPlugin {
             )
 
             .add_systems(
-                (handle_movements, handle_rotations, swap_hold)
-                    .chain()
-                    .in_set(OnUpdate(LevelState::Falling))
-            )
-
-            .add_systems(
-                (handle_movements, handle_rotations, swap_hold, ghost_blocks, piece_place, detect_placement)
+                (piece_place, detect_placement)
                     .in_set(OnUpdate(LevelState::Placing))
             )
 
 
             // start of UI
             .add_system(
-                show_placement_timer_bar.in_schedule(OnEnter(LevelState::Placing))
+                placement_timer_bar::show_placement_timer_bar.in_schedule(OnEnter(LevelState::Placing))
             )
             .add_system(
-                update_placement_timer_bar.in_set(OnUpdate(LevelState::Placing))
+                placement_timer_bar::update_placement_timer_bar.in_set(OnUpdate(LevelState::Placing))
             )
             .add_system(
-                hide_placement_timer_bar.in_schedule(OnExit(LevelState::Placing))
+                placement_timer_bar::hide_placement_timer_bar.in_schedule(OnExit(LevelState::Placing))
             )
 
             // resources
@@ -125,7 +133,7 @@ impl Plugin for LevelPlugin {
 }
 
 #[derive(Component, PartialEq, Eq, Debug, Clone, Hash)]
-struct Coords {
+pub(crate) struct Coords {
     x: isize,
     y: isize,
 }
@@ -200,9 +208,9 @@ struct BlockBundle {
 
 
 #[derive(Component)]
-struct PieceController {
+pub struct PieceController {
     falling_timer: Timer,
-    placing_timer: Timer,
+    pub(crate) placing_timer: Timer,
     hard_dropped: bool,
     used_hold: bool,
     movement_timer: Timer,
@@ -210,10 +218,12 @@ struct PieceController {
 
 impl Default for PieceController {
     fn default() -> Self {
+        let config = LevelConfig::default();
+
         Self {
             falling_timer: Timer::from_seconds(0.5, TimerMode::Repeating),
             placing_timer: Timer::from_seconds(0.5, TimerMode::Once),
-            movement_timer: Timer::from_seconds(0.1, TimerMode::Repeating),
+            movement_timer: Timer::new(config.movement_duration, TimerMode::Repeating),
             hard_dropped: false,
             used_hold: false,
         }
@@ -251,12 +261,12 @@ impl MatchCoords for Transform {
 
 
 impl BlockBundle {
-    fn with_texture(config: &LevelConfig, texture_assets: &TextureAssets, transform: Transform, color: Color) -> Self {
+    fn with_texture(config: &LevelConfig, texture_assets: &GameAssets, transform: Transform, color: Color) -> Self {
         return BlockBundle::new(config, transform, color, texture_assets.block_texture.clone());
     }
 
     fn transparent(config: &LevelConfig, color: Color, transform: Transform) -> Self {
-        return BlockBundle::new(config, transform, color,DEFAULT_IMAGE_HANDLE.typed(),);
+        return BlockBundle::new(config, transform, color, DEFAULT_IMAGE_HANDLE.typed());
     }
 
     fn new(config: &LevelConfig, transform: Transform, color: Color, texture: Handle<Image>) -> Self {
@@ -282,7 +292,7 @@ fn level_setup(
     mut commands: Commands,
     config: Res<LevelConfig>,
     mut next_state: ResMut<NextState<LevelState>>,
-    texture_assets: Res<TextureAssets>,
+    texture_assets: Res<GameAssets>,
 ) {
     info!("level_setup");
 
@@ -367,14 +377,14 @@ fn level_setup(
     next_state.set(LevelState::Falling);
 }
 
-fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, textual_assets: &Res<TextureAssets>, cell: &Cell) -> Entity {
+fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, assets: &Res<GameAssets>, cell: &Cell) -> Entity {
     let piece_type = cell.cell_kind();
     let color = piece_color(piece_type.as_some().unwrap());
 
     let coords = Coords::from(cell.coords());
     let transform = Transform::from_coords(&coords, &config);
 
-    let bundle = BlockBundle::with_texture(&config, &textual_assets, transform, color);
+    let bundle = BlockBundle::with_texture(&config, &assets, transform, color);
 
     // spawn static block
     commands.spawn((bundle, StaticBlock)).id()
@@ -385,58 +395,9 @@ struct Holder {
     piece: Option<Piece>,
 }
 
-fn swap_hold(mut commands: Commands,
-             mut holder_query: Query<&mut Holder>,
-             mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
-             config: Res<LevelConfig>,
-             texture_assets: Res<TextureAssets>,
-             mut generator: ResMut<PieceGenerator>,
-             action_query: Query<&ActionState<GameControl>, With<Board>>,
-) {
-    let action_state = action_query.single();
-    let (current_piece_entity, current_piece, mut piece_controller) = piece_query.single_mut();
-    if !action_state.just_pressed(GameControl::Hold) || piece_controller.used_hold {
-        return;
-    }
-
-    let mut holder = holder_query.single_mut();
-
-
-    let next_piece = holder.piece.take().unwrap_or(Piece::from(generator.next().unwrap()));
-
-
-    // spawn the blocks
-    let block_ids: Vec<Entity> = next_piece.board().cells().iter().map(|&cell| {
-        spawn_free_block(&mut commands, &config, &texture_assets, &next_piece, cell, FallingBlock)
-    }).collect();
-
-    let piece_entity = commands.spawn(next_piece).id();
-
-    // spawn new piece
-    commands.entity(piece_entity)
-        .insert(Coords::from(config.spawn_coords))
-        .insert(PieceController {
-            used_hold: true, // prevent hold from being used again
-            ..default()
-        })
-        .insert(SpatialBundle {
-            transform: Transform::from_translation(to_translation(config.spawn_coords.0, config.spawn_coords.1, &config)),
-            ..default()
-        });
-
-    commands.entity(piece_entity).push_children(&block_ids);
-
-    holder.piece = Some(current_piece.clone());
-
-    // remove old piece
-    commands.entity(current_piece_entity).despawn_recursive();
-
-    piece_controller.used_hold = true;
-}
-
 fn piece_setup(mut commands: Commands,
                config: Res<LevelConfig>,
-               texture_assets: Res<TextureAssets>,
+               texture_assets: Res<GameAssets>,
                mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
                mut generator: ResMut<PieceGenerator>) {
 
@@ -471,7 +432,7 @@ fn piece_setup(mut commands: Commands,
 
 fn spawn_free_block(commands: &mut Commands,
                     config: &Res<LevelConfig>,
-                    texture_assets: &Res<TextureAssets>,
+                    texture_assets: &Res<GameAssets>,
                     piece: &Piece,
                     cell: &Cell,
                     block_component: impl BlockComponent,
@@ -483,7 +444,7 @@ fn spawn_free_block(commands: &mut Commands,
         BlockComponentKind::Falling => piece_color(piece_type),
         BlockComponentKind::Ghost => Color::GRAY.set_a(0.5).as_rgba(),
         BlockComponentKind::Static => piece_color(piece_type),
-        _ => Color::rgb(0.1, 0.1, 0.1),
+        _ => Color::rgb(0.2, 0.2, 0.2),
     };
 
     let coords = Coords::from((x, y));
@@ -500,13 +461,13 @@ fn spawn_free_block(commands: &mut Commands,
 
 pub fn piece_color(piece_type: PieceType) -> Color {
     let color = match piece_type {
-        PieceType::I => Color::BLUE,
-        PieceType::J => Color::GREEN,
-        PieceType::O => Color::YELLOW,
-        PieceType::L => Color::ORANGE,
-        PieceType::S => Color::RED,
-        PieceType::T => Color::PURPLE,
-        PieceType::Z => Color::PINK,
+        PieceType::I => Color::rgb_u8(100, 196, 235), // cyan
+        PieceType::J => Color::rgb_u8(224, 127, 58), // orange
+        PieceType::O => Color::rgb_u8(241, 212, 72), // yellow
+        PieceType::L => Color::rgb_u8(90, 99, 165), // blue
+        PieceType::S => Color::rgb_u8(100,180, 82), // green
+        PieceType::T => Color::rgb_u8(161, 83, 152), // purple
+        PieceType::Z => Color::rgb_u8(216, 57, 52), // red
     };
     color
 }
@@ -539,7 +500,8 @@ fn piece_place(
     mut query_static_blocks: Query<Entity, With<StaticBlock>>,
     time: Res<Time>,
     config: Res<LevelConfig>,
-    texture_assets: Res<TextureAssets>,
+    assets: Res<GameAssets>,
+    audio: Res<Audio>,
     mut next_state: ResMut<NextState<LevelState>>,
 ) {
     let (piece_entity, piece, coords, mut piece_controller, children) = query.single_mut();
@@ -551,7 +513,7 @@ fn piece_place(
         || piece_controller.hard_dropped // after hard drop, place immediately
     {
         piece_controller.hard_dropped = false; // reset hard drop flag
-
+        audio.play(assets.hard_drop_sound.clone());
         // switch to piece setup state and finalize piece
         next_state.set(LevelState::Falling);
 
@@ -588,125 +550,13 @@ fn piece_place(
 
 
             for cell in board.cells() {
-                spawn_static_block(&mut commands, &config, &texture_assets, cell);
+                spawn_static_block(&mut commands, &config, &assets, cell);
             }
 
             piece_controller.placing_timer.reset();
         }
     }
 }
-
-
-fn handle_movements(
-    mut action_query: Query<&mut ActionState<GameControl>, With<Board>>,
-    mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &mut PieceController)>,
-    mut board_query: Query<&mut Board>,
-    config: Res<LevelConfig>,
-    time: Res<Time>,
-) {
-    let mut action_state = action_query.single_mut();
-
-    let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
-    let board = board_query.single_mut();
-
-    piece_controller.movement_timer.tick(time.delta());
-
-    let movement = IVec2::new(
-        action_state.pressed(GameControl::Right) as i32
-
-            - action_state.pressed(GameControl::Left) as i32
-        ,
-        action_state.pressed(GameControl::Down) as i32,
-    );
-
-
-    // let hard_drop = action_state.
-    let hard_drop = action_state.just_pressed(GameControl::HardDrop);
-
-    let movement =
-        match movement {
-            IVec2 { x: 0, y: 1 } => Some(MoveDirection::Down),
-            IVec2 { x: 1, y: 0 } => Some(MoveDirection::Right),
-            IVec2 { x: -1, y: 0 } => Some(MoveDirection::Left),
-            _ => hard_drop.then(|| MoveDirection::Down),
-        };
-
-
-    if piece_controller.movement_timer.finished() || hard_drop {
-        if let Some(movement) = movement {
-            if hard_drop {
-                while move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement) {
-                    piece_controller.placing_timer.reset();
-                }
-                piece_controller.hard_dropped = true;
-            } else {
-                if move_piece_and_update(&config, &mut piece, &mut coords, &mut transform, &board, movement) {
-                    piece_controller.placing_timer.reset();
-                }
-            }
-        }
-        piece_controller.movement_timer.reset();
-    }
-}
-
-fn move_piece_and_update(config: &Res<LevelConfig>,
-                         piece: &mut Mut<Piece>,
-                         coords: &mut Mut<'_, Coords>,
-                         transform: &mut Mut<Transform>,
-                         board: &Mut<Board>,
-                         movement: MoveDirection) -> bool {
-    if let Ok(new_coords) = piece.try_move(&board, (coords.x, coords.y), movement) {
-        (coords.x, coords.y) = new_coords;
-        transform.update_coords(coords.as_ref(), &config);
-        true
-    } else {
-        false
-    }
-}
-
-fn handle_rotations(
-    action_query: Query<&ActionState<GameControl>, With<Board>>,
-    mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &Children)>,
-    mut children_query: Query<(&mut Coords, &mut Transform), Without<Piece>>,
-    mut board_query: Query<&mut Board>,
-    mut piece_controller_query: Query<&mut PieceController>,
-    config: Res<LevelConfig>,
-) {
-    let action_state = action_query.single();
-    let mut piece_controller = piece_controller_query.single_mut();
-
-
-    let (mut piece, mut coords, mut transform, children) = query.single_mut();
-    let board = board_query.single_mut();
-
-    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as isize - action_state.just_pressed(GameControl::RotateCounterClockwise) as isize;
-
-    let rotation = match rotation {
-        1 => Some(PieceRotation::R90 + piece.rotation()),
-        -1 => Some(PieceRotation::R270 + piece.rotation()),
-        _ => None
-    };
-
-
-    if let Some(rotation_n) = rotation {
-        if let Ok((rotation, new_coords)) = piece.try_rotate_with_kicks(&board, (coords.x, coords.y), rotation_n) {
-            piece.rotate_to(rotation);
-
-            (coords.x, coords.y) = new_coords;
-
-            for (child_entity, cell) in zip(children.iter(), piece.board().cells().iter()) {
-                let (mut child_coords, mut child_transform) = children_query.get_mut(*child_entity).unwrap();
-                child_coords.set_if_neq(Coords::from(cell.coords()));
-                child_transform.update_coords(child_coords.as_ref(), &config);
-            }
-
-            transform.update_coords(coords.as_ref(), &config);
-
-            piece_controller.placing_timer.reset();
-        }
-    }
-}
-
 
 fn ghost_blocks(
     mut commands: Commands,
@@ -714,7 +564,7 @@ fn ghost_blocks(
     ghost_query: Query<Entity, With<GhostPiece>>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
-    texture_assets: Res<TextureAssets>,
+    texture_assets: Res<GameAssets>,
 ) {
     if query.is_empty() {
         return;
@@ -784,39 +634,4 @@ fn detect_placement(
         next_state.set(LevelState::Falling);
         info!("Transitioning to Falling state.");
     }
-}
-
-#[derive(Component)]
-struct PlacementTimerBar;
-
-fn show_placement_timer_bar(
-    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
-) {
-    let mut bar = bar_query.single_mut();
-    bar.set_if_neq(Visibility::Inherited);
-}
-
-// update_placement_timer_bar
-fn update_placement_timer_bar(
-    mut piece_controller_query: Query<&mut PieceController>,
-    mut bar_query: Query<&mut Sprite, With<PlacementTimerBar>>,
-    config: Res<LevelConfig>,
-) {
-    let mut piece_controller = piece_controller_query.single_mut();
-
-    let timer = &mut piece_controller.placing_timer;
-    let mut bar = bar_query.single_mut();
-
-    let progress = timer.percent();
-    let width = config.block_size * config.board_width as f32 * progress;
-
-    bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
-}
-
-// remove_placement_timer_bar
-fn hide_placement_timer_bar(
-    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
-) {
-    let mut bar = bar_query.single_mut();
-    bar.set_if_neq(Visibility::Hidden);
 }

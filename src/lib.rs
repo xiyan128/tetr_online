@@ -6,7 +6,7 @@ use bevy_asset_loader::prelude::*;
 
 mod level;
 mod core;
-mod actions;
+mod assets;
 
 use crate::level::LevelPlugin;
 
