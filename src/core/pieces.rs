@@ -1,5 +1,6 @@
 use std::fmt::{Debug, Display};
 use bevy::prelude::{Component, info};
+use itertools::Itertools;
 use crate::core::board::{Board, CellKind};
 
 
@@ -26,6 +27,8 @@ impl PieceType {
             PieceType::Z,
         ]
     }
+
+    pub const LEN: usize = 7;
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -130,6 +133,36 @@ impl Piece {
         }
     }
 
+    // margin-less board with fixed rotation
+    fn get_avatar_shape(piece_type: PieceType) -> [(isize, isize); 4] {
+        use crate::core::constants::avatar_shapes::*;
+        match piece_type {
+            PieceType::I => I,
+            PieceType::J => J,
+            PieceType::L => L,
+            PieceType::O => O,
+            PieceType::S => S,
+            PieceType::T => T,
+            PieceType::Z => Z,
+        }
+    }
+
+    pub(crate) fn avatar_board(&self) -> Board {
+        let mut shape = Self::get_avatar_shape(self.piece_type).to_vec();
+        // get width and height of the avatar board
+        // those are the max x and y values of the shape
+        let (width, height) = shape.iter().fold((0, 0), |(max_x, max_y), (x, y)| {
+            (max_x.max(*x), max_y.max(*y))
+        });
+        let mut board = Board::new(width as usize + 1, height as usize + 1);
+
+        for (x, y) in shape {
+            board.set(x, y, CellKind::Some(self.piece_type));
+        }
+
+        board
+    }
+
     pub(crate) fn piece_type(&self) -> PieceType {
         self.piece_type
     }
@@ -144,10 +177,7 @@ impl Piece {
         let n = self.rotation as u8;
 
         if self.piece_type != PieceType::O {
-            // if piece is not O, rotate shape
-            for _ in 0..n {
-                shape = shape.iter().map(|(x, y)| (*y, (height as isize) - x - 1)).collect();
-            }
+            Self::rotate_shape(height, &mut shape, n);
         }
 
         for (x, y) in shape {
@@ -155,6 +185,17 @@ impl Piece {
         }
 
         board
+    }
+
+    fn rotate_shape(height: usize, shape: &mut Vec<(isize, isize)>, n: u8) {
+        for _ in 0..n {
+            for (x, y) in shape.iter_mut() {
+                let new_x = *y;
+                let new_y = height as isize - 1 - *x;
+                *x = new_x;
+                *y = new_y;
+            }
+        }
     }
 
     pub fn collide_with(&self, board: &Board, offset: (isize, isize)) -> bool {
@@ -223,7 +264,7 @@ impl Piece {
         let kicks = kicks_table[kicks_idx];
 
         for (set_idx, (x_offset, y_offset)) in kicks.iter().enumerate() {
-            let new_offset = (offset.0 + x_offset, offset.1 - y_offset);
+            let new_offset = (offset.0 + x_offset, offset.1 + y_offset);
             if let Ok(new_rotation) = self.try_rotate(board, new_offset, rotation) {
                 info!("Kicked to {:?} (set {:?})", (x_offset, y_offset), set_idx);
                 return Ok((new_rotation, new_offset));
@@ -252,26 +293,6 @@ impl From<PieceType> for Piece {
     }
 }
 
-impl Display for Piece {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // show board representation
-        let board = self.board();
-        let mut s = String::new();
-
-        for row in board.rows() {
-            for cell in row {
-                s.push_str(match cell.cell_kind {
-                    CellKind::Some(_) => "X",
-                    CellKind::None => "#",
-                    _ => " ",
-                });
-            }
-            s.push_str("\n");
-        }
-
-        write!(f, "{}", s)
-    }
-}
 
 #[cfg(test)]
 mod tests {
@@ -298,12 +319,21 @@ mod tests {
             for rotation in PieceRotation::all() {
                 let mut piece = Piece::new(piece_type);
                 piece.rotation = rotation;
-                println!("{}", piece);
+                println!("{}", piece.board());
             }
         }
 
         let mut piece = Piece::new(PieceType::L);
 
-        println!("{}", piece);
+        println!("{}", piece.board());
+    }
+
+    #[test]
+    fn test_avatars() {
+        for piece_type in PieceType::all() {
+            let piece = Piece::new(piece_type);
+            let avatar = piece.avatar_board();
+            println!("{:?}: \n{}", piece_type, piece.avatar_board());
+        }
     }
 }

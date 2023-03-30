@@ -1,4 +1,5 @@
 use std::cmp::Ordering;
+use std::fmt::Display;
 
 use std::ops::Range;
 use array2d::Array2D;
@@ -19,7 +20,15 @@ impl Board {
         Self {
             width,
             height,
-            cells: Array2D::filled_with(Cell::dummy(0, 0), height + 10, width),
+            cells: Array2D::filled_with(Cell::dummy(0, 0), height, width),
+        }
+    }
+
+    pub fn with_top_margin(width: usize, height: usize, margin: usize) -> Self {
+        Self {
+            width,
+            height,
+            cells: Array2D::filled_with(Cell::dummy(0, 0), height + margin, width),
         }
     }
 
@@ -32,7 +41,7 @@ impl Board {
     }
 
     pub fn rows(&self) -> Vec<Vec<Cell>> {
-        return self.cells.as_rows();
+        return self.cells.as_rows()[..self.height].to_vec();
     }
 
     pub fn cells(&self) -> Vec<&Cell> {
@@ -101,6 +110,38 @@ impl Board {
             }
         }
         0
+    }
+
+    pub fn width(&self) -> usize {
+        self.width
+    }
+
+    pub fn height(&self) -> usize {
+        self.height
+    }
+}
+
+
+impl Display for Board {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        // show board representation
+        let board = self;
+        let mut s = String::new();
+
+
+         for row in board.rows().iter().rev() {
+             for cell in row {
+                 s.push_str(match cell.cell_kind {
+                     CellKind::Some(_) => "X",
+                     CellKind::None => "#",
+                     _ => " ",
+                 });
+             }
+             s.push_str("\n");
+         }
+
+
+        write!(f, "{}", s)
     }
 }
 
@@ -218,3 +259,4 @@ impl Cell {
         self.cell_kind
     }
 }
+

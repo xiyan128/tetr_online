@@ -19,9 +19,19 @@ impl PieceGenerator {
     }
 
     fn refill_bag(&mut self) {
-        self.bag = PieceType::all();
+        let mut next_bag = PieceType::all();
         let mut rng = rand::thread_rng();
-        self.bag.shuffle(&mut rng);
+        next_bag.shuffle(&mut rng);
+
+        self.bag = [&next_bag[..], &self.bag[..]].concat();
+    }
+
+    pub(crate) fn preview(&mut self) -> Vec<PieceType> {
+
+        if self.bag.len() < PieceType::LEN {
+            self.refill_bag();
+        }
+        self.bag[self.bag.len() - PieceType::LEN..].iter().rev().copied().collect()
     }
 }
 

@@ -5,7 +5,7 @@ use std::iter::zip;
 use crate::assets::GameAssets;
 use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation};
 use crate::level;
-use crate::level::{Coords, FallingBlock, GameControl, Holder, LevelConfig, LevelState, MatchCoords, PieceController};
+use crate::level::{Coords, FallingBlock, GameControl, PieceHolder, LevelConfig, LevelState, MatchCoords, PieceController};
 
 pub struct ActionsPlugin;
 
@@ -18,7 +18,7 @@ impl Plugin for ActionsPlugin {
             )
 
             .add_systems(
-                (handle_movements, handle_rotations, swap_hold)
+                (handle_movements, handle_rotations, handle_hard_drop, swap_hold)
                     .in_set(OnUpdate(LevelState::Placing))
             );
     }
@@ -169,7 +169,7 @@ pub(crate) fn handle_rotations(
 }
 
 fn swap_hold(mut commands: Commands,
-             mut holder_query: Query<&mut Holder>,
+             mut holder_query: Query<&mut PieceHolder>,
              mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
              config: Res<LevelConfig>,
              texture_assets: Res<GameAssets>,
@@ -209,7 +209,7 @@ fn swap_hold(mut commands: Commands,
             ..default()
         })
         .insert(SpatialBundle {
-            transform: Transform::from_translation(level::to_translation(spawn_coords.0, spawn_coords.1, &config)),
+            transform: Transform::from_translation(level::to_translation(spawn_coords.0, spawn_coords.1, config.block_size)),
             ..default()
         });
 

@@ -1,3 +1,4 @@
+use std::default::Default;
 use std::time::Duration;
 use bevy::app::{App, Plugin};
 use bevy::core_pipeline::bloom::BloomSettings;
@@ -16,12 +17,12 @@ use crate::core::{Board, Cell, CellKind, MoveDirection, Piece, PieceGenerator, P
 use bevy_asset_loader::prelude::*;
 use crate::assets::GameAssets;
 use crate::level::actions::ActionsPlugin;
-use crate::level::placement_timer_bar::PlacementTimerBar;
 use crate::level::game_over::GameOverPlugin;
+use crate::level::ui::UIPlugin;
 
 mod actions;
-mod placement_timer_bar;
 mod game_over;
+mod ui;
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 enum LevelState {
@@ -36,7 +37,10 @@ enum LevelState {
 #[derive(Resource, Debug)]
 pub struct LevelConfig {
     pub(crate) block_size: f32,
+    pub(crate) preview_size: f32,
     pub(crate) board_width: usize,
+    pub(crate) preview_count: usize,
+
     board_height: usize,
     movement_duration: Duration,
     movement_speedup: f64,
@@ -49,8 +53,10 @@ impl Default for LevelConfig {
     fn default() -> Self {
         Self {
             block_size: 32.0,
+            preview_size: 32.0 * 3.0,
             board_width: 10,
             board_height: 20,
+            preview_count: 3,
             movement_duration: Duration::from_millis(200),
             soft_drop_duration: Duration::from_millis(50),
             movement_speedup: 1. / 1.0_f64.exp(),
@@ -112,6 +118,7 @@ impl Plugin for LevelPlugin {
             .add_state::<LevelState>()
             .add_plugin(ActionsPlugin)
             .add_plugin(GameOverPlugin)
+            .add_plugin(UIPlugin)
             .add_collection_to_loading_state::<_, GameAssets>(GameState::Loading)
 
             .configure_set(LevelSystemSet::Control.before(LevelSystemSet::Logic))
@@ -121,6 +128,7 @@ impl Plugin for LevelPlugin {
 
             // setup
             .add_system(level_setup.in_schedule(OnEnter(GameState::InGame)))
+
             .add_system(piece_setup.in_schedule(OnEnter(LevelState::Falling)))
             .add_system(level_cleanup.in_schedule(OnEnter(LevelState::GameOver)))
             // updates
@@ -133,17 +141,6 @@ impl Plugin for LevelPlugin {
                     .in_set(OnUpdate(LevelState::Placing))
             )
 
-
-            // start of UI
-            .add_system(
-                placement_timer_bar::show_placement_timer_bar.in_schedule(OnEnter(LevelState::Placing))
-            )
-            .add_system(
-                placement_timer_bar::update_placement_timer_bar.in_set(OnUpdate(LevelState::Placing))
-            )
-            .add_system(
-                placement_timer_bar::hide_placement_timer_bar.in_schedule(OnExit(LevelState::Placing))
-            )
 
             // resources
             .init_resource::<LevelConfig>()
@@ -175,6 +172,7 @@ enum BlockComponentKind {
     Falling,
     Static,
     Ghost,
+    Preview,
 }
 
 trait BlockComponent: Component {
@@ -224,6 +222,8 @@ impl BlockComponent for GhostBlock {
 struct BlockBundle {
     #[bundle]
     sprite_bundle: SpriteBundle,
+
+    // level_cleanup: LevelCleanup,
 }
 
 
@@ -263,19 +263,19 @@ trait MatchCoords {
     fn update_coords(&mut self, coords: &Coords, config: &LevelConfig);
 }
 
-fn to_translation(x: isize, y: isize, config: &LevelConfig) -> Vec3 {
+fn to_translation(x: isize, y: isize, block_size: f32) -> Vec3 {
     IVec2::new(
         x as i32,
         y as i32,
-    ).as_vec2().extend(0.0) * config.block_size
+    ).as_vec2().extend(0.0) * block_size
 }
 
 impl MatchCoords for Transform {
     fn from_coords(coords: &Coords, config: &LevelConfig) -> Self {
-        Transform::from_translation(to_translation(coords.x, coords.y, &config))
+        Transform::from_translation(to_translation(coords.x, coords.y, config.block_size))
     }
     fn update_coords(&mut self, coords: &Coords, config: &LevelConfig) {
-        self.translation = to_translation(coords.x, coords.y, &config);
+        self.translation = to_translation(coords.x, coords.y, config.block_size);
     }
 }
 
@@ -293,7 +293,7 @@ impl BlockBundle {
         let sprite = Sprite {
             custom_size: Some(Vec2::new(config.block_size, config.block_size)),
             color,
-            anchor: Anchor::TopLeft,
+            anchor: Anchor::BottomLeft,
             ..default()
         };
 
@@ -310,7 +310,6 @@ impl BlockBundle {
 
 fn level_cleanup(
     mut commands: Commands,
-    mut next_state: ResMut<NextState<LevelState>>,
     mut query: Query<Entity, With<LevelCleanup>>,
 ) {
     info!("level_cleanup");
@@ -329,7 +328,7 @@ fn level_setup(
 ) {
     info!("level_setup");
 
-    let board = Board::new(config.board_width, config.board_height);
+    let board = Board::with_top_margin(config.board_width, config.board_height, 10);
 
 
     let mut block_ids = Vec::new();
@@ -377,27 +376,10 @@ fn level_setup(
             ..default()
         })
         .insert(LevelCleanup)
-        .insert(Holder::default())
+        .insert(PieceHolder::default())
         .id();
 
     commands.entity(board_entity).push_children(&block_ids);
-
-    // spawn the timer bar
-    let timer_bar_entity = commands
-        .spawn(SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(0., -config.block_size, 0.)),
-            sprite: Sprite {
-                custom_size: Some(Vec2::new(config.block_size * config.board_width as f32, config.block_size * 0.2)),
-                color: Color::GRAY,
-                anchor: Anchor::TopLeft,
-                ..Default::default()
-            },
-            visibility: Visibility::Hidden,
-            ..Default::default()
-        })
-        .insert(PlacementTimerBar).id();
-
-    commands.entity(board_entity).add_child(timer_bar_entity);
 
     // look at center of the board
     commands.spawn((Camera2dBundle {
@@ -428,14 +410,14 @@ fn spawn_static_block(commands: &mut Commands, config: &Res<LevelConfig>, assets
 }
 
 #[derive(Component, Default)]
-struct Holder {
+pub struct PieceHolder {
     piece: Option<Piece>,
 }
 
 fn piece_setup(mut commands: Commands,
                config: Res<LevelConfig>,
                texture_assets: Res<GameAssets>,
-               mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
+               piece_query: Query<(Entity, &Piece, &PieceController)>,
                board_query: Query<&Board>,
                mut next_state: ResMut<NextState<LevelState>>,
                mut next_game_state: ResMut<NextState<GameState>>,
@@ -449,6 +431,7 @@ fn piece_setup(mut commands: Commands,
 
     info!("piece_setup");
     let next_piece_type = generator.next();
+    info!("preview: {:?}", generator.preview());
     let piece = Piece::from(next_piece_type.unwrap());
     let spawn_coords = config.spawn_coords(&piece);
 
@@ -476,7 +459,7 @@ fn piece_setup(mut commands: Commands,
         .insert(Coords::from(spawn_coords))
         .insert(PieceController::default())
         .insert(SpatialBundle {
-            transform: Transform::from_translation(to_translation(spawn_coords.0, spawn_coords.1, &config)),
+            transform: Transform::from_translation(to_translation(spawn_coords.0, spawn_coords.1, config.block_size)),
             ..default()
         });
 
@@ -484,17 +467,17 @@ fn piece_setup(mut commands: Commands,
 }
 
 fn spawn_free_block(commands: &mut Commands,
-                    config: &Res<LevelConfig>,
+                    config: &LevelConfig,
                     texture_assets: &Res<GameAssets>,
                     piece: &Piece,
                     cell: &Cell,
                     block_component: impl BlockComponent,
 ) -> Entity {
     let (x, y) = cell.coords();
-    let piece_type = piece.board().get_cell_kind(x, y).unwrap();
+    let piece_type = cell.cell_kind().unwrap();
 
     let color = match block_component.kind() {
-        BlockComponentKind::Falling => piece_color(piece_type),
+        BlockComponentKind::Falling | BlockComponentKind::Preview => piece_color(piece_type),
         BlockComponentKind::Ghost => Color::GRAY.set_a(0.5).as_rgba(),
         BlockComponentKind::Static => piece_color(piece_type),
         _ => Color::rgb(0.2, 0.2, 0.2),
@@ -520,9 +503,9 @@ fn spawn_free_block(commands: &mut Commands,
 pub fn piece_color(piece_type: PieceType) -> Color {
     let color = match piece_type {
         PieceType::I => Color::rgb_u8(100, 196, 235), // cyan
-        PieceType::J => Color::rgb_u8(224, 127, 58), // orange
+        PieceType::J => Color::rgb_u8(90, 99, 165), // orange
+        PieceType::L => Color::rgb_u8(224, 127, 58), // blue
         PieceType::O => Color::rgb_u8(241, 212, 72), // yellow
-        PieceType::L => Color::rgb_u8(90, 99, 165), // blue
         PieceType::S => Color::rgb_u8(100, 180, 82), // green
         PieceType::T => Color::rgb_u8(161, 83, 152), // purple
         PieceType::Z => Color::rgb_u8(216, 57, 52), // red

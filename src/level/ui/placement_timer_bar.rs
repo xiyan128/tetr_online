@@ -1,8 +1,37 @@
 use bevy::prelude::*;
-use crate::level::{LevelConfig, PieceController};
+use bevy::sprite::Anchor;
+use crate::level::{LevelConfig, PieceController, Board};
 
 #[derive(Component)]
 pub struct PlacementTimerBar;
+
+pub fn spawn_placement_timer_bar(
+    mut commands: Commands,
+    config: Res<LevelConfig>,
+    board_entity_query: Query<Entity, With<Board>>,
+) {
+
+    let board_entity = board_entity_query.single();
+
+    let bar_height = config.block_size * 0.2;
+
+    // spawn the timer bar
+    let timer_bar_entity = commands
+        .spawn(SpriteBundle {
+            transform: Transform::from_translation(Vec3::new(0., -bar_height, 1.)),
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(config.block_size * config.board_width as f32, bar_height)),
+                color: Color::GRAY,
+                anchor: Anchor::BottomLeft,
+                ..Default::default()
+            },
+            visibility: Visibility::Hidden,
+            ..Default::default()
+        })
+        .insert(PlacementTimerBar).id();
+
+    commands.entity(board_entity).add_child(timer_bar_entity);
+}
 
 pub fn show_placement_timer_bar(
     mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
