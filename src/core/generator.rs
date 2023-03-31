@@ -1,10 +1,10 @@
 use crate::core::pieces::PieceType;
 use rand::seq::SliceRandom;
 
+use bevy::prelude::Component;
 use std::iter::Iterator;
-use bevy::prelude::{Component, Resource};
 
-#[derive(Resource)]
+#[derive(Component)]
 pub struct PieceGenerator {
     bag: Vec<PieceType>,
 }
@@ -27,11 +27,14 @@ impl PieceGenerator {
     }
 
     pub(crate) fn preview(&mut self) -> Vec<PieceType> {
-
         if self.bag.len() < PieceType::LEN {
             self.refill_bag();
         }
-        self.bag[self.bag.len() - PieceType::LEN..].iter().rev().copied().collect()
+        self.bag[self.bag.len() - PieceType::LEN..]
+            .iter()
+            .rev()
+            .copied()
+            .collect()
     }
 }
 

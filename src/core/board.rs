@@ -1,11 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use std::ops::Range;
+use crate::core::pieces::PieceType;
 use array2d::Array2D;
 use bevy::prelude::Component;
-use crate::core::pieces::PieceType;
 use itertools::{iproduct, Product};
+use std::ops::Range;
 
 #[derive(Component)]
 pub struct Board {
@@ -13,7 +13,6 @@ pub struct Board {
     height: usize,
     cells: Array2D<Cell>,
 }
-
 
 impl Board {
     pub fn new(width: usize, height: usize) -> Self {
@@ -45,7 +44,10 @@ impl Board {
     }
 
     pub fn cells(&self) -> Vec<&Cell> {
-        self.cells.elements_row_major_iter().filter(|cell| cell.cell_kind.is_some()).collect()
+        self.cells
+            .elements_row_major_iter()
+            .filter(|cell| cell.cell_kind.is_some())
+            .collect()
     }
 
     pub fn get(&self, x: isize, y: isize) -> Option<&Cell> {
@@ -53,7 +55,9 @@ impl Board {
             return None;
         }
 
-        self.cells[(y as usize, x as usize)].cell_kind.is_some()
+        self.cells[(y as usize, x as usize)]
+            .cell_kind
+            .is_some()
             .then(|| &self.cells[(y as usize, x as usize)])
     }
 
@@ -77,8 +81,10 @@ impl Board {
         self.cells().iter().map(|cell| (cell.x, cell.y)).collect()
     }
 
-    pub fn row_cells(&self, row: usize) -> impl Iterator<Item=&Cell> {
-        self.cells().into_iter().filter(move |cell| cell.y == row as isize)
+    pub fn row_cells(&self, row: usize) -> impl Iterator<Item = &Cell> {
+        self.cells()
+            .into_iter()
+            .filter(move |cell| cell.y == row as isize)
     }
 
     pub fn clear_line(&mut self, y: usize) -> Vec<Cell> {
@@ -121,25 +127,22 @@ impl Board {
     }
 }
 
-
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // show board representation
         let board = self;
         let mut s = String::new();
 
-
-         for row in board.rows().iter().rev() {
-             for cell in row {
-                 s.push_str(match cell.cell_kind {
-                     CellKind::Some(_) => "X",
-                     CellKind::None => "#",
-                     _ => " ",
-                 });
-             }
-             s.push_str("\n");
-         }
-
+        for row in board.rows().iter().rev() {
+            for cell in row {
+                s.push_str(match cell.cell_kind {
+                    CellKind::Some(_) => "X",
+                    CellKind::None => "#",
+                    _ => " ",
+                });
+            }
+            s.push_str("\n");
+        }
 
         write!(f, "{}", s)
     }
@@ -228,11 +231,7 @@ impl Default for Cell {
 
 impl Cell {
     pub fn new(x: isize, y: isize, cell_kind: CellKind) -> Self {
-        Self {
-            x,
-            y,
-            cell_kind,
-        }
+        Self { x, y, cell_kind }
     }
 
     pub fn dummy(x: isize, y: isize) -> Self {
@@ -259,4 +258,3 @@ impl Cell {
         self.cell_kind
     }
 }
-

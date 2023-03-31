@@ -1,8 +1,7 @@
-use std::fmt::{Debug, Display};
-use bevy::prelude::{Component, info};
-use itertools::Itertools;
 use crate::core::board::{Board, CellKind};
-
+use bevy::prelude::{info, Component};
+use itertools::Itertools;
+use std::fmt::{Debug, Display};
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PieceType {
@@ -167,7 +166,6 @@ impl Piece {
         self.piece_type
     }
 
-
     pub fn board(&self) -> Board {
         let (width, height) = self.board_size();
         let mut board = Board::new(width, height);
@@ -213,8 +211,12 @@ impl Piece {
         false
     }
 
-    pub fn try_move(&self, board: &Board, offset: (isize, isize), direction: MoveDirection)
-                    -> Result<(isize, isize), ()> {
+    pub fn try_move(
+        &self,
+        board: &Board,
+        offset: (isize, isize),
+        direction: MoveDirection,
+    ) -> Result<(isize, isize), ()> {
         let (x_offset, y_offset) = offset;
         let (x_offset, y_offset) = match direction {
             MoveDirection::Left => (x_offset - 1, y_offset),
@@ -229,7 +231,12 @@ impl Piece {
         }
     }
 
-    pub fn try_rotate_with_kicks(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<(PieceRotation, (isize, isize)), ()> {
+    pub fn try_rotate_with_kicks(
+        &self,
+        board: &Board,
+        offset: (isize, isize),
+        rotation: PieceRotation,
+    ) -> Result<(PieceRotation, (isize, isize)), ()> {
         use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
 
         if self.piece_type == PieceType::O {
@@ -258,7 +265,7 @@ impl Piece {
             (PieceRotation::R270, PieceRotation::R180) => 5,
             (PieceRotation::R270, PieceRotation::R0) => 6,
             (PieceRotation::R0, PieceRotation::R270) => 7,
-            _ => unreachable!("Invalid rotation: {:?} -> {:?}", self.rotation, rotation)
+            _ => unreachable!("Invalid rotation: {:?} -> {:?}", self.rotation, rotation),
         };
 
         let kicks = kicks_table[kicks_idx];
@@ -274,7 +281,12 @@ impl Piece {
         Err(())
     }
 
-    pub fn try_rotate(&self, board: &Board, offset: (isize, isize), rotation: PieceRotation) -> Result<PieceRotation, ()> {
+    pub fn try_rotate(
+        &self,
+        board: &Board,
+        offset: (isize, isize),
+        rotation: PieceRotation,
+    ) -> Result<PieceRotation, ()> {
         let (x_offset, y_offset) = offset;
         let mut new_piece = self.clone();
         new_piece.rotate_to(rotation);
@@ -282,7 +294,7 @@ impl Piece {
         if new_piece.collide_with(board, (x_offset, y_offset)) {
             Err(())
         } else {
-            Ok(new_piece.rotation)// return new rotation
+            Ok(new_piece.rotation) // return new rotation
         }
     }
 }
@@ -292,7 +304,6 @@ impl From<PieceType> for Piece {
         Self::new(piece_type)
     }
 }
-
 
 #[cfg(test)]
 mod tests {
@@ -313,7 +324,6 @@ mod tests {
 
     #[test]
     fn test_piece_display() {
-
         // print all pieces and rotations
         for piece_type in PieceType::all() {
             for rotation in PieceRotation::all() {

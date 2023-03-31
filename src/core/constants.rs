@@ -35,8 +35,6 @@ pub mod shapes {
     pub static Z: Shape = [(0, 2), (1, 2), (1, 1), (2, 1)];
 }
 
-
-
 pub mod avatar_shapes {
     use super::Shape;
     pub static I: Shape = [(0, 0), (1, 0), (2, 0), (3, 0)];

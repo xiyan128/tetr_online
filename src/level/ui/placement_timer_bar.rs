@@ -1,6 +1,7 @@
+use crate::level::common::{LevelConfig, PieceController};
+use crate::level::Board;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
-use crate::level::{LevelConfig, PieceController, Board};
 
 #[derive(Component)]
 pub struct PlacementTimerBar;
@@ -10,7 +11,6 @@ pub fn spawn_placement_timer_bar(
     config: Res<LevelConfig>,
     board_entity_query: Query<Entity, With<Board>>,
 ) {
-
     let board_entity = board_entity_query.single();
 
     let bar_height = config.block_size * 0.2;
@@ -20,24 +20,20 @@ pub fn spawn_placement_timer_bar(
         .spawn(SpriteBundle {
             transform: Transform::from_translation(Vec3::new(0., -bar_height, 1.)),
             sprite: Sprite {
-                custom_size: Some(Vec2::new(config.block_size * config.board_width as f32, bar_height)),
+                custom_size: Some(Vec2::new(
+                    config.block_size * config.board_width as f32,
+                    bar_height,
+                )),
                 color: Color::GRAY,
                 anchor: Anchor::BottomLeft,
                 ..Default::default()
             },
-            visibility: Visibility::Hidden,
             ..Default::default()
         })
-        .insert(PlacementTimerBar).id();
+        .insert(PlacementTimerBar)
+        .id();
 
     commands.entity(board_entity).add_child(timer_bar_entity);
-}
-
-pub fn show_placement_timer_bar(
-    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
-) {
-    let mut bar = bar_query.single_mut();
-    bar.set_if_neq(Visibility::Inherited);
 }
 
 // update_placement_timer_bar
@@ -58,9 +54,11 @@ pub fn update_placement_timer_bar(
 }
 
 // remove_placement_timer_bar
-pub fn hide_placement_timer_bar(
-    mut bar_query: Query<&mut Visibility, With<PlacementTimerBar>>,
+pub fn despawn_placement_timer_bar(
+    mut bar_query: Query<Entity, With<PlacementTimerBar>>,
+    mut commands: Commands,
 ) {
-    let mut bar = bar_query.single_mut();
-    bar.set_if_neq(Visibility::Hidden);
+    info!("despawning placement timer bar");
+    let bar = bar_query.single();
+    commands.entity(bar).despawn_recursive();
 }

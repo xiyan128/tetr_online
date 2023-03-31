@@ -1,19 +1,23 @@
-use bevy::prelude::*;
 use crate::assets::GameAssets;
+use crate::level::common::LevelState;
 use crate::GameState;
-use crate::level::LevelState;
+use bevy::prelude::*;
 
 pub(crate) struct GameOverPlugin;
 
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            (setup_game_over_ui, ).chain().in_schedule(OnEnter(GameState::GameOver))
-        ).add_system(button_system)
-            .add_systems(
-                (cleanup_level, ).chain().in_schedule(OnExit(GameState::GameOver))
-            );
-        ;
+            (setup_game_over_ui,)
+                .chain()
+                .in_schedule(OnEnter(GameState::GameOver)),
+        )
+        .add_system(button_system)
+        .add_systems(
+            (cleanup_level,)
+                .chain()
+                .in_schedule(OnExit(GameState::GameOver)),
+        );
     }
 }
 
@@ -33,7 +37,6 @@ enum MenuActions {
 struct GameOverCleanup;
 
 pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) {
-    commands.spawn(Camera2dBundle::default()).insert(GameOverCleanup);
     commands
         .spawn((
             NodeBundle {
@@ -44,7 +47,8 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
                     ..default()
                 },
                 ..default()
-            }, GameOverCleanup
+            },
+            GameOverCleanup,
         ))
         .with_children(|parent| {
             parent
@@ -67,10 +71,10 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
                                 color: Color::rgb(0.9, 0.9, 0.9),
                             },
                         )
-                            .with_style(Style {
-                                margin: UiRect::all(Val::Px(20.0)),
-                                ..default()
-                            }),
+                        .with_style(Style {
+                            margin: UiRect::all(Val::Px(20.0)),
+                            ..default()
+                        }),
                     );
 
                     parent
@@ -86,11 +90,11 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
                                 background_color: Color::rgb(0.15, 0.15, 0.15).into(),
                                 ..default()
                             },
-                            MenuActions::Quit
+                            MenuActions::Quit,
                         ))
                         .with_children(|parent| {
                             parent.spawn(TextBundle::from_section(
-                                "Quit to Menu",
+                                "Menu",
                                 TextStyle {
                                     font: game_assets.font.clone(),
                                     font_size: 12.0,
@@ -112,7 +116,7 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
                                 background_color: Color::rgb(0.15, 0.15, 0.15).into(),
                                 ..default()
                             },
-                            MenuActions::Restart
+                            MenuActions::Restart,
                         ))
                         .with_children(|parent| {
                             parent.spawn(TextBundle::from_section(
@@ -127,7 +131,6 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
                 });
         });
 }
-
 
 const NORMAL_BUTTON: Color = Color::rgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::rgb(0.25, 0.25, 0.25);
@@ -148,7 +151,7 @@ fn button_system(
                 match menu_actions {
                     MenuActions::Restart => {
                         next_game_state.set(GameState::InGame);
-                        next_level_state.set(LevelState::Ready);
+                        next_level_state.set(LevelState::Setup);
                     }
                     MenuActions::Quit => {
                         next_game_state.set(GameState::MainMenu);

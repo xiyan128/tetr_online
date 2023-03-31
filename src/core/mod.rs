@@ -1,9 +1,8 @@
-mod pieces;
 mod board;
-mod generator;
 mod constants;
+mod generator;
+mod pieces;
 
-
-pub use board::{Board, CellKind, Cell};
-pub use pieces::{PieceType, PieceRotation, Piece, MoveDirection};
+pub use board::{Board, Cell, CellKind};
 pub use generator::PieceGenerator;
+pub use pieces::{MoveDirection, Piece, PieceRotation, PieceType};
