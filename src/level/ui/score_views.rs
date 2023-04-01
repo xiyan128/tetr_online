@@ -42,7 +42,7 @@ pub fn spawn_score_text(
             transform: Transform::from_translation(
                 to_translation(config.board_width as isize, 1, config.block_size) + offset,
             ),
-            text_anchor: Anchor::TopRight,
+            text_anchor: Anchor::TopLeft,
             ..Default::default()
         })
         .insert(ScoreText)
@@ -69,7 +69,7 @@ pub fn spawn_line_count_text(
             transform: Transform::from_translation(
                 to_translation(config.board_width as isize, 2, config.block_size) + offset,
             ),
-            text_anchor: Anchor::TopRight,
+            text_anchor: Anchor::TopLeft,
             ..Default::default()
         })
         .insert(LineCountText)
@@ -92,7 +92,7 @@ pub fn spawn_score_type_text(
             transform: Transform::from_translation(
                 to_translation(0, (1 + config.board_height >> 1) as isize, config.block_size) + offset,
             ),
-            text_anchor: Anchor::TopLeft,
+            text_anchor: Anchor::TopRight,
             ..Default::default()
         })
         .insert(ScoreTypeText)

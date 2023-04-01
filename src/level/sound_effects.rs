@@ -2,6 +2,7 @@ use crate::assets::GameAssets;
 use crate::level::common::{ActionEvent, LevelState, PlacingEvent};
 use crate::GameState;
 use bevy::prelude::*;
+use itertools::Itertools;
 use crate::level::score::ScoreType;
 
 pub struct SoundEffectsPlugin;
@@ -19,9 +20,6 @@ fn placing_sounds(
 ) {
     for ev in ev_placing.iter() {
         match ev {
-            PlacingEvent::Placed => {
-                audio.play(game_assets.placed_sound.clone());
-            }
             PlacingEvent::Locked(0) => {
                 audio.play(game_assets.locked_sound.clone());
             }
@@ -42,6 +40,7 @@ fn placing_sounds(
                     _ => unreachable!()
                 }
             }
+            _ => {}
         }
     }
 }
