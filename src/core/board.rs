@@ -108,7 +108,7 @@ impl Board {
         cleared
     }
 
-    pub fn clear_lines(&mut self) -> isize {
+    pub fn clear_lines(&mut self) -> usize {
         for y in 0..self.height {
             if self.row_cells(y).count() == self.width {
                 self.clear_line(y);

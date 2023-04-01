@@ -4,9 +4,9 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 #[derive(Component)]
-pub struct PlacementTimerBar;
+pub struct LockingTimerBar;
 
-pub fn spawn_placement_timer_bar(
+pub fn spawn_locking_timer_bar(
     mut commands: Commands,
     config: Res<LevelConfig>,
     board_entity_query: Query<Entity, With<Board>>,
@@ -30,21 +30,21 @@ pub fn spawn_placement_timer_bar(
             },
             ..Default::default()
         })
-        .insert(PlacementTimerBar)
+        .insert(LockingTimerBar)
         .id();
 
     commands.entity(board_entity).add_child(timer_bar_entity);
 }
 
-// update_placement_timer_bar
-pub fn update_placement_timer_bar(
+// update_locking_timer_bar
+pub fn update_locking_timer_bar(
     mut piece_controller_query: Query<&mut PieceController>,
-    mut bar_query: Query<&mut Sprite, With<PlacementTimerBar>>,
+    mut bar_query: Query<&mut Sprite, With<LockingTimerBar>>,
     config: Res<LevelConfig>,
 ) {
     let mut piece_controller = piece_controller_query.single_mut();
 
-    let timer = &mut piece_controller.placing_timer;
+    let timer = &mut piece_controller.locking_timer;
     let mut bar = bar_query.single_mut();
 
     let progress = timer.percent();
@@ -53,12 +53,12 @@ pub fn update_placement_timer_bar(
     bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
 }
 
-// remove_placement_timer_bar
-pub fn despawn_placement_timer_bar(
-    mut bar_query: Query<Entity, With<PlacementTimerBar>>,
+// remove_locking_timer_bar
+pub fn despawn_locking_timer_bar(
+    mut bar_query: Query<Entity, With<LockingTimerBar>>,
     mut commands: Commands,
 ) {
-    info!("despawning placement timer bar");
+    info!("despawning locking timer bar");
     let bar = bar_query.single();
     commands.entity(bar).despawn_recursive();
 }

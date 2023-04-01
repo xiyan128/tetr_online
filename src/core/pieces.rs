@@ -236,11 +236,11 @@ impl Piece {
         board: &Board,
         offset: (isize, isize),
         rotation: PieceRotation,
-    ) -> Result<(PieceRotation, (isize, isize)), ()> {
+    ) -> Result<(PieceRotation, (isize, isize), usize), ()> {
         use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
 
         if self.piece_type == PieceType::O {
-            return Ok((PieceRotation::R0, offset)); // O piece doesn't rotate
+            return Ok((PieceRotation::R0, offset, 0)); // O piece doesn't rotate
         }
 
         let kicks_table = match self.piece_type {
@@ -274,7 +274,7 @@ impl Piece {
             let new_offset = (offset.0 + x_offset, offset.1 + y_offset);
             if let Ok(new_rotation) = self.try_rotate(board, new_offset, rotation) {
                 info!("Kicked to {:?} (set {:?})", (x_offset, y_offset), set_idx);
-                return Ok((new_rotation, new_offset));
+                return Ok((new_rotation, new_offset, set_idx));
             }
         }
 

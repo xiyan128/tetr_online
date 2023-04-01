@@ -1,5 +1,5 @@
 use crate::assets::GameAssets;
-use crate::core::{Board, Cell, Piece, PieceType};
+use crate::core::{Board, Cell, MoveDirection, Piece, PieceRotation, PieceType};
 use bevy::asset::Handle;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
@@ -9,6 +9,20 @@ use bevy::prelude::{
 use bevy::render::texture::DEFAULT_IMAGE_HANDLE;
 use bevy::sprite::Anchor;
 use std::time::Duration;
+
+#[derive(Clone, Debug)]
+pub enum ActionEvent {
+    Rotation(PieceRotation, PieceType, usize, bool), // rotation, piece type, occupied cells (only for T-Spin), wall kick
+    Movement(MoveDirection),
+    HardDrop(usize),
+    Hold,
+}
+
+#[derive(Clone)]
+pub enum PlacingEvent {
+    Locked(usize), // lines cleared
+    Placed,
+}
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 pub enum LevelState {
@@ -23,7 +37,7 @@ pub enum LevelState {
 pub enum PlayingState {
     #[default]
     Falling,
-    Placing,
+    Locking,
 }
 
 #[derive(Resource, Debug)]
@@ -38,7 +52,7 @@ pub struct LevelConfig {
     pub(crate) movement_speedup: f64,
     pub(crate) soft_drop_duration: Duration,
     pub(crate) fall_duration: Duration,
-    pub(crate) placing_duration: Duration,
+    pub(crate) locking_duration: Duration,
 }
 
 impl Default for LevelConfig {
@@ -53,7 +67,7 @@ impl Default for LevelConfig {
             soft_drop_duration: Duration::from_millis(50),
             movement_speedup: 1. / 1.0_f64.exp(),
             fall_duration: Duration::from_millis(500),
-            placing_duration: Duration::from_millis(500),
+            locking_duration: Duration::from_millis(500),
         }
     }
 }
@@ -150,7 +164,7 @@ pub struct BlockBundle {
 #[derive(Component)]
 pub struct PieceController {
     pub(crate) falling_timer: Timer,
-    pub(crate) placing_timer: Timer,
+    pub(crate) locking_timer: Timer,
     pub(crate) hard_dropped: bool,
     pub(crate) used_hold: bool,
     pub(crate) movement_timer: Timer,
@@ -162,7 +176,7 @@ impl Default for PieceController {
 
         Self {
             falling_timer: Timer::new(config.fall_duration, TimerMode::Repeating),
-            placing_timer: Timer::new(config.placing_duration, TimerMode::Once),
+            locking_timer: Timer::new(config.locking_duration, TimerMode::Once),
             movement_timer: Timer::new(config.movement_duration, TimerMode::Repeating),
             hard_dropped: false,
             used_hold: false,

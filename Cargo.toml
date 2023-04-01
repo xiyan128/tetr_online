@@ -6,9 +6,12 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-bevy = "0.10.0"
+bevy = {version = "0.10.0", features = [ "wav" ]}
 itertools = "0.10.5"
 rand = "0.8.5"
 leafwing-input-manager = "0.9.1"
 array2d = "0.3.0"
 bevy_asset_loader = "0.15.0"
+
+[target.wasm32-unknown-unknown]
+runner = "wasm-server-runner"

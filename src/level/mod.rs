@@ -9,13 +9,17 @@ use crate::assets::GameAssets;
 use crate::level::actions::ActionsPlugin;
 use crate::level::common::PlayingState::Falling;
 use crate::level::game_over::GameOverPlugin;
+use crate::level::score::ScorePlugin;
+use crate::level::sound_effects::SoundEffectsPlugin;
 use crate::level::ui::UIPlugin;
 use crate::GameState;
 
 mod actions;
 mod common;
 mod game_over;
+mod score;
 mod setup;
+mod sound_effects;
 mod ui;
 
 pub struct LevelPlugin;
@@ -26,9 +30,14 @@ impl Plugin for LevelPlugin {
             // states
             .add_state::<LevelState>()
             .add_state::<PlayingState>()
+            // events
+            .add_event::<ActionEvent>()
+            .add_event::<PlacingEvent>()
             // plugins
             .add_plugin(ActionsPlugin)
             .add_plugin(GameOverPlugin)
+            .add_plugin(SoundEffectsPlugin)
+            .add_plugin(ScorePlugin)
             .add_plugin(UIPlugin)
             // resources
             .init_resource::<LevelConfig>()
@@ -49,7 +58,7 @@ impl Plugin for LevelPlugin {
             .add_systems(
                 (piece_fall, detect_placement, ghost_blocks).in_set(OnUpdate(LevelState::Playing)),
             )
-            .add_system(piece_place.in_set(OnUpdate(PlayingState::Placing)));
+            .add_system(piece_lock.in_set(OnUpdate(PlayingState::Locking)));
     }
 }
 
@@ -224,10 +233,10 @@ fn piece_fall(
     }
 }
 
-fn piece_place(
+fn piece_lock(
     mut commands: Commands,
     mut query: Query<(Entity, &Piece, &Coords, &mut PieceController, &Children)>,
-    mut board_query: Query<(Entity, &mut Board, &Children)>,
+    mut board_query: Query<(Entity, &mut Board)>,
     mut query_children: Query<
         (&mut Coords, &mut Transform),
         (With<FallingBlock>, Without<StaticBlock>, Without<Piece>),
@@ -236,21 +245,20 @@ fn piece_place(
     time: Res<Time>,
     config: Res<LevelConfig>,
     assets: Res<GameAssets>,
-    audio: Res<Audio>,
     mut next_state: ResMut<NextState<LevelState>>,
+    mut ev_placing: EventWriter<PlacingEvent>,
 ) {
     let (piece_entity, piece, coords, mut piece_controller, children) = query.single_mut();
-    let (board_entity, mut board, board_children) = board_query.single_mut();
+    let (board_entity, mut board) = board_query.single_mut();
 
-    piece_controller.placing_timer.tick(time.delta());
+    piece_controller.locking_timer.tick(time.delta());
 
-    if piece_controller.placing_timer.finished() || piece_controller.hard_dropped
+    if piece_controller.locking_timer.finished() || piece_controller.hard_dropped
     // after hard drop, place immediately
     {
         info!("piece_place");
         piece_controller.hard_dropped = false; // reset hard drop flag
-        audio.play(assets.hard_drop_sound.clone());
-        // switch to piece setup state and finalize piece
+                                               // switch to piece setup state and finalize piece
         next_state.set(LevelState::Playing); // enter the next playing loop
 
         // hand over children to board
@@ -278,9 +286,9 @@ fn piece_place(
         }
 
         // check for line clears
-        let line_clear_count = board.clear_lines();
+        let lines_cleared = board.clear_lines();
 
-        if line_clear_count > 0 {
+        if lines_cleared > 0 {
             // remove all static blocks
             for entity in query_static_blocks.iter_mut() {
                 commands.entity(entity).despawn_recursive();
@@ -297,15 +305,17 @@ fn piece_place(
                 commands.entity(board_entity).add_child(block_entity);
             }
 
-            piece_controller.placing_timer.reset();
+            piece_controller.locking_timer.reset();
         }
+
+        ev_placing.send(PlacingEvent::Locked(lines_cleared));
     }
 }
 
 fn ghost_blocks(
     mut commands: Commands,
-    mut query: Query<
-        (&Coords, &Children, &Piece),
+    mut piece_query: Query<
+        (&Coords, &Piece),
         (With<PieceController>, Or<(Changed<Coords>, Changed<Piece>)>),
     >, // either the piece or its coords changed
     ghost_query: Query<Entity, With<GhostPiece>>,
@@ -313,7 +323,7 @@ fn ghost_blocks(
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
 ) {
-    if query.is_empty() {
+    if piece_query.is_empty() {
         return;
     }
 
@@ -321,12 +331,12 @@ fn ghost_blocks(
         commands.entity(entity).despawn_recursive();
     }
 
-    let (coords, children, piece) = query.single_mut();
+    let (coords, piece) = piece_query.single_mut();
     let board = board_query.single_mut();
 
     let mut ghost_coords = coords.clone();
     let mut ghost_transform = Transform::default();
-    let mut ghost_piece = piece.clone();
+    let ghost_piece = piece.clone();
 
     let mut can_move = false;
 
@@ -362,16 +372,17 @@ fn ghost_blocks(
 }
 
 fn detect_placement(
-    mut query: Query<(&Coords, &Children, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
+    mut piece_query: Query<(&Coords, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
     mut board_query: Query<&mut Board>,
     mut next_state: ResMut<NextState<PlayingState>>,
-    mut current_state: Res<State<PlayingState>>,
+    current_state: Res<State<PlayingState>>,
+    mut ev_placing: EventWriter<PlacingEvent>,
 ) {
-    if query.is_empty() {
+    if piece_query.is_empty() {
         return;
     }
 
-    let (coords, children, piece) = query.single_mut();
+    let (coords, piece) = piece_query.single_mut();
     let board = board_query.single_mut();
 
     let current_state = &current_state.0;
@@ -380,12 +391,14 @@ fn detect_placement(
         .try_move(&board, (coords.x, coords.y), MoveDirection::Down)
         .is_err()
     {
-        if current_state == &PlayingState::Falling {
-            next_state.set(PlayingState::Placing);
+        if current_state == &Falling {
+            next_state.set(PlayingState::Locking);
             info!("Transitioning to Placing state.");
+
+            ev_placing.send(PlacingEvent::Placed);
         }
-    } else if current_state == &PlayingState::Placing {
-        next_state.set(PlayingState::Falling);
+    } else if current_state == &PlayingState::Locking {
+        next_state.set(Falling);
         info!("Transitioning to Falling state.");
     }
 }

@@ -2,12 +2,13 @@ use bevy::prelude::*;
 use leafwing_input_manager::prelude::*;
 
 use crate::assets::GameAssets;
-use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation};
+use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
 use crate::level::common;
 use crate::level::common::{
-    spawn_piece_blocks, Coords, FallingBlock, LevelCleanup, LevelConfig, LevelState, MatchCoords,
-    PieceController, PieceHolder,
+    spawn_piece_blocks, ActionEvent, Coords, FallingBlock, LevelCleanup, LevelConfig, LevelState,
+    MatchCoords, PieceController, PieceHolder,
 };
+use itertools::iproduct;
 use std::iter::zip;
 
 pub struct ActionsPlugin;
@@ -77,6 +78,7 @@ pub(crate) fn handle_movements(
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
     time: Res<Time>,
+    mut ev_action: EventWriter<ActionEvent>,
 ) {
     if query.get_single_mut().is_err() {
         return;
@@ -129,7 +131,8 @@ pub(crate) fn handle_movements(
                 &board,
                 movement,
             ) {
-                piece_controller.placing_timer.reset();
+                ev_action.send(ActionEvent::Movement(movement));
+                piece_controller.locking_timer.reset();
                 piece_controller.movement_timer.set_duration(duration);
             }
             if just_pressed {
@@ -149,6 +152,7 @@ pub(crate) fn handle_hard_drop(
     )>,
     mut board_query: Query<&mut Board>,
     config: Res<LevelConfig>,
+    mut ev_action: EventWriter<ActionEvent>,
 ) {
     if query.get_single_mut().is_err() {
         return;
@@ -162,6 +166,7 @@ pub(crate) fn handle_hard_drop(
     let hard_drop = action_state.just_pressed(GameControl::HardDrop);
 
     if hard_drop {
+        let mut lines = 0;
         while move_piece_and_update(
             &config,
             &mut piece,
@@ -170,9 +175,12 @@ pub(crate) fn handle_hard_drop(
             &board,
             MoveDirection::Down,
         ) {
-            piece_controller.placing_timer.reset();
+            piece_controller.locking_timer.reset();
+            lines += 1;
         }
         piece_controller.hard_dropped = true;
+
+        ev_action.send(ActionEvent::HardDrop(lines));
     }
 }
 
@@ -183,6 +191,7 @@ pub(crate) fn handle_rotations(
     mut board_query: Query<&mut Board>,
     mut piece_controller_query: Query<&mut PieceController>,
     config: Res<LevelConfig>,
+    mut ev_action: EventWriter<ActionEvent>,
 ) {
     if query.get_single_mut().is_err() {
         return;
@@ -204,7 +213,7 @@ pub(crate) fn handle_rotations(
     };
 
     if let Some(rotation_n) = rotation {
-        if let Ok((rotation, new_coords)) =
+        if let Ok((rotation, new_coords, wall_kick_set)) =
             piece.try_rotate_with_kicks(&board, (coords.x, coords.y), rotation_n)
         {
             piece.rotate_to(rotation);
@@ -219,8 +228,24 @@ pub(crate) fn handle_rotations(
             }
 
             transform.update_coords(coords.as_ref(), &config);
+            piece_controller.locking_timer.reset();
 
-            piece_controller.placing_timer.reset();
+            // count t-spin corners
+            let mut t_spin_corners = 0;
+            if piece.piece_type() == PieceType::T {
+                for (x, y) in iproduct!([0, 2], [0, 2]) {
+                    if board.get(coords.x + x, coords.y + y).is_some() {
+                        t_spin_corners += 1;
+                    }
+                }
+            }
+
+            ev_action.send(ActionEvent::Rotation(
+                rotation, // rotation that was performed
+                piece.piece_type(), // type of piece that was rotated
+                t_spin_corners, // (only for t-spin) number of corners occupied by other blocks
+                wall_kick_set != 0, // if wall kick was performed
+            ));
         }
     }
 }
@@ -233,6 +258,7 @@ fn swap_hold(
     texture_assets: Res<GameAssets>,
     mut generator_query: Query<&mut PieceGenerator>,
     action_query: Query<&ActionState<GameControl>>,
+    mut ev_action: EventWriter<ActionEvent>,
 ) {
     if piece_query.get_single_mut().is_err() {
         return;
@@ -288,6 +314,7 @@ fn swap_hold(
     commands.entity(current_piece_entity).despawn_recursive();
 
     piece_controller.used_hold = true;
+    ev_action.send(ActionEvent::Hold);
 }
 
 #[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]

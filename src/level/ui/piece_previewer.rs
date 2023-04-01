@@ -2,6 +2,7 @@ use crate::assets::GameAssets;
 use crate::core::{Board, Piece, PieceGenerator, PieceType};
 use crate::level::common::spawn_free_block;
 use crate::level::common::{to_translation, FallingBlock, LevelCleanup, LevelConfig, PieceHolder};
+use crate::level::ui::calc_ui_offset;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -14,10 +15,6 @@ pub struct HoldViewer;
 #[derive(Component)]
 pub struct PreviewHolder {
     index: usize,
-}
-
-fn calc_ui_offset(config: &LevelConfig) -> f32 {
-    config.block_size * 0.5
 }
 
 pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
