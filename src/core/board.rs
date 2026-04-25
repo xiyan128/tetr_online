@@ -3,11 +3,12 @@ use std::fmt::Display;
 
 use crate::core::pieces::PieceType;
 use array2d::Array2D;
-use bevy::prelude::Component;
+use bevy::prelude::{Component, Transform};
 use itertools::{iproduct, Product};
 use std::ops::Range;
 
 #[derive(Component)]
+#[require(Transform)]
 pub struct Board {
     width: usize,
     height: usize,
@@ -40,7 +41,7 @@ impl Board {
     }
 
     pub fn rows(&self) -> Vec<Vec<Cell>> {
-        return self.cells.as_rows()[..self.height].to_vec();
+        self.cells.as_rows()[..self.height].to_vec()
     }
 
     pub fn cells(&self) -> Vec<&Cell> {
@@ -109,13 +110,19 @@ impl Board {
     }
 
     pub fn clear_lines(&mut self) -> usize {
-        for y in 0..self.height {
+        let mut cleared = 0;
+        let mut y = 0;
+
+        while y < self.height {
             if self.row_cells(y).count() == self.width {
                 self.clear_line(y);
-                return self.clear_lines() + 1;
+                cleared += 1;
+            } else {
+                y += 1;
             }
         }
-        0
+
+        cleared
     }
 
     pub fn width(&self) -> usize {
@@ -141,18 +148,83 @@ impl Display for Board {
                     _ => " ",
                 });
             }
-            s.push_str("\n");
+            s.push('\n');
         }
 
         write!(f, "{}", s)
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub enum CellKind {
     Some(PieceType),
     None,
     Wall,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fill_row(board: &mut Board, y: isize, piece_type: PieceType) {
+        for x in 0..board.width {
+            assert!(board.set(x as isize, y, CellKind::Some(piece_type)));
+        }
+    }
+
+    #[test]
+    fn set_and_get_round_trip_inside_visible_board() {
+        let mut board = Board::new(10, 20);
+
+        assert!(board.set(3, 4, CellKind::Some(PieceType::T)));
+        assert_eq!(board.get_cell_kind(3, 4), CellKind::Some(PieceType::T));
+        assert_eq!(
+            board.get(3, 4).map(Cell::cell_kind),
+            Some(CellKind::Some(PieceType::T))
+        );
+    }
+
+    #[test]
+    fn horizontal_bounds_are_walls() {
+        let board = Board::new(10, 20);
+
+        assert_eq!(board.get_cell_kind(-1, 0), CellKind::Wall);
+        assert_eq!(board.get_cell_kind(10, 0), CellKind::Wall);
+    }
+
+    #[test]
+    fn top_margin_accepts_hidden_spawn_cells() {
+        let mut board = Board::with_top_margin(10, 20, 20);
+
+        assert!(board.set(4, 25, CellKind::Some(PieceType::I)));
+        assert_eq!(board.get_cell_kind(4, 25), CellKind::Some(PieceType::I));
+        assert!(board.get(4, 25).is_none());
+    }
+
+    #[test]
+    fn clear_line_removes_row_and_drops_above_cells() {
+        let mut board = Board::new(4, 4);
+        fill_row(&mut board, 0, PieceType::I);
+        assert!(board.set(1, 1, CellKind::Some(PieceType::T)));
+
+        let cleared = board.clear_line(0);
+
+        assert_eq!(cleared.len(), 4);
+        assert_eq!(board.get_cell_kind(1, 0), CellKind::Some(PieceType::T));
+        assert_eq!(board.get_cell_kind(1, 1), CellKind::None);
+    }
+
+    #[test]
+    fn clear_lines_handles_multiple_adjacent_full_rows() {
+        let mut board = Board::new(4, 4);
+        fill_row(&mut board, 0, PieceType::I);
+        fill_row(&mut board, 1, PieceType::O);
+        assert!(board.set(2, 2, CellKind::Some(PieceType::T)));
+
+        assert_eq!(board.clear_lines(), 2);
+        assert_eq!(board.get_cell_kind(2, 0), CellKind::Some(PieceType::T));
+        assert_eq!(board.cells().len(), 1);
+    }
 }
 
 impl CellKind {
@@ -164,28 +236,10 @@ impl CellKind {
         matches!(self, CellKind::None)
     }
 
-    pub fn is_wall(&self) -> bool {
-        matches!(self, CellKind::Wall)
-    }
-
-    pub fn unwrap_or(self, default: PieceType) -> PieceType {
-        match self {
-            CellKind::Some(piece_type) => piece_type,
-            _ => default,
-        }
-    }
-
     pub fn unwrap(self) -> PieceType {
         match self {
             CellKind::Some(piece_type) => piece_type,
             _ => panic!("CellKind is None or Wall"),
-        }
-    }
-
-    pub fn as_some(&self) -> Option<PieceType> {
-        match self {
-            CellKind::Some(piece_type) => Some(*piece_type),
-            _ => None,
         }
     }
 }
@@ -242,10 +296,12 @@ impl Cell {
         }
     }
 
+    #[cfg(test)]
     pub fn x(&self) -> isize {
         self.x
     }
 
+    #[cfg(test)]
     pub fn y(&self) -> isize {
         self.y
     }

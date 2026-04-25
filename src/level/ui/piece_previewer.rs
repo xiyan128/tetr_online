@@ -1,8 +1,9 @@
 use crate::assets::GameAssets;
 use crate::core::{Piece, PieceGenerator, PieceType};
 use crate::level::common::spawn_free_block;
-use crate::level::common::{to_translation, FallingBlock, LevelCleanup, LevelConfig, PieceHolder};
+use crate::level::common::{to_translation, BlockKind, LevelConfig, PieceHolder};
 use crate::level::ui::calc_ui_offset;
+use crate::GameState;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -30,7 +31,7 @@ pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
                 config.block_size,
             ) + offset,
         ))
-        .insert(LevelCleanup)
+        .insert(DespawnOnExit(GameState::InGame))
         .id();
 
     for i in 0..config.preview_count {
@@ -47,19 +48,14 @@ pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
 pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
     let offset = Vec3::new(-calc_ui_offset(&config), 0., 0.);
 
-    let hold_viewer = commands
-        .spawn(HoldViewer)
-        .insert(Transform::from_translation(
+    commands.spawn((
+        HoldViewer,
+        Transform::from_translation(
             to_translation(0, (config.board_height) as isize, config.block_size) + offset,
-        ))
-        .insert(LevelCleanup)
-        .id();
-
-    let box_entity = commands
-        .spawn((Transform::default(), PreviewHolder { index: 0 }))
-        .id();
-
-    commands.entity(hold_viewer).add_child(box_entity);
+        ),
+        DespawnOnExit(GameState::InGame),
+        children![(Transform::default(), PreviewHolder { index: 0 })],
+    ));
 }
 
 pub fn update_piece_previewer(
@@ -152,7 +148,7 @@ pub fn update_hold_viewer(
 fn spawn_holder_piece(
     config: &Res<LevelConfig>,
     game_assets: &Res<GameAssets>,
-    mut commands: &mut Commands,
+    commands: &mut Commands,
     piece_type: PieceType,
 ) -> (Vec2, Entity) {
     let piece = Piece::from(piece_type);
@@ -166,14 +162,14 @@ fn spawn_holder_piece(
         .iter()
         .map(|&cell| {
             spawn_free_block(
-                &mut commands,
+                commands,
                 &LevelConfig {
                     block_size: preview_block_size,
                     ..Default::default()
                 },
-                &game_assets,
+                game_assets,
                 cell,
-                FallingBlock,
+                BlockKind::Preview,
             )
         })
         .collect();

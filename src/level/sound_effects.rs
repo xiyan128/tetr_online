@@ -1,77 +1,31 @@
 use crate::assets::GameAssets;
-use crate::level::common::{ActionEvent, LevelState, PlacingEvent};
+use crate::level::common::AudioCue;
 use bevy::prelude::*;
 
 pub struct SoundEffectsPlugin;
 
 impl Plugin for SoundEffectsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (placing_sounds, action_sounds).run_if(in_state(LevelState::Playing)),
-        );
+        app.add_observer(play_audio_cue);
     }
 }
 
-fn placing_sounds(
-    mut commands: Commands,
-    mut ev_placing: MessageReader<PlacingEvent>,
-    game_assets: Res<GameAssets>,
-) {
-    for ev in ev_placing.read() {
-        match ev {
-            PlacingEvent::Locked(0) => {
-                commands.spawn((
-                    AudioPlayer::new(game_assets.locked_sound.clone()),
-                    PlaybackSettings::DESPAWN,
-                ));
-            }
-            PlacingEvent::Locked(lines) => {
-                let sound = match lines {
-                    1 => game_assets.line_clear_1.clone(),
-                    2 => game_assets.line_clear_2.clone(),
-                    3 => game_assets.line_clear_3.clone(),
-                    4 => game_assets.line_clear_4.clone(),
-                    _ => unreachable!(),
-                };
-                commands.spawn((AudioPlayer::new(sound), PlaybackSettings::DESPAWN));
-            }
-            PlacingEvent::Placed => {
-                commands.spawn((
-                    AudioPlayer::new(game_assets.placed_sound.clone()),
-                    PlaybackSettings::DESPAWN,
-                ));
-            }
+fn play_audio_cue(cue: On<AudioCue>, mut commands: Commands, game_assets: Res<GameAssets>) {
+    let sound = match cue.event() {
+        AudioCue::Rotation => game_assets.rotation_sound.clone(),
+        AudioCue::HardDrop => game_assets.hard_drop_sound.clone(),
+        AudioCue::Hold => game_assets.hold_sound.clone(),
+        AudioCue::Placed => game_assets.placed_sound.clone(),
+        AudioCue::Locked(0) => game_assets.locked_sound.clone(),
+        AudioCue::Locked(1) => game_assets.line_clear_1.clone(),
+        AudioCue::Locked(2) => game_assets.line_clear_2.clone(),
+        AudioCue::Locked(3) => game_assets.line_clear_3.clone(),
+        AudioCue::Locked(4) => game_assets.line_clear_4.clone(),
+        AudioCue::Locked(lines) => {
+            warn!("ignoring invalid line clear audio cue: {lines}");
+            return;
         }
-    }
-}
+    };
 
-fn action_sounds(
-    mut commands: Commands,
-    mut ev_action: MessageReader<ActionEvent>,
-    game_assets: Res<GameAssets>,
-) {
-    for ev in ev_action.read() {
-        match ev {
-            ActionEvent::Hold => {
-                commands.spawn((
-                    AudioPlayer::new(game_assets.hold_sound.clone()),
-                    PlaybackSettings::DESPAWN,
-                ));
-            }
-            ActionEvent::Rotation(_, _, _, _) => {
-                commands.spawn((
-                    AudioPlayer::new(game_assets.rotation_sound.clone()),
-                    PlaybackSettings::DESPAWN,
-                ));
-            }
-            ActionEvent::HardDrop(_) => {
-                commands.spawn((
-                    AudioPlayer::new(game_assets.hard_drop_sound.clone()),
-                    PlaybackSettings::DESPAWN,
-                ));
-            }
-            _ => {}
-        }
-    }
+    commands.spawn((AudioPlayer::new(sound), PlaybackSettings::DESPAWN));
 }

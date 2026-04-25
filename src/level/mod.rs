@@ -1,7 +1,7 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::core::*;
-use crate::utils::*;
 use common::*;
 
 use crate::assets::GameAssets;
@@ -17,18 +17,46 @@ mod actions;
 mod common;
 mod game_over;
 mod score;
-mod setup;
 mod sound_effects;
 mod ui;
 
 pub struct LevelPlugin;
 
+type FallingBlockQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Coords, &'static mut Transform),
+    (With<FallingBlock>, Without<StaticBlock>, Without<Piece>),
+>;
+
+type ActivePieceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Coords, &'static Piece),
+    (
+        With<PieceController>,
+        Without<GhostPiece>,
+        Without<GhostBlock>,
+        Or<(Changed<Coords>, Changed<Piece>)>,
+    ),
+>;
+
+type GhostBlockQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static mut Coords, &'static mut Transform),
+    (
+        With<GhostBlock>,
+        Without<GhostPiece>,
+        Without<PieceController>,
+    ),
+>;
+
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             // states
-            .init_state::<LevelState>()
-            .init_state::<PlayingState>()
+            .add_sub_state::<PlayingState>()
             // events
             .add_message::<ActionEvent>()
             .add_message::<PlacingEvent>()
@@ -40,40 +68,59 @@ impl Plugin for LevelPlugin {
             .add_plugins(UIPlugin)
             // resources
             .init_resource::<LevelConfig>()
-            // enter setup immediately in game
-            .add_systems(
-                OnEnter(GameState::InGame),
-                continue_to_state(LevelState::Setup),
-            )
             // setup
-            .add_systems(
-                OnEnter(LevelState::Setup),
-                (level_cleanup, level_setup).chain(),
-            )
-            .add_systems(OnEnter(LevelState::Playing), piece_setup)
+            .add_systems(OnEnter(GameState::InGame), level_setup)
             // updates
             .add_systems(
                 Update,
-                (piece_fall, detect_placement, ghost_blocks).run_if(in_state(LevelState::Playing)),
+                (piece_setup, piece_fall, detect_placement, ghost_blocks)
+                    .run_if(in_state(GameState::InGame)),
             )
             .add_systems(Update, piece_lock.run_if(in_state(PlayingState::Locking)));
     }
 }
 
-// despawn recursively all entities with the LevelCleanup component
-fn level_cleanup(mut commands: Commands, mut query: Query<Entity, With<LevelCleanup>>) {
-    for entity in query.iter_mut() {
-        commands.entity(entity).despawn();
-    }
+#[derive(SystemParam)]
+struct LockQueries<'w, 's> {
+    piece: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static Piece,
+            &'static Coords,
+            &'static mut PieceController,
+            &'static Children,
+        ),
+    >,
+    board: Query<'w, 's, (Entity, &'static mut Board)>,
+    falling_blocks: FallingBlockQuery<'w, 's>,
+    static_blocks: Query<'w, 's, Entity, With<StaticBlock>>,
 }
 
+#[derive(SystemParam)]
+struct GhostQueries<'w, 's> {
+    active_piece: ActivePieceQuery<'w, 's>,
+    ghosts: Query<
+        'w,
+        's,
+        (
+            Entity,
+            &'static mut Piece,
+            &'static mut Transform,
+            Option<&'static Children>,
+        ),
+        With<GhostPiece>,
+    >,
+    ghost_blocks: GhostBlockQuery<'w, 's>,
+    board: Query<'w, 's, &'static Board>,
+}
+
+type ChangedPieceQuery<'w, 's> =
+    Query<'w, 's, (&'static Coords, &'static Piece), Or<(Changed<Coords>, Changed<Piece>)>>;
+
 // setup board and camera
-fn level_setup(
-    mut commands: Commands,
-    config: Res<LevelConfig>,
-    mut next_state: ResMut<NextState<LevelState>>,
-    texture_assets: Res<GameAssets>,
-) {
+fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets: Res<GameAssets>) {
     info!("level_setup");
 
     // Play field is 10×40, where rows above 20 are hidden or obstructed by the field frame to trick
@@ -90,17 +137,14 @@ fn level_setup(
             &config,
             &texture_assets,
             &cell,
-            BackgroundBlock,
+            BlockKind::Background,
         );
         block_ids.push(block_id);
     }
 
     let board_entity = commands
-        .spawn(BoardBundle {
-            board,
-            transform: Transform::default(),
-        })
-        .insert(LevelCleanup)
+        .spawn((board, Transform::default()))
+        .insert(DespawnOnExit(GameState::InGame))
         .insert(PieceHolder::default())
         .insert(PieceGenerator::default())
         .id();
@@ -115,11 +159,8 @@ fn level_setup(
             config.block_size * config.board_height as f32 / 2.,
             1.0,
         )),
-        LevelCleanup,
+        DespawnOnExit(GameState::InGame),
     ));
-
-    // switch to falling state
-    next_state.set(LevelState::Playing);
 }
 
 fn spawn_static_block(
@@ -128,16 +169,7 @@ fn spawn_static_block(
     assets: &Res<GameAssets>,
     cell: &Cell,
 ) -> Entity {
-    let piece_type = cell.cell_kind();
-    let color = piece_color(piece_type.as_some().unwrap());
-
-    let coords = Coords::from(cell.coords());
-    let transform = Transform::from_coords(&coords, &config);
-
-    let bundle = BlockBundle::with_texture(&config, &assets, transform, color);
-
-    // spawn static block
-    commands.spawn((bundle, StaticBlock)).id()
+    spawn_free_block(commands, config, assets, cell, BlockKind::Static)
 }
 
 fn piece_setup(
@@ -146,9 +178,7 @@ fn piece_setup(
     texture_assets: Res<GameAssets>,
     piece_query: Query<(Entity, &Piece, &PieceController)>,
     board_query: Query<&Board>,
-    mut next_level_state: ResMut<NextState<LevelState>>,
     mut next_game_state: ResMut<NextState<GameState>>,
-    mut next_playing_state: ResMut<NextState<PlayingState>>,
     mut generator_query: Query<&mut PieceGenerator>,
 ) {
     // if there is already a piece, don't spawn a new one
@@ -171,10 +201,8 @@ fn piece_setup(
     };
 
     // test collision and game over
-    if piece.collide_with(&board, spawn_coords) {
+    if piece.collide_with(board, spawn_coords) {
         info!("game over");
-        next_level_state.set(LevelState::GameOver);
-        next_playing_state.set(PlayingState::default());
         next_game_state.set(GameState::GameOver);
         return;
     }
@@ -184,10 +212,12 @@ fn piece_setup(
         &config,
         &texture_assets,
         &piece,
-        FallingBlock,
+        BlockKind::Falling,
     );
 
-    let piece_entity = commands.spawn(piece).id();
+    let piece_entity = commands
+        .spawn((piece, DespawnOnExit(GameState::InGame)))
+        .id();
 
     commands
         .entity(piece_entity)
@@ -209,21 +239,21 @@ fn piece_fall(
         &mut Coords,
         &mut Transform,
     )>,
-    mut board_query: Query<&mut Board>,
+    board_query: Query<&Board>,
     config: Res<LevelConfig>,
     time: Res<Time>,
 ) {
     let Ok((piece, mut piece_controller, mut coords, mut transform)) = query.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = board_query.single() else {
         return;
     };
 
     piece_controller.falling_timer.tick(time.delta());
 
     if piece_controller.falling_timer.is_finished() {
-        if let Ok(new_coords) = piece.try_move(&board, (coords.x, coords.y), MoveDirection::Down) {
+        if let Some(new_coords) = piece.try_move(board, (coords.x, coords.y), MoveDirection::Down) {
             (coords.x, coords.y) = new_coords;
             transform.update_coords(coords.as_ref(), &config);
         }
@@ -232,24 +262,19 @@ fn piece_fall(
 
 fn piece_lock(
     mut commands: Commands,
-    mut query: Query<(Entity, &Piece, &Coords, &mut PieceController, &Children)>,
-    mut board_query: Query<(Entity, &mut Board)>,
-    mut query_children: Query<
-        (&mut Coords, &mut Transform),
-        (With<FallingBlock>, Without<StaticBlock>, Without<Piece>),
-    >,
-    mut query_static_blocks: Query<Entity, With<StaticBlock>>,
+    mut queries: LockQueries,
     time: Res<Time>,
     config: Res<LevelConfig>,
     assets: Res<GameAssets>,
-    mut next_state: ResMut<NextState<LevelState>>,
+    mut next_playing_state: ResMut<NextState<PlayingState>>,
     mut ev_placing: MessageWriter<PlacingEvent>,
 ) {
-    let Ok((piece_entity, piece, coords, mut piece_controller, children)) = query.single_mut()
+    let Ok((piece_entity, piece, coords, mut piece_controller, children)) =
+        queries.piece.single_mut()
     else {
         return;
     };
-    let Ok((board_entity, mut board)) = board_query.single_mut() else {
+    let Ok((board_entity, mut board)) = queries.board.single_mut() else {
         return;
     };
 
@@ -260,8 +285,7 @@ fn piece_lock(
     {
         info!("piece_place");
         piece_controller.hard_dropped = false; // reset hard drop flag
-                                               // switch to piece setup state and finalize piece
-        next_state.set(LevelState::Playing); // enter the next playing loop
+        next_playing_state.set(PlayingState::Falling);
 
         // hand over children to board
         commands.entity(board_entity).add_children(children);
@@ -270,7 +294,8 @@ fn piece_lock(
 
         for child in children.iter() {
             // convert the coordinates of the child to board coordinates
-            let (mut child_coords, mut child_transform) = query_children.get_mut(child).unwrap();
+            let (mut child_coords, mut child_transform) =
+                queries.falling_blocks.get_mut(child).unwrap();
             child_coords.x += coords.x;
             child_coords.y += coords.y;
 
@@ -292,7 +317,7 @@ fn piece_lock(
 
         if lines_cleared > 0 {
             // remove all static blocks
-            for entity in query_static_blocks.iter_mut() {
+            for entity in queries.static_blocks.iter_mut() {
                 commands.entity(entity).despawn();
             }
 
@@ -311,32 +336,24 @@ fn piece_lock(
         }
 
         ev_placing.write(PlacingEvent::Locked(lines_cleared));
+        commands.trigger(AudioCue::Locked(lines_cleared));
     }
 }
 
 fn ghost_blocks(
     mut commands: Commands,
-    mut piece_query: Query<
-        (&Coords, &Piece),
-        (With<PieceController>, Or<(Changed<Coords>, Changed<Piece>)>),
-    >, // either the piece or its coords changed
-    ghost_query: Query<Entity, With<GhostPiece>>,
-    mut board_query: Query<&mut Board>,
+    mut queries: GhostQueries,
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
 ) {
-    if piece_query.is_empty() {
+    if queries.active_piece.is_empty() {
         return;
     }
 
-    for entity in ghost_query.iter() {
-        commands.entity(entity).despawn();
-    }
-
-    let Ok((coords, piece)) = piece_query.single_mut() else {
+    let Ok((coords, piece)) = queries.active_piece.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = queries.board.single() else {
         return;
     };
 
@@ -346,8 +363,8 @@ fn ghost_blocks(
 
     let mut can_move = false;
 
-    while let Ok(new_coords) =
-        ghost_piece.try_move(&board, ghost_coords.into(), MoveDirection::Down)
+    while let Some(new_coords) =
+        ghost_piece.try_move(board, ghost_coords.into(), MoveDirection::Down)
     {
         ghost_coords = Coords::from(new_coords);
 
@@ -356,30 +373,85 @@ fn ghost_blocks(
     }
 
     if !can_move {
+        for (entity, _, _, _) in queries.ghosts.iter_mut() {
+            commands.entity(entity).despawn();
+        }
         return;
     }
 
-    let block_entities = ghost_piece
-        .board()
-        .cells()
-        .iter()
-        .map(|cell| spawn_free_block(&mut commands, &config, &texture_assets, cell, GhostBlock))
-        .collect::<Vec<_>>();
+    let ghost_board = ghost_piece.board();
+    let ghost_cells = ghost_board.cells();
 
-    let piece_entity = commands
-        .spawn(ghost_piece)
-        .insert(GhostPiece)
-        .insert(ghost_transform)
-        .id();
-    commands.entity(piece_entity).add_children(&block_entities);
+    let Ok((piece_entity, mut existing_piece, mut transform, children)) =
+        queries.ghosts.single_mut()
+    else {
+        let block_entities = ghost_cells
+            .iter()
+            .map(|cell| {
+                spawn_free_block(
+                    &mut commands,
+                    &config,
+                    &texture_assets,
+                    cell,
+                    BlockKind::Ghost,
+                )
+            })
+            .collect::<Vec<_>>();
+
+        let piece_entity = commands
+            .spawn((
+                ghost_piece,
+                ghost_transform,
+                DespawnOnExit(GameState::InGame),
+            ))
+            .insert(GhostPiece)
+            .id();
+        commands.entity(piece_entity).add_children(&block_entities);
+        return;
+    };
+
+    *existing_piece = ghost_piece;
+    *transform = ghost_transform;
+
+    let Some(children) = children else {
+        return;
+    };
+
+    if children.len() != ghost_cells.len() {
+        commands.entity(piece_entity).despawn_related::<Children>();
+        let block_entities = ghost_cells
+            .iter()
+            .map(|cell| {
+                spawn_free_block(
+                    &mut commands,
+                    &config,
+                    &texture_assets,
+                    cell,
+                    BlockKind::Ghost,
+                )
+            })
+            .collect::<Vec<_>>();
+        commands.entity(piece_entity).add_children(&block_entities);
+        return;
+    }
+
+    for (child_entity, cell) in children.iter().zip(ghost_cells.iter()) {
+        let Ok((mut child_coords, mut child_transform)) =
+            queries.ghost_blocks.get_mut(child_entity)
+        else {
+            continue;
+        };
+        child_coords.set_if_neq(Coords::from(cell.coords()));
+        child_transform.update_coords(child_coords.as_ref(), &config);
+    }
 }
 
 fn detect_placement(
-    mut piece_query: Query<(&Coords, &Piece), Or<(Changed<Coords>, Changed<Piece>)>>, // either the piece or its coords changed
-    mut board_query: Query<&mut Board>,
+    mut commands: Commands,
+    mut piece_query: ChangedPieceQuery, // either the piece or its coords changed
+    board_query: Query<&Board>,
     mut next_state: ResMut<NextState<PlayingState>>,
     current_state: Res<State<PlayingState>>,
-    mut ev_placing: MessageWriter<PlacingEvent>,
 ) {
     if piece_query.is_empty() {
         return;
@@ -388,24 +460,55 @@ fn detect_placement(
     let Ok((coords, piece)) = piece_query.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = board_query.single() else {
         return;
     };
 
     let current_state = current_state.get();
 
     if piece
-        .try_move(&board, (coords.x, coords.y), MoveDirection::Down)
-        .is_err()
+        .try_move(board, (coords.x, coords.y), MoveDirection::Down)
+        .is_none()
     {
         if current_state == &Falling {
             next_state.set(PlayingState::Locking);
             info!("Transitioning to Placing state.");
-
-            ev_placing.write(PlacingEvent::Placed);
+            commands.trigger(AudioCue::Placed);
         }
     } else if current_state == &PlayingState::Locking {
         next_state.set(Falling);
         info!("Transitioning to Falling state.");
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn level_plugin_systems_initialize_without_query_conflicts() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<GameState>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(GameAssets {
+                block_texture: default(),
+                hard_drop_sound: default(),
+                placed_sound: default(),
+                line_clear_1: default(),
+                line_clear_2: default(),
+                line_clear_3: default(),
+                line_clear_4: default(),
+                locked_sound: default(),
+                hold_sound: default(),
+                rotation_sound: default(),
+                font: default(),
+            })
+            .add_plugins(LevelPlugin);
+
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::InGame);
+        app.update();
     }
 }

@@ -5,18 +5,19 @@ mod score_views;
 use bevy::prelude::*;
 
 use crate::core::PieceGenerator;
-use crate::level::common::{LevelConfig, LevelState, PieceHolder, PlayingState};
+use crate::level::common::{LevelConfig, PieceHolder, PlayingState};
 use crate::level::score::Scorer;
 use crate::level::ui::piece_previewer::*;
 use crate::level::ui::placement_timer_bar::*;
 use crate::level::ui::score_views::*;
+use crate::GameState;
 
 pub(crate) struct UIPlugin;
 
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            OnEnter(LevelState::Setup),
+            OnEnter(GameState::InGame),
             (
                 spawn_piece_previewer,
                 spawn_hold_viewer,

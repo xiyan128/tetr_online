@@ -11,7 +11,7 @@ pub struct PieceGenerator {
 
 impl PieceGenerator {
     pub fn new() -> Self {
-        let mut bag = PieceType::all();
+        let mut bag = Vec::from(PieceType::all());
         let mut rng = rand::rng();
         bag.shuffle(&mut rng);
 
@@ -19,7 +19,7 @@ impl PieceGenerator {
     }
 
     fn refill_bag(&mut self) {
-        let mut next_bag = PieceType::all();
+        let mut next_bag = Vec::from(PieceType::all());
         let mut rng = rand::rng();
         next_bag.shuffle(&mut rng);
 
@@ -61,11 +61,22 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_piece_generator() {
+    fn generator_yields_each_piece_once_per_bag() {
         let mut generator = PieceGenerator::new();
-        for _ in 0..14 {
-            let piece = generator.next().unwrap();
-            println!("{:?}", piece);
-        }
+        let mut pieces = (0..PieceType::LEN)
+            .map(|_| generator.next().unwrap())
+            .collect::<Vec<_>>();
+        pieces.sort_by_key(|piece_type| *piece_type as u8);
+
+        assert_eq!(pieces, PieceType::all());
+    }
+
+    #[test]
+    fn preview_does_not_consume_the_bag() {
+        let mut generator = PieceGenerator::new();
+        let preview = generator.preview();
+
+        assert_eq!(preview.len(), PieceType::LEN);
+        assert_eq!(generator.next(), preview.first().copied());
     }
 }

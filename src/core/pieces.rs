@@ -1,5 +1,5 @@
 use crate::core::board::{Board, CellKind};
-use bevy::prelude::{info, Component};
+use bevy::prelude::{info, Component, Transform};
 use std::fmt::Debug;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -14,16 +14,18 @@ pub enum PieceType {
 }
 
 impl PieceType {
-    pub fn all() -> Vec<PieceType> {
-        vec![
-            PieceType::I,
-            PieceType::J,
-            PieceType::L,
-            PieceType::O,
-            PieceType::S,
-            PieceType::T,
-            PieceType::Z,
-        ]
+    pub const ALL: [PieceType; Self::LEN] = [
+        PieceType::I,
+        PieceType::J,
+        PieceType::L,
+        PieceType::O,
+        PieceType::S,
+        PieceType::T,
+        PieceType::Z,
+    ];
+
+    pub fn all() -> [PieceType; Self::LEN] {
+        Self::ALL
     }
 
     pub const LEN: usize = 7;
@@ -38,13 +40,17 @@ pub enum PieceRotation {
 }
 
 impl PieceRotation {
-    pub fn all() -> Vec<PieceRotation> {
-        vec![
-            PieceRotation::R0,
-            PieceRotation::R90,
-            PieceRotation::R180,
-            PieceRotation::R270,
-        ]
+    #[cfg(test)]
+    pub const ALL: [PieceRotation; 4] = [
+        PieceRotation::R0,
+        PieceRotation::R90,
+        PieceRotation::R180,
+        PieceRotation::R270,
+    ];
+
+    #[cfg(test)]
+    pub fn all() -> [PieceRotation; 4] {
+        Self::ALL
     }
 }
 
@@ -78,6 +84,7 @@ pub enum MoveDirection {
 }
 
 #[derive(Component, Clone, Debug)]
+#[require(Transform)]
 pub struct Piece {
     piece_type: PieceType,
     rotation: PieceRotation,
@@ -93,17 +100,6 @@ impl Piece {
 
     pub(crate) fn rotation(&self) -> PieceRotation {
         self.rotation
-    }
-
-    pub fn rotate(&mut self) {
-        self.rotation += PieceRotation::R90;
-    }
-
-    pub fn rotate_n(&mut self, n: u8) {
-        let n = n.rem_euclid(4);
-        for _ in 0..n {
-            self.rotate();
-        }
     }
 
     pub fn rotate_to(&mut self, rotation: PieceRotation) {
@@ -184,7 +180,7 @@ impl Piece {
         board
     }
 
-    fn rotate_shape(height: usize, shape: &mut Vec<(isize, isize)>, n: u8) {
+    fn rotate_shape(height: usize, shape: &mut [(isize, isize)], n: u8) {
         for _ in 0..n {
             for (x, y) in shape.iter_mut() {
                 let new_x = *y;
@@ -215,7 +211,7 @@ impl Piece {
         board: &Board,
         offset: (isize, isize),
         direction: MoveDirection,
-    ) -> Result<(isize, isize), ()> {
+    ) -> Option<(isize, isize)> {
         let (x_offset, y_offset) = offset;
         let (x_offset, y_offset) = match direction {
             MoveDirection::Left => (x_offset - 1, y_offset),
@@ -224,9 +220,9 @@ impl Piece {
         };
 
         if self.collide_with(board, (x_offset, y_offset)) {
-            Err(())
+            None
         } else {
-            Ok((x_offset, y_offset)) // return new offset
+            Some((x_offset, y_offset))
         }
     }
 
@@ -235,11 +231,11 @@ impl Piece {
         board: &Board,
         offset: (isize, isize),
         rotation: PieceRotation,
-    ) -> Result<(PieceRotation, (isize, isize), usize), ()> {
+    ) -> Option<(PieceRotation, (isize, isize), usize)> {
         use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
 
         if self.piece_type == PieceType::O {
-            return Ok((PieceRotation::R0, offset, 0)); // O piece doesn't rotate
+            return Some((PieceRotation::R0, offset, 0)); // O piece doesn't rotate
         }
 
         let kicks_table = match self.piece_type {
@@ -271,13 +267,13 @@ impl Piece {
 
         for (set_idx, (x_offset, y_offset)) in kicks.iter().enumerate() {
             let new_offset = (offset.0 + x_offset, offset.1 + y_offset);
-            if let Ok(new_rotation) = self.try_rotate(board, new_offset, rotation) {
+            if let Some(new_rotation) = self.try_rotate(board, new_offset, rotation) {
                 info!("Kicked to {:?} (set {:?})", (x_offset, y_offset), set_idx);
-                return Ok((new_rotation, new_offset, set_idx));
+                return Some((new_rotation, new_offset, set_idx));
             }
         }
 
-        Err(())
+        None
     }
 
     pub fn try_rotate(
@@ -285,15 +281,15 @@ impl Piece {
         board: &Board,
         offset: (isize, isize),
         rotation: PieceRotation,
-    ) -> Result<PieceRotation, ()> {
+    ) -> Option<PieceRotation> {
         let (x_offset, y_offset) = offset;
         let mut new_piece = self.clone();
         new_piece.rotate_to(rotation);
 
         if new_piece.collide_with(board, (x_offset, y_offset)) {
-            Err(())
+            None
         } else {
-            Ok(new_piece.rotation) // return new rotation
+            Some(new_piece.rotation)
         }
     }
 }
@@ -309,40 +305,83 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_piece_rotation() {
-        let mut piece = Piece::new(PieceType::I);
-        assert_eq!(piece.board_size(), (4, 4));
-        assert_eq!(piece.board().rows().len(), 4);
-        assert_eq!(piece.board().rows()[0].len(), 4);
-
-        piece.rotate();
-        assert_eq!(piece.board_size(), (4, 4));
-        assert_eq!(piece.board().rows().len(), 4);
-        assert_eq!(piece.board().rows()[0].len(), 4);
-    }
-
-    #[test]
-    fn test_piece_display() {
-        // print all pieces and rotations
+    fn every_piece_has_four_blocks_in_every_rotation() {
         for piece_type in PieceType::all() {
+            let mut piece = Piece::new(piece_type);
+
             for rotation in PieceRotation::all() {
-                let mut piece = Piece::new(piece_type);
-                piece.rotation = rotation;
-                println!("{}", piece.board());
+                piece.rotate_to(rotation);
+                assert_eq!(
+                    piece.board().cells().len(),
+                    4,
+                    "{piece_type:?} at {rotation:?} should occupy four cells"
+                );
             }
         }
-
-        let mut piece = Piece::new(PieceType::L);
-
-        println!("{}", piece.board());
     }
 
     #[test]
-    fn test_avatars() {
+    fn o_piece_rotation_is_a_noop() {
+        let board = Board::new(10, 20);
+        let piece = Piece::new(PieceType::O);
+
+        assert_eq!(
+            piece.try_rotate_with_kicks(&board, (4, 18), PieceRotation::R90),
+            Some((PieceRotation::R0, (4, 18), 0))
+        );
+    }
+
+    #[test]
+    fn avatar_boards_are_tightly_bounded() {
         for piece_type in PieceType::all() {
             let piece = Piece::new(piece_type);
             let avatar = piece.avatar_board();
-            println!("{:?}: \n{}", piece_type, piece.avatar_board());
+
+            assert_eq!(avatar.cells().len(), 4);
+            assert!(avatar
+                .cells()
+                .iter()
+                .all(|cell| cell.x() >= 0 && cell.y() >= 0));
+            assert!(avatar.cells().iter().any(|cell| cell.x() == 0));
+            assert!(avatar.cells().iter().any(|cell| cell.y() == 0));
         }
+    }
+
+    #[test]
+    fn movement_returns_new_position_when_unblocked() {
+        let board = Board::new(10, 20);
+        let piece = Piece::new(PieceType::T);
+
+        assert_eq!(
+            piece.try_move(&board, (4, 18), MoveDirection::Left),
+            Some((3, 18))
+        );
+        assert_eq!(
+            piece.try_move(&board, (4, 18), MoveDirection::Right),
+            Some((5, 18))
+        );
+        assert_eq!(
+            piece.try_move(&board, (4, 18), MoveDirection::Down),
+            Some((4, 17))
+        );
+    }
+
+    #[test]
+    fn movement_returns_none_on_collision() {
+        let board = Board::new(10, 20);
+        let piece = Piece::new(PieceType::T);
+
+        assert_eq!(piece.try_move(&board, (-1, 0), MoveDirection::Left), None);
+    }
+
+    #[test]
+    fn wall_kick_can_find_a_valid_rotation_offset() {
+        let board = Board::new(10, 20);
+        let piece = Piece::new(PieceType::T);
+
+        assert_eq!(
+            piece.try_rotate_with_kicks(&board, (8, 5), PieceRotation::R90),
+            Some((PieceRotation::R90, (7, 5), 1))
+        );
     }
 }

@@ -1,12 +1,14 @@
+use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
 use crate::level::common;
 use crate::level::common::{
-    spawn_piece_blocks, ActionEvent, Coords, FallingBlock, LevelConfig, LevelState, MatchCoords,
+    spawn_piece_blocks, ActionEvent, AudioCue, BlockKind, Coords, LevelConfig, MatchCoords,
     PieceController, PieceHolder,
 };
+use crate::GameState;
 use itertools::iproduct;
 use std::iter::zip;
 
@@ -22,46 +24,64 @@ impl Plugin for ActionsPlugin {
                 handle_hard_drop,
                 swap_hold,
             )
-                .run_if(in_state(LevelState::Playing)),
+                .run_if(in_state(GameState::InGame)),
         );
     }
 }
 
+#[derive(SystemParam)]
+struct RotationQueries<'w, 's> {
+    piece: Query<
+        'w,
+        's,
+        (
+            &'static mut Piece,
+            &'static mut Coords,
+            &'static mut Transform,
+            &'static Children,
+        ),
+    >,
+    children: Query<'w, 's, (&'static mut Coords, &'static mut Transform), Without<Piece>>,
+    board: Query<'w, 's, &'static Board>,
+    controller: Query<'w, 's, &'static mut PieceController>,
+}
+
+#[derive(SystemParam)]
+struct HoldQueries<'w, 's> {
+    holder: Query<'w, 's, &'static mut PieceHolder>,
+    piece: Query<'w, 's, (Entity, &'static Piece, &'static mut PieceController)>,
+    generator: Query<'w, 's, &'static mut PieceGenerator>,
+}
+
 fn move_piece_and_update(
-    config: &Res<LevelConfig>,
-    piece: &mut Mut<Piece>,
-    coords: &mut Mut<'_, Coords>,
-    transform: &mut Mut<Transform>,
-    board: &Mut<Board>,
+    config: &LevelConfig,
+    piece: &Piece,
+    coords: &mut Coords,
+    transform: &mut Transform,
+    board: &Board,
     movement: MoveDirection,
 ) -> bool {
-    if let Ok(new_coords) = piece.try_move(&board, (coords.x, coords.y), movement) {
+    if let Some(new_coords) = piece.try_move(board, (coords.x, coords.y), movement) {
         (coords.x, coords.y) = new_coords;
-        transform.update_coords(coords.as_ref(), &config);
+        transform.update_coords(coords, config);
         true
     } else {
         false
     }
 }
 
-pub(crate) fn handle_movements(
-    mut query: Query<(
-        &mut Piece,
-        &mut Coords,
-        &mut Transform,
-        &mut PieceController,
-    )>,
-    mut board_query: Query<&mut Board>,
+fn handle_movements(
+    mut query: Query<(&Piece, &mut Coords, &mut Transform, &mut PieceController)>,
+    board_query: Query<&Board>,
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     time: Res<Time>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    let Ok((mut piece, mut coords, mut transform, mut piece_controller)) = query.single_mut()
-    else {
+    let Ok((piece, mut coords, mut transform, mut piece_controller)) = query.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = board_query.single() else {
         return;
     };
 
@@ -110,14 +130,7 @@ pub(crate) fn handle_movements(
 
     if piece_controller.movement_timer.is_finished() || just_pressed {
         if let Some(movement) = movement {
-            if move_piece_and_update(
-                &config,
-                &mut piece,
-                &mut coords,
-                &mut transform,
-                &board,
-                movement,
-            ) {
+            if move_piece_and_update(&config, piece, &mut coords, &mut transform, board, movement) {
                 ev_action.write(ActionEvent::Movement(movement));
                 piece_controller.locking_timer.reset();
                 piece_controller.movement_timer.set_duration(duration);
@@ -129,23 +142,18 @@ pub(crate) fn handle_movements(
     }
 }
 
-pub(crate) fn handle_hard_drop(
-    mut query: Query<(
-        &mut Piece,
-        &mut Coords,
-        &mut Transform,
-        &mut PieceController,
-    )>,
-    mut board_query: Query<&mut Board>,
+fn handle_hard_drop(
+    mut commands: Commands,
+    mut query: Query<(&Piece, &mut Coords, &mut Transform, &mut PieceController)>,
+    board_query: Query<&Board>,
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    let Ok((mut piece, mut coords, mut transform, mut piece_controller)) = query.single_mut()
-    else {
+    let Ok((piece, mut coords, mut transform, mut piece_controller)) = query.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = board_query.single() else {
         return;
     };
 
@@ -155,10 +163,10 @@ pub(crate) fn handle_hard_drop(
         let mut lines = 0;
         while move_piece_and_update(
             &config,
-            &mut piece,
+            piece,
             &mut coords,
             &mut transform,
-            &board,
+            board,
             MoveDirection::Down,
         ) {
             piece_controller.locking_timer.reset();
@@ -167,25 +175,24 @@ pub(crate) fn handle_hard_drop(
         piece_controller.hard_dropped = true;
 
         ev_action.write(ActionEvent::HardDrop(lines));
+        commands.trigger(AudioCue::HardDrop);
     }
 }
 
-pub(crate) fn handle_rotations(
-    mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &Children)>,
-    mut children_query: Query<(&mut Coords, &mut Transform), Without<Piece>>,
-    mut board_query: Query<&mut Board>,
-    mut piece_controller_query: Query<&mut PieceController>,
+fn handle_rotations(
+    mut commands: Commands,
+    mut queries: RotationQueries,
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    let Ok((mut piece, mut coords, mut transform, children)) = query.single_mut() else {
+    let Ok((mut piece, mut coords, mut transform, children)) = queries.piece.single_mut() else {
         return;
     };
-    let Ok(mut piece_controller) = piece_controller_query.single_mut() else {
+    let Ok(mut piece_controller) = queries.controller.single_mut() else {
         return;
     };
-    let Ok(board) = board_query.single_mut() else {
+    let Ok(board) = queries.board.single() else {
         return;
     };
 
@@ -200,8 +207,8 @@ pub(crate) fn handle_rotations(
     };
 
     if let Some(rotation_n) = rotation {
-        if let Ok((rotation, new_coords, wall_kick_set)) =
-            piece.try_rotate_with_kicks(&board, (coords.x, coords.y), rotation_n)
+        if let Some((rotation, new_coords, wall_kick_set)) =
+            piece.try_rotate_with_kicks(board, (coords.x, coords.y), rotation_n)
         {
             piece.rotate_to(rotation);
 
@@ -209,7 +216,7 @@ pub(crate) fn handle_rotations(
 
             for (child_entity, cell) in zip(children.iter(), piece.board().cells().iter()) {
                 let (mut child_coords, mut child_transform) =
-                    children_query.get_mut(child_entity).unwrap();
+                    queries.children.get_mut(child_entity).unwrap();
                 child_coords.set_if_neq(Coords::from(cell.coords()));
                 child_transform.update_coords(child_coords.as_ref(), &config);
             }
@@ -228,26 +235,25 @@ pub(crate) fn handle_rotations(
             }
 
             ev_action.write(ActionEvent::Rotation(
-                rotation,           // rotation that was performed
                 piece.piece_type(), // type of piece that was rotated
                 t_spin_corners,     // (only for t-spin) number of corners occupied by other blocks
                 wall_kick_set != 0, // if wall kick was performed
             ));
+            commands.trigger(AudioCue::Rotation);
         }
     }
 }
 
 fn swap_hold(
     mut commands: Commands,
-    mut holder_query: Query<&mut PieceHolder>,
-    mut piece_query: Query<(Entity, &mut Piece, &mut PieceController)>,
+    mut queries: HoldQueries,
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
-    mut generator_query: Query<&mut PieceGenerator>,
     keyboard: Res<ButtonInput<KeyCode>>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    let Ok((current_piece_entity, current_piece, mut piece_controller)) = piece_query.single_mut()
+    let Ok((current_piece_entity, current_piece, mut piece_controller)) =
+        queries.piece.single_mut()
     else {
         return;
     };
@@ -255,10 +261,10 @@ fn swap_hold(
         return;
     }
 
-    let Ok(mut holder) = holder_query.single_mut() else {
+    let Ok(mut holder) = queries.holder.single_mut() else {
         return;
     };
-    let Ok(mut generator) = generator_query.single_mut() else {
+    let Ok(mut generator) = queries.generator.single_mut() else {
         return;
     };
 
@@ -272,11 +278,13 @@ fn swap_hold(
         &config,
         &texture_assets,
         &next_piece,
-        FallingBlock,
+        BlockKind::Falling,
     );
 
     let spawn_coords = config.spawn_coords(&next_piece);
-    let piece_entity = commands.spawn(next_piece).id();
+    let piece_entity = commands
+        .spawn((next_piece, DespawnOnExit(GameState::InGame)))
+        .id();
 
     // spawn new piece
     commands
@@ -301,6 +309,7 @@ fn swap_hold(
 
     piece_controller.used_hold = true;
     ev_action.write(ActionEvent::Hold);
+    commands.trigger(AudioCue::Hold);
 }
 
 fn key_for_movement(direction: MoveDirection) -> KeyCode {

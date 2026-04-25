@@ -1,18 +1,20 @@
 use crate::assets::GameAssets;
-use crate::core::{Board, Cell, MoveDirection, Piece, PieceRotation, PieceType};
-use bevy::asset::Handle;
+use crate::core::{Cell, MoveDirection, Piece, PieceType};
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
-    Bundle, Color, Commands, Component, Entity, Image, Message, Res, Resource, Sprite, States,
-    Timer, TimerMode, Transform,
+    Color, Commands, Component, Entity, Event, Message, Res, Resource, Sprite, SubStates, Timer,
+    TimerMode, Transform,
 };
 use bevy::sprite::Anchor;
+use bevy::state::state::StateSet;
 use std::time::Duration;
+
+use crate::GameState;
 
 #[derive(Message, Clone, Debug)]
 pub enum ActionEvent {
-    Rotation(PieceRotation, PieceType, usize, bool), // rotation, piece type, occupied cells (only for T-Spin), wall kick
+    Rotation(PieceType, usize, bool), // piece type, occupied cells (only for T-Spin), wall kick
     Movement(MoveDirection),
     HardDrop(usize),
     Hold,
@@ -21,19 +23,19 @@ pub enum ActionEvent {
 #[derive(Message, Clone)]
 pub enum PlacingEvent {
     Locked(usize), // lines cleared
+}
+
+#[derive(Event, Clone, Debug)]
+pub enum AudioCue {
+    Rotation,
+    HardDrop,
+    Hold,
     Placed,
+    Locked(usize),
 }
 
-#[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
-pub enum LevelState {
-    #[default]
-    Idle,
-    Setup,
-    Playing,
-    GameOver,
-}
-
-#[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
+#[derive(SubStates, PartialEq, Eq, Debug, Clone, Hash, Default)]
+#[source(GameState = GameState::InGame)]
 pub enum PlayingState {
     #[default]
     Falling,
@@ -82,9 +84,6 @@ impl LevelConfig {
     }
 }
 
-#[derive(Component)]
-pub struct LevelCleanup;
-
 #[derive(Component, PartialEq, Eq, Debug, Clone, Hash)]
 pub(crate) struct Coords {
     pub(crate) x: isize,
@@ -97,14 +96,14 @@ impl From<(isize, isize)> for Coords {
     }
 }
 
-impl Into<(isize, isize)> for Coords {
-    fn into(self) -> (isize, isize) {
-        (self.x, self.y)
+impl From<Coords> for (isize, isize) {
+    fn from(coords: Coords) -> Self {
+        (coords.x, coords.y)
     }
 }
 
-#[derive(PartialEq)]
-pub enum BlockComponentKind {
+#[derive(Copy, Clone, PartialEq, Eq)]
+pub enum BlockKind {
     Background,
     Falling,
     Static,
@@ -112,55 +111,28 @@ pub enum BlockComponentKind {
     Preview,
 }
 
-pub trait BlockComponent: Component {
-    fn kind(&self) -> BlockComponentKind;
-}
-
 #[derive(Component, Clone)]
+#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct BackgroundBlock;
 
-impl BlockComponent for BackgroundBlock {
-    fn kind(&self) -> BlockComponentKind {
-        BlockComponentKind::Background
-    }
-}
-
 #[derive(Component, Clone)]
+#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct FallingBlock;
 
-impl BlockComponent for FallingBlock {
-    fn kind(&self) -> BlockComponentKind {
-        BlockComponentKind::Falling
-    }
-}
-
 #[derive(Component, Clone)]
+#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct StaticBlock;
 
-impl BlockComponent for StaticBlock {
-    fn kind(&self) -> BlockComponentKind {
-        BlockComponentKind::Static
-    }
-}
+#[derive(Component, Clone)]
+#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
+pub struct GhostBlock;
 
 #[derive(Component, Clone)]
-pub struct GhostBlock;
+#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
+pub struct PreviewBlock;
 
 #[derive(Component)]
 pub struct GhostPiece;
-
-impl BlockComponent for GhostBlock {
-    fn kind(&self) -> BlockComponentKind {
-        BlockComponentKind::Ghost
-    }
-}
-
-#[derive(Bundle)]
-pub struct BlockBundle {
-    pub(crate) sprite: Sprite,
-    pub(crate) transform: Transform,
-    pub(crate) anchor: Anchor,
-}
 
 #[derive(Component)]
 pub struct PieceController {
@@ -189,12 +161,6 @@ impl Default for PieceController {
     }
 }
 
-#[derive(Bundle)]
-pub struct BoardBundle {
-    pub(crate) board: Board,
-    pub(crate) transform: Transform,
-}
-
 pub(crate) trait MatchCoords {
     fn from_coords(coords: &Coords, config: &LevelConfig) -> Self;
     fn update_coords(&mut self, coords: &Coords, config: &LevelConfig);
@@ -213,47 +179,6 @@ impl MatchCoords for Transform {
     }
 }
 
-impl BlockBundle {
-    pub(crate) fn with_texture(
-        config: &LevelConfig,
-        texture_assets: &GameAssets,
-        transform: Transform,
-        color: Color,
-    ) -> Self {
-        return BlockBundle::new(
-            config,
-            transform,
-            color,
-            texture_assets.block_texture.clone(),
-        );
-    }
-
-    pub(crate) fn transparent(config: &LevelConfig, transform: Transform, color: Color) -> Self {
-        Self {
-            sprite: Sprite::from_color(color, Vec2::new(config.block_size, config.block_size)),
-            transform,
-            anchor: Anchor::BOTTOM_LEFT,
-        }
-    }
-
-    fn new(
-        config: &LevelConfig,
-        transform: Transform,
-        color: Color,
-        texture: Handle<Image>,
-    ) -> Self {
-        let mut sprite = Sprite::from_image(texture);
-        sprite.custom_size = Some(Vec2::new(config.block_size, config.block_size));
-        sprite.color = color;
-
-        Self {
-            sprite,
-            transform,
-            anchor: Anchor::BOTTOM_LEFT,
-        }
-    }
-}
-
 #[derive(Component, Default)]
 pub struct PieceHolder {
     pub(crate) piece: Option<Piece>,
@@ -265,68 +190,82 @@ pub fn spawn_free_block(
     config: &LevelConfig,
     texture_assets: &Res<GameAssets>,
     cell: &Cell,
-    block_component: impl BlockComponent,
+    block_kind: BlockKind,
 ) -> Entity {
     let (x, y) = cell.coords();
 
-    let block_kind = block_component.kind();
-
     let color = match block_kind {
-        BlockComponentKind::Falling | BlockComponentKind::Preview | BlockComponentKind::Static => {
+        BlockKind::Falling | BlockKind::Preview | BlockKind::Static => {
             piece_color(cell.cell_kind().unwrap())
         }
-        BlockComponentKind::Ghost => Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
-        BlockComponentKind::Background => Color::srgb(0.1, 0.1, 0.1),
+        BlockKind::Ghost => Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
+        BlockKind::Background => Color::srgb(0.1, 0.1, 0.1),
     };
 
     let coords = Coords::from((x, y));
-    let transform = Transform::from_coords(&coords, &config);
+    let mut transform = Transform::from_coords(&coords, config);
 
-    let mut bundle = match block_kind {
-        BlockComponentKind::Background => BlockBundle::transparent(&config, transform, color),
-        _ => BlockBundle::with_texture(&config, &texture_assets, transform, color),
+    let sprite = match block_kind {
+        BlockKind::Background => {
+            Sprite::from_color(color, Vec2::new(config.block_size, config.block_size))
+        }
+        _ => {
+            let mut sprite = Sprite::from_image(texture_assets.block_texture.clone());
+            sprite.custom_size = Some(Vec2::new(config.block_size, config.block_size));
+            sprite.color = color;
+            sprite
+        }
     };
 
-    bundle.transform.translation.z = match block_kind {
-        BlockComponentKind::Ghost => -0.1, // ghost is behind falling block
-        BlockComponentKind::Background => -1., // background is behind everything
+    transform.translation.z = match block_kind {
+        BlockKind::Ghost => -0.1,     // ghost is behind falling block
+        BlockKind::Background => -1., // background is behind everything
         _ => 0.,
     };
 
-    // spawn falling block
     let entity = commands
-        .spawn(bundle)
-        .insert(coords)
-        .insert(block_component)
+        .spawn((sprite, transform, Anchor::BOTTOM_LEFT, coords))
         .id();
+
+    match block_kind {
+        BlockKind::Background => {
+            commands.entity(entity).insert(BackgroundBlock);
+        }
+        BlockKind::Falling => {
+            commands.entity(entity).insert(FallingBlock);
+        }
+        BlockKind::Static => {
+            commands.entity(entity).insert(StaticBlock);
+        }
+        BlockKind::Ghost => {
+            commands.entity(entity).insert(GhostBlock);
+        }
+        BlockKind::Preview => {
+            commands.entity(entity).insert(PreviewBlock);
+        }
+    }
+
     entity
 }
 
 pub fn spawn_piece_blocks(
-    mut commands: &mut Commands,
+    commands: &mut Commands,
     config: &LevelConfig,
     texture_assets: &Res<GameAssets>,
     piece: &Piece,
-    block_component: impl BlockComponent + Clone,
+    block_kind: BlockKind,
 ) -> Vec<Entity> {
-    piece
-        .board()
+    let board = piece.board();
+
+    board
         .cells()
-        .iter()
-        .map(|&cell| {
-            spawn_free_block(
-                &mut commands,
-                &config,
-                &texture_assets,
-                cell,
-                block_component.clone(),
-            )
-        })
+        .into_iter()
+        .map(|cell| spawn_free_block(commands, config, texture_assets, cell, block_kind))
         .collect()
 }
 
 pub fn piece_color(piece_type: PieceType) -> Color {
-    let color = match piece_type {
+    match piece_type {
         PieceType::I => Color::srgb_u8(100, 196, 235), // cyan
         PieceType::J => Color::srgb_u8(90, 99, 165),   // orange
         PieceType::L => Color::srgb_u8(224, 127, 58),  // blue
@@ -334,6 +273,5 @@ pub fn piece_color(piece_type: PieceType) -> Color {
         PieceType::S => Color::srgb_u8(100, 180, 82),  // green
         PieceType::T => Color::srgb_u8(161, 83, 152),  // purple
         PieceType::Z => Color::srgb_u8(216, 57, 52),   // red
-    };
-    color
+    }
 }

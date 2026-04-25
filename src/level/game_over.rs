@@ -1,5 +1,4 @@
 use crate::assets::GameAssets;
-use crate::level::common::LevelState;
 use crate::GameState;
 use bevy::prelude::*;
 
@@ -8,14 +7,7 @@ pub(crate) struct GameOverPlugin;
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::GameOver), (setup_game_over_ui,).chain())
-            .add_systems(Update, button_system)
-            .add_systems(OnExit(GameState::GameOver), (cleanup_level,).chain());
-    }
-}
-
-fn cleanup_level(mut commands: Commands, query: Query<Entity, With<GameOverCleanup>>) {
-    for entity in query.iter() {
-        commands.entity(entity).despawn();
+            .add_systems(Update, button_system);
     }
 }
 
@@ -24,9 +16,6 @@ enum MenuActions {
     Restart,
     Quit,
 }
-
-#[derive(Component)]
-struct GameOverCleanup;
 
 pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) {
     let font = TextFont {
@@ -48,7 +37,7 @@ pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) 
             justify_content: JustifyContent::Center,
             ..default()
         },
-        GameOverCleanup,
+        DespawnOnExit(GameState::GameOver),
         children![(
             Node {
                 flex_direction: FlexDirection::Column,
@@ -79,6 +68,17 @@ const NORMAL_BUTTON: Color = Color::srgb(0.15, 0.15, 0.15);
 const HOVERED_BUTTON: Color = Color::srgb(0.25, 0.25, 0.25);
 const PRESSED_BUTTON: Color = Color::srgb(0.35, 0.75, 0.35);
 
+type ButtonInteractionQuery<'w, 's> = Query<
+    'w,
+    's,
+    (
+        &'static Interaction,
+        &'static mut BackgroundColor,
+        &'static MenuActions,
+    ),
+    (Changed<Interaction>, With<Button>),
+>;
+
 fn game_over_button(label: &'static str, action: MenuActions, font: TextFont) -> impl Bundle {
     (
         Button,
@@ -101,12 +101,8 @@ fn game_over_button(label: &'static str, action: MenuActions, font: TextFont) ->
 }
 
 fn button_system(
-    mut interaction_query: Query<
-        (&Interaction, &mut BackgroundColor, &MenuActions),
-        (Changed<Interaction>, With<Button>),
-    >,
+    mut interaction_query: ButtonInteractionQuery,
     mut next_game_state: ResMut<NextState<GameState>>,
-    mut next_level_state: ResMut<NextState<LevelState>>,
 ) {
     for (interaction, mut color, menu_actions) in &mut interaction_query {
         match *interaction {
@@ -115,7 +111,6 @@ fn button_system(
                 match menu_actions {
                     MenuActions::Restart => {
                         next_game_state.set(GameState::InGame);
-                        next_level_state.set(LevelState::Setup);
                     }
                     MenuActions::Quit => {
                         next_game_state.set(GameState::MainMenu);

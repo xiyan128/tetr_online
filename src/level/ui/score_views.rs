@@ -1,7 +1,8 @@
 use crate::assets::GameAssets;
-use crate::level::common::{to_translation, LevelCleanup, LevelConfig};
+use crate::level::common::{to_translation, LevelConfig};
 use crate::level::score::{ScoreTypes, Scorer};
 use crate::level::ui::calc_ui_offset;
+use crate::GameState;
 use bevy::color::Alpha;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -45,7 +46,7 @@ pub fn spawn_score_text(
             Anchor::TOP_LEFT,
         ))
         .insert(ScoreText)
-        .insert(LevelCleanup);
+        .insert(DespawnOnExit(GameState::InGame));
 }
 
 pub fn spawn_line_count_text(
@@ -70,7 +71,7 @@ pub fn spawn_line_count_text(
             Anchor::TOP_LEFT,
         ))
         .insert(LineCountText)
-        .insert(LevelCleanup);
+        .insert(DespawnOnExit(GameState::InGame));
 }
 
 pub fn spawn_score_type_text(
@@ -93,14 +94,14 @@ pub fn spawn_score_type_text(
             Transform::from_translation(
                 to_translation(
                     0,
-                    (1 + config.board_height >> 1) as isize,
+                    ((1 + config.board_height) >> 1) as isize,
                     config.block_size,
                 ) + offset,
             ),
             Anchor::TOP_RIGHT,
         ))
         .insert(ScoreTypeText)
-        .insert(LevelCleanup);
+        .insert(DespawnOnExit(GameState::InGame));
 }
 
 pub fn update_score_text(mut text_query: Query<&mut Text2d, With<ScoreText>>, scorer: Res<Scorer>) {

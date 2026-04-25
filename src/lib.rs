@@ -7,12 +7,11 @@ use bevy_asset_loader::prelude::*;
 mod assets;
 mod core;
 mod level;
-mod utils;
 
 use crate::level::LevelPlugin;
 
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
-enum GameState {
+pub enum GameState {
     #[default]
     Loading,
     MainMenu,
