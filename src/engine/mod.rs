@@ -8,12 +8,13 @@ mod goals;
 mod gravity;
 mod lock_down;
 mod pieces;
+mod scoring;
 mod t_spin;
 
 pub use active_piece::{ActivePiece, PieceAction, RotationDirection};
 pub use api::{
-    ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineScoreAction, EngineSnapshot,
-    GameOverStatus, InputFrame, SnapshotCell,
+    ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
+    InputFrame, SnapshotCell,
 };
 pub use board::{Board, Cell, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
@@ -30,4 +31,5 @@ pub use lock_down::{
     apply_grounded_move_or_rotation, LockDownMode, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS,
 };
 pub use pieces::{MoveDirection, Piece, PieceRotation, PieceType};
+pub use scoring::EngineScoreAction;
 pub use t_spin::{classify_t_spin, t_spin_corners, TSpinCorners, TSpinKind};
