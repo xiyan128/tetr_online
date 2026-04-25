@@ -123,6 +123,7 @@ pub struct EngineSnapshot {
     pub config: EngineConfig,
     pub board_cells: Vec<SnapshotCell>,
     pub active: Option<ActivePieceSnapshot>,
+    pub ghost_cells: Vec<SnapshotCell>,
     pub hold: Option<PieceType>,
     pub next_queue: Vec<PieceType>,
     pub score: usize,
@@ -222,6 +223,7 @@ impl Engine {
                 .active
                 .as_ref()
                 .map(|active| active_piece_snapshot(active, &self.config)),
+            ghost_cells: self.ghost_snapshot_cells(),
             hold: self.hold,
             next_queue: self.next_queue.clone(),
             score: self.score_state.score(),
@@ -524,6 +526,22 @@ impl Engine {
             })
             .collect()
     }
+
+    fn ghost_snapshot_cells(&self) -> Vec<SnapshotCell> {
+        let Some(active) = self.active.as_ref() else {
+            return Vec::new();
+        };
+        let mut origin = active.origin();
+        while let Some(next_origin) =
+            active
+                .piece()
+                .try_move(&self.board, origin, MoveDirection::Down)
+        {
+            origin = next_origin;
+        }
+
+        piece_snapshot_cells(active.piece(), origin)
+    }
 }
 
 fn active_piece_snapshot(active: &ActivePiece, config: &EngineConfig) -> ActivePieceSnapshot {
@@ -605,6 +623,15 @@ mod tests {
         let mut events = Vec::new();
         engine.lock_active_piece(active, &mut events);
         events
+    }
+
+    fn sorted_cell_coords(cells: &[SnapshotCell]) -> Vec<(isize, isize)> {
+        let mut coords = cells
+            .iter()
+            .map(|cell| (cell.x, cell.y))
+            .collect::<Vec<_>>();
+        coords.sort();
+        coords
     }
 
     #[test]
@@ -1201,5 +1228,43 @@ mod tests {
             ]
         ));
         assert_eq!(engine.snapshot().score, 400);
+    }
+
+    #[test]
+    fn snapshot_ghost_cells_match_hard_drop_landing_cells() {
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        engine.step(InputFrame::default());
+        let ghost_cells = sorted_cell_coords(&engine.snapshot().ghost_cells);
+
+        engine.step(InputFrame {
+            hard_drop: true,
+            ..InputFrame::default()
+        });
+
+        assert_eq!(
+            sorted_cell_coords(&engine.snapshot().board_cells),
+            ghost_cells
+        );
+    }
+
+    #[test]
+    fn snapshot_ghost_cells_follow_horizontal_movement() {
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        engine.step(InputFrame::default());
+        let before = sorted_cell_coords(&engine.snapshot().ghost_cells);
+
+        engine.step(InputFrame {
+            left: true,
+            ..InputFrame::default()
+        });
+
+        let after = sorted_cell_coords(&engine.snapshot().ghost_cells);
+        assert_eq!(
+            after,
+            before
+                .into_iter()
+                .map(|(x, y)| (x - 1, y))
+                .collect::<Vec<_>>()
+        );
     }
 }
