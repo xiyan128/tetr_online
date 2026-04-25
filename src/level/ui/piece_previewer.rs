@@ -1,7 +1,9 @@
 use crate::assets::GameAssets;
-use crate::core::{Piece, PieceGenerator, PieceType};
+use crate::engine::{Piece, PieceType};
 use crate::level::common::spawn_free_block;
-use crate::level::common::{to_translation, BlockKind, LevelConfig, PieceHolder};
+use crate::level::common::{
+    to_translation, BlockKind, LevelConfig, PieceGeneratorState, PieceHolder,
+};
 use crate::level::ui::calc_ui_offset;
 use crate::GameState;
 use bevy::prelude::*;
@@ -61,7 +63,7 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
 pub fn update_piece_previewer(
     children_query: Query<&Children, With<PiecePreviewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
-    mut generator_query: Query<&mut PieceGenerator, Changed<PieceGenerator>>,
+    generator_query: Query<&PieceGeneratorState, Changed<PieceGeneratorState>>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
@@ -71,7 +73,7 @@ pub fn update_piece_previewer(
     }
     info!("updating piece previewer");
 
-    let Ok(mut generator) = generator_query.single_mut() else {
+    let Ok(generator) = generator_query.single() else {
         return;
     };
 
@@ -156,6 +158,10 @@ fn spawn_holder_piece(
     let avatar_board = piece.avatar_board();
 
     let preview_block_size = config.block_size * config.preview_scale;
+    let preview_config = LevelConfig {
+        block_size: preview_block_size,
+        ..Default::default()
+    };
 
     let block_ids: Vec<Entity> = avatar_board
         .cells()
@@ -163,10 +169,7 @@ fn spawn_holder_piece(
         .map(|&cell| {
             spawn_free_block(
                 commands,
-                &LevelConfig {
-                    block_size: preview_block_size,
-                    ..Default::default()
-                },
+                &preview_config,
                 game_assets,
                 cell,
                 BlockKind::Preview,
@@ -185,8 +188,7 @@ fn spawn_holder_piece(
         * scale;
 
     let piece_entity = commands
-        .spawn(piece)
-        .insert((
+        .spawn((
             Sprite {
                 custom_size: Some(preview_board_size),
                 color: Color::srgba(0.0, 0.0, 0.0, 0.0),

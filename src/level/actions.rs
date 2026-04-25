@@ -2,11 +2,11 @@ use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
-use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
+use crate::engine::{Board, LockDownMode, MoveDirection, Piece, PieceRotation, PieceType};
 use crate::level::common;
 use crate::level::common::{
-    spawn_piece_blocks, ActionEvent, AudioCue, BlockKind, Coords, LevelConfig, MatchCoords,
-    PieceController, PieceHolder,
+    spawn_piece_blocks, ActionEvent, AudioCue, BlockKind, BoardState, Coords, LevelConfig,
+    MatchCoords, PieceController, PieceGeneratorState, PieceHolder, PieceState,
 };
 use crate::GameState;
 use itertools::iproduct;
@@ -35,22 +35,22 @@ struct RotationQueries<'w, 's> {
         'w,
         's,
         (
-            &'static mut Piece,
+            &'static mut PieceState,
             &'static mut Coords,
             &'static mut Transform,
             &'static Children,
         ),
     >,
-    children: Query<'w, 's, (&'static mut Coords, &'static mut Transform), Without<Piece>>,
-    board: Query<'w, 's, &'static Board>,
+    children: Query<'w, 's, (&'static mut Coords, &'static mut Transform), Without<PieceState>>,
+    board: Query<'w, 's, &'static BoardState>,
     controller: Query<'w, 's, &'static mut PieceController>,
 }
 
 #[derive(SystemParam)]
 struct HoldQueries<'w, 's> {
     holder: Query<'w, 's, &'static mut PieceHolder>,
-    piece: Query<'w, 's, (Entity, &'static Piece, &'static mut PieceController)>,
-    generator: Query<'w, 's, &'static mut PieceGenerator>,
+    piece: Query<'w, 's, (Entity, &'static PieceState, &'static mut PieceController)>,
+    generator: Query<'w, 's, &'static mut PieceGeneratorState>,
 }
 
 fn move_piece_and_update(
@@ -70,9 +70,23 @@ fn move_piece_and_update(
     }
 }
 
+fn reset_locking_timer_after_successful_move_or_rotation(
+    piece_controller: &mut PieceController,
+    config: &LevelConfig,
+) {
+    if config.lock_down_mode != LockDownMode::Classic {
+        piece_controller.locking_timer.reset();
+    }
+}
+
 fn handle_movements(
-    mut query: Query<(&Piece, &mut Coords, &mut Transform, &mut PieceController)>,
-    board_query: Query<&Board>,
+    mut query: Query<(
+        &PieceState,
+        &mut Coords,
+        &mut Transform,
+        &mut PieceController,
+    )>,
+    board_query: Query<&BoardState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     time: Res<Time>,
@@ -132,7 +146,10 @@ fn handle_movements(
         if let Some(movement) = movement {
             if move_piece_and_update(&config, piece, &mut coords, &mut transform, board, movement) {
                 ev_action.write(ActionEvent::Movement(movement));
-                piece_controller.locking_timer.reset();
+                reset_locking_timer_after_successful_move_or_rotation(
+                    &mut piece_controller,
+                    &config,
+                );
                 piece_controller.movement_timer.set_duration(duration);
             }
             if just_pressed {
@@ -144,8 +161,13 @@ fn handle_movements(
 
 fn handle_hard_drop(
     mut commands: Commands,
-    mut query: Query<(&Piece, &mut Coords, &mut Transform, &mut PieceController)>,
-    board_query: Query<&Board>,
+    mut query: Query<(
+        &PieceState,
+        &mut Coords,
+        &mut Transform,
+        &mut PieceController,
+    )>,
+    board_query: Query<&BoardState>,
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     mut ev_action: MessageWriter<ActionEvent>,
@@ -222,7 +244,7 @@ fn handle_rotations(
             }
 
             transform.update_coords(coords.as_ref(), &config);
-            piece_controller.locking_timer.reset();
+            reset_locking_timer_after_successful_move_or_rotation(&mut piece_controller, &config);
 
             // count t-spin corners
             let mut t_spin_corners = 0;
@@ -237,7 +259,7 @@ fn handle_rotations(
             ev_action.write(ActionEvent::Rotation(
                 piece.piece_type(), // type of piece that was rotated
                 t_spin_corners,     // (only for t-spin) number of corners occupied by other blocks
-                wall_kick_set != 0, // if wall kick was performed
+                wall_kick_set,      // successful SRS kick test number
             ));
             commands.trigger(AudioCue::Rotation);
         }
@@ -283,7 +305,7 @@ fn swap_hold(
 
     let spawn_coords = config.spawn_coords(&next_piece);
     let piece_entity = commands
-        .spawn((next_piece, DespawnOnExit(GameState::InGame)))
+        .spawn((PieceState(next_piece), DespawnOnExit(GameState::InGame)))
         .id();
 
     // spawn new piece
@@ -292,7 +314,7 @@ fn swap_hold(
         .insert(Coords::from(spawn_coords))
         .insert(PieceController {
             used_hold: true, // prevent hold from being used again
-            ..default()
+            ..PieceController::new(&config)
         })
         .insert(Transform::from_translation(common::to_translation(
             spawn_coords.0,
@@ -302,7 +324,7 @@ fn swap_hold(
 
     commands.entity(piece_entity).add_children(&block_ids);
 
-    holder.piece = Some(current_piece.clone());
+    holder.piece = Some(current_piece.0.clone());
 
     // remove old piece
     commands.entity(current_piece_entity).despawn();

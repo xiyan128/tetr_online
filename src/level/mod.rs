@@ -1,7 +1,7 @@
 use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use crate::core::*;
+use crate::engine::*;
 use common::*;
 
 use crate::assets::GameAssets;
@@ -26,18 +26,22 @@ type FallingBlockQuery<'w, 's> = Query<
     'w,
     's,
     (&'static mut Coords, &'static mut Transform),
-    (With<FallingBlock>, Without<StaticBlock>, Without<Piece>),
+    (
+        With<FallingBlock>,
+        Without<StaticBlock>,
+        Without<PieceState>,
+    ),
 >;
 
 type ActivePieceQuery<'w, 's> = Query<
     'w,
     's,
-    (&'static Coords, &'static Piece),
+    (&'static Coords, &'static PieceState),
     (
         With<PieceController>,
         Without<GhostPiece>,
         Without<GhostBlock>,
-        Or<(Changed<Coords>, Changed<Piece>)>,
+        Or<(Changed<Coords>, Changed<PieceState>)>,
     ),
 >;
 
@@ -87,13 +91,13 @@ struct LockQueries<'w, 's> {
         's,
         (
             Entity,
-            &'static Piece,
+            &'static PieceState,
             &'static Coords,
             &'static mut PieceController,
             &'static Children,
         ),
     >,
-    board: Query<'w, 's, (Entity, &'static mut Board)>,
+    board: Query<'w, 's, (Entity, &'static mut BoardState)>,
     falling_blocks: FallingBlockQuery<'w, 's>,
     static_blocks: Query<'w, 's, Entity, With<StaticBlock>>,
 }
@@ -106,18 +110,22 @@ struct GhostQueries<'w, 's> {
         's,
         (
             Entity,
-            &'static mut Piece,
+            &'static mut PieceState,
             &'static mut Transform,
             Option<&'static Children>,
         ),
         With<GhostPiece>,
     >,
     ghost_blocks: GhostBlockQuery<'w, 's>,
-    board: Query<'w, 's, &'static Board>,
+    board: Query<'w, 's, &'static BoardState>,
 }
 
-type ChangedPieceQuery<'w, 's> =
-    Query<'w, 's, (&'static Coords, &'static Piece), Or<(Changed<Coords>, Changed<Piece>)>>;
+type ChangedPieceQuery<'w, 's> = Query<
+    'w,
+    's,
+    (&'static Coords, &'static PieceState),
+    Or<(Changed<Coords>, Changed<PieceState>)>,
+>;
 
 // setup board and camera
 fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets: Res<GameAssets>) {
@@ -143,10 +151,10 @@ fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets:
     }
 
     let board_entity = commands
-        .spawn((board, Transform::default()))
+        .spawn((BoardState(board), Transform::default()))
         .insert(DespawnOnExit(GameState::InGame))
         .insert(PieceHolder::default())
-        .insert(PieceGenerator::default())
+        .insert(PieceGeneratorState(PieceGenerator::default()))
         .id();
 
     commands.entity(board_entity).add_children(&block_ids);
@@ -172,14 +180,24 @@ fn spawn_static_block(
     spawn_free_block(commands, config, assets, cell, BlockKind::Static)
 }
 
+fn apply_immediate_drop(
+    piece: &Piece,
+    board: &Board,
+    spawn_coords: (isize, isize),
+) -> (isize, isize) {
+    piece
+        .try_move(board, spawn_coords, MoveDirection::Down)
+        .unwrap_or(spawn_coords)
+}
+
 fn piece_setup(
     mut commands: Commands,
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
-    piece_query: Query<(Entity, &Piece, &PieceController)>,
-    board_query: Query<&Board>,
+    piece_query: Query<(Entity, &PieceState, &PieceController)>,
+    board_query: Query<&BoardState>,
     mut next_game_state: ResMut<NextState<GameState>>,
-    mut generator_query: Query<&mut PieceGenerator>,
+    mut generator_query: Query<&mut PieceGeneratorState>,
 ) {
     // if there is already a piece, don't spawn a new one
     if piece_query.single().is_ok() {
@@ -206,6 +224,7 @@ fn piece_setup(
         next_game_state.set(GameState::GameOver);
         return;
     }
+    let spawn_coords = apply_immediate_drop(&piece, board, spawn_coords);
 
     let block_ids: Vec<Entity> = spawn_piece_blocks(
         &mut commands,
@@ -216,13 +235,13 @@ fn piece_setup(
     );
 
     let piece_entity = commands
-        .spawn((piece, DespawnOnExit(GameState::InGame)))
+        .spawn((PieceState(piece), DespawnOnExit(GameState::InGame)))
         .id();
 
     commands
         .entity(piece_entity)
         .insert(Coords::from(spawn_coords))
-        .insert(PieceController::default())
+        .insert(PieceController::new(&config))
         .insert(Transform::from_translation(common::to_translation(
             spawn_coords.0,
             spawn_coords.1,
@@ -234,12 +253,12 @@ fn piece_setup(
 
 fn piece_fall(
     mut query: Query<(
-        &mut Piece,
+        &PieceState,
         &mut PieceController,
         &mut Coords,
         &mut Transform,
     )>,
-    board_query: Query<&Board>,
+    board_query: Query<&BoardState>,
     config: Res<LevelConfig>,
     time: Res<Time>,
 ) {
@@ -449,7 +468,7 @@ fn ghost_blocks(
 fn detect_placement(
     mut commands: Commands,
     mut piece_query: ChangedPieceQuery, // either the piece or its coords changed
-    board_query: Query<&Board>,
+    board_query: Query<&BoardState>,
     mut next_state: ResMut<NextState<PlayingState>>,
     current_state: Res<State<PlayingState>>,
 ) {
@@ -510,5 +529,22 @@ mod tests {
             .resource_mut::<NextState<GameState>>()
             .set(GameState::InGame);
         app.update();
+    }
+
+    #[test]
+    fn immediate_drop_moves_spawn_down_when_free() {
+        let board = Board::with_top_margin(10, 20, 20);
+        let piece = Piece::from(PieceType::T);
+
+        assert_eq!(apply_immediate_drop(&piece, &board, (3, 19)), (3, 18));
+    }
+
+    #[test]
+    fn immediate_drop_keeps_spawn_when_blocked_below() {
+        let mut board = Board::with_top_margin(10, 20, 20);
+        let piece = Piece::from(PieceType::T);
+        assert!(board.set(4, 19, CellKind::Some(PieceType::O)));
+
+        assert_eq!(apply_immediate_drop(&piece, &board, (3, 19)), (3, 19));
     }
 }

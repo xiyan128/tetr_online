@@ -1,4 +1,4 @@
-use crate::core::{MoveDirection, PieceType};
+use crate::engine::{MoveDirection, PieceType};
 use crate::level::common::{ActionEvent, PlacingEvent};
 use crate::GameState;
 use bevy::prelude::*;
@@ -74,15 +74,21 @@ impl Scorer {
                 difficult_action = true;
                 (1200, vec![ScoreType::TSpin, ScoreType::Double])
             }
-            (2, Some(ActionEvent::Rotation(PieceType::T, _, true))) => {
+            (2, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
+                if used_wall_kick(*kick_number) =>
+            {
                 difficult_action = true;
                 (400, vec![ScoreType::MiniTSpin, ScoreType::Double])
             }
-            (1, Some(ActionEvent::Rotation(PieceType::T, _, true))) => {
+            (1, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
+                if used_wall_kick(*kick_number) =>
+            {
                 difficult_action = true;
                 (200, vec![ScoreType::MiniTSpin, ScoreType::Single])
             }
-            (0, Some(ActionEvent::Rotation(PieceType::T, _, true))) => {
+            (0, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
+                if used_wall_kick(*kick_number) =>
+            {
                 (100, vec![ScoreType::MiniTSpin])
             }
             (0, Some(ActionEvent::Rotation(PieceType::T, 3, _))) => (400, vec![ScoreType::TSpin]),
@@ -131,6 +137,10 @@ impl Scorer {
         self.score += score;
         score_types
     }
+}
+
+fn used_wall_kick(kick_number: u8) -> bool {
+    kick_number > 1
 }
 
 fn reset_score(mut scorer: ResMut<Scorer>) {
@@ -248,7 +258,7 @@ mod tests {
     #[test]
     fn t_spin_double_scores_from_last_rotation_before_hard_drop() {
         let mut scorer = Scorer::default();
-        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, false));
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
         scorer.record_action(ActionEvent::HardDrop(1));
 
         let score_types = scorer.lock_piece(2);
@@ -278,7 +288,7 @@ mod tests {
     #[test]
     fn mini_t_spin_no_line_scores_without_combo() {
         let mut scorer = Scorer::default();
-        scorer.record_action(ActionEvent::Rotation(PieceType::T, 2, true));
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 2, 2));
 
         let score_types = scorer.lock_piece(0);
 

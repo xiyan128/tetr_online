@@ -1,10 +1,13 @@
 use crate::assets::GameAssets;
-use crate::core::{Cell, MoveDirection, Piece, PieceType};
+use crate::engine::{
+    fall_duration, soft_drop_duration, Board, Cell, LockDownMode, MoveDirection, Piece,
+    PieceGenerator, PieceType, LOCK_DOWN_SECONDS, MIN_LEVEL,
+};
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
-    Color, Commands, Component, Entity, Event, Message, Res, Resource, Sprite, SubStates, Timer,
-    TimerMode, Transform,
+    Color, Commands, Component, Deref, DerefMut, Entity, Event, Message, Res, Resource, Sprite,
+    SubStates, Timer, TimerMode, Transform,
 };
 use bevy::sprite::Anchor;
 use bevy::state::state::StateSet;
@@ -14,7 +17,7 @@ use crate::GameState;
 
 #[derive(Message, Clone, Debug)]
 pub enum ActionEvent {
-    Rotation(PieceType, usize, bool), // piece type, occupied cells (only for T-Spin), wall kick
+    Rotation(PieceType, usize, u8), // piece type, occupied cells (only for T-Spin), SRS kick number
     Movement(MoveDirection),
     HardDrop(usize),
     Hold,
@@ -55,6 +58,7 @@ pub struct LevelConfig {
     pub(crate) soft_drop_duration: Duration,
     pub(crate) fall_duration: Duration,
     pub(crate) locking_duration: Duration,
+    pub(crate) lock_down_mode: LockDownMode,
 }
 
 impl Default for LevelConfig {
@@ -66,21 +70,18 @@ impl Default for LevelConfig {
             board_height: 20,
             preview_count: 6,
             movement_duration: Duration::from_millis(200),
-            soft_drop_duration: Duration::from_millis(50),
+            soft_drop_duration: soft_drop_duration(MIN_LEVEL),
             movement_speedup: 1. / 1.0_f64.exp(),
-            fall_duration: Duration::from_millis(500),
-            locking_duration: Duration::from_millis(500),
+            fall_duration: fall_duration(MIN_LEVEL),
+            locking_duration: Duration::from_secs_f32(LOCK_DOWN_SECONDS),
+            lock_down_mode: LockDownMode::default(),
         }
     }
 }
 
 impl LevelConfig {
     pub(crate) fn spawn_coords(&self, piece: &Piece) -> (isize, isize) {
-        let (offset_x, _) = piece.board_size();
-        (
-            self.board_width as isize / 2 - offset_x as isize / 2,
-            self.board_height as isize,
-        )
+        piece.spawn_coords(self.board_width, self.board_height)
     }
 }
 
@@ -148,7 +149,12 @@ pub struct PieceController {
 impl Default for PieceController {
     fn default() -> Self {
         let config = LevelConfig::default();
+        Self::new(&config)
+    }
+}
 
+impl PieceController {
+    pub(crate) fn new(config: &LevelConfig) -> Self {
         Self {
             falling_timer: Timer::new(config.fall_duration, TimerMode::Repeating),
             locking_timer: Timer::new(config.locking_duration, TimerMode::Once),
@@ -183,6 +189,15 @@ impl MatchCoords for Transform {
 pub struct PieceHolder {
     pub(crate) piece: Option<Piece>,
 }
+
+#[derive(Component, Deref, DerefMut)]
+pub struct BoardState(pub(crate) Board);
+
+#[derive(Component, Clone, Debug, Deref, DerefMut)]
+pub struct PieceState(pub(crate) Piece);
+
+#[derive(Component, Deref, DerefMut)]
+pub struct PieceGeneratorState(pub(crate) PieceGenerator);
 
 // spawn a block that is yet a part of a piece at the given cell
 pub fn spawn_free_block(
