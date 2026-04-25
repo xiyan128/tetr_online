@@ -1,4 +1,6 @@
-use crate::engine::{MoveDirection, PieceType};
+use crate::engine::{
+    breaks_back_to_back, qualifies_for_back_to_back, MoveDirection, PieceType, TSpinKind,
+};
 use crate::level::common::{ActionEvent, PlacingEvent};
 use crate::GameState;
 use bevy::prelude::*;
@@ -19,13 +21,25 @@ impl Plugin for ScorePlugin {
     }
 }
 
-#[derive(Resource, Default)]
+#[derive(Resource)]
 pub struct Scorer {
-    action_history: Vec<ActionEvent>,
+    last_lock_action: Option<ActionEvent>,
+    pub level: usize,
     pub score: usize,
     pub lines: usize,
-    pub combo: usize,
-    pub difficult_action: bool,
+    pub back_to_back_active: bool,
+}
+
+impl Default for Scorer {
+    fn default() -> Self {
+        Self {
+            last_lock_action: None,
+            level: 1,
+            score: 0,
+            lines: 0,
+            back_to_back_active: false,
+        }
+    }
 }
 
 impl Scorer {
@@ -40,7 +54,9 @@ impl Scorer {
             _ => {}
         }
 
-        self.action_history.push(action);
+        if !matches!(action, ActionEvent::HardDrop(_)) {
+            self.last_lock_action = Some(action);
+        }
     }
 
     pub fn lock_piece(&mut self, lines: usize) -> Vec<ScoreType> {
@@ -51,96 +67,132 @@ impl Scorer {
 
         self.lines += lines;
 
-        let last_action = match self.action_history.last() {
-            Some(ActionEvent::HardDrop(_)) => self
-                .action_history
-                .len()
-                .checked_sub(2)
-                .and_then(|idx| self.action_history.get(idx)),
-            _ => self.action_history.last(),
-        };
+        let action = score_action(lines, self.last_lock_action.as_ref());
+        let (base_score, mut score_types) = action.base_score_and_types(self.level);
+        let mut score = base_score;
 
-        let mut difficult_action = false;
-        let (mut score, spin_score_types) = match (lines, last_action) {
-            (1, Some(ActionEvent::Rotation(PieceType::T, 3, _))) => {
-                difficult_action = true;
-                (800, vec![ScoreType::TSpin, ScoreType::Single])
+        if action.qualifies_for_back_to_back() {
+            if self.back_to_back_active {
+                score += base_score / 2;
+                score_types.push(ScoreType::BackToBack);
+            } else {
+                self.back_to_back_active = true;
             }
-            (3, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, _))) => {
-                difficult_action = true;
-                (1600, vec![ScoreType::TSpin, ScoreType::Triple])
-            }
-            (2, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, _))) => {
-                difficult_action = true;
-                (1200, vec![ScoreType::TSpin, ScoreType::Double])
-            }
-            (2, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
-                if used_wall_kick(*kick_number) =>
-            {
-                difficult_action = true;
-                (400, vec![ScoreType::MiniTSpin, ScoreType::Double])
-            }
-            (1, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
-                if used_wall_kick(*kick_number) =>
-            {
-                difficult_action = true;
-                (200, vec![ScoreType::MiniTSpin, ScoreType::Single])
-            }
-            (0, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
-                if used_wall_kick(*kick_number) =>
-            {
-                (100, vec![ScoreType::MiniTSpin])
-            }
-            (0, Some(ActionEvent::Rotation(PieceType::T, 3, _))) => (400, vec![ScoreType::TSpin]),
-            _ => (0, vec![]),
-        };
-
-        let mut score_types = spin_score_types;
-
-        match lines {
-            0 => {
-                self.combo = 0;
-            }
-            1..=4 => {
-                if score_types.is_empty() {
-                    let (line_clear_score, score_type) = match lines {
-                        1 => (100, ScoreType::Single),
-                        2 => (300, ScoreType::Double),
-                        3 => (500, ScoreType::Triple),
-                        4 => {
-                            difficult_action = true;
-                            (800, ScoreType::Tetris)
-                        }
-                        _ => unreachable!("line count is constrained by the match arm"),
-                    };
-                    score += line_clear_score;
-                    score_types.push(score_type);
-                }
-
-                if self.combo > 0 {
-                    self.score += self.combo * 50;
-                    score_types.push(ScoreType::Combo(self.combo + 1));
-                }
-
-                self.combo += 1;
-
-                if difficult_action && self.difficult_action {
-                    score = score * 3 / 2;
-                    score_types.push(ScoreType::BackToBack);
-                }
-
-                self.difficult_action = difficult_action;
-            }
-            _ => unreachable!("line count is validated before scoring"),
+        } else if action.breaks_back_to_back() {
+            self.back_to_back_active = false;
         }
 
         self.score += score;
+        self.last_lock_action = None;
         score_types
     }
 }
 
 fn used_wall_kick(kick_number: u8) -> bool {
     kick_number > 1
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+enum ScoreAction {
+    NoClear,
+    Single,
+    Double,
+    Triple,
+    Tetris,
+    TSpin { kind: TSpinKind, lines: usize },
+}
+
+impl ScoreAction {
+    fn base_score_and_types(self, level: usize) -> (usize, Vec<ScoreType>) {
+        let (base, score_types) = match self {
+            ScoreAction::NoClear => (0, vec![]),
+            ScoreAction::Single => (100, vec![ScoreType::Single]),
+            ScoreAction::Double => (300, vec![ScoreType::Double]),
+            ScoreAction::Triple => (500, vec![ScoreType::Triple]),
+            ScoreAction::Tetris => (800, vec![ScoreType::Tetris]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Mini,
+                lines: 0,
+            } => (100, vec![ScoreType::MiniTSpin]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Mini,
+                lines: 1,
+            } => (200, vec![ScoreType::MiniTSpin, ScoreType::Single]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Full,
+                lines: 0,
+            } => (400, vec![ScoreType::TSpin]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Full,
+                lines: 1,
+            } => (800, vec![ScoreType::TSpin, ScoreType::Single]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Full,
+                lines: 2,
+            } => (1200, vec![ScoreType::TSpin, ScoreType::Double]),
+            ScoreAction::TSpin {
+                kind: TSpinKind::Full,
+                lines: 3,
+            } => (1600, vec![ScoreType::TSpin, ScoreType::Triple]),
+            ScoreAction::TSpin { kind, lines } => {
+                warn!("ignoring invalid T-Spin score action: {kind:?} with {lines} lines");
+                (0, vec![])
+            }
+        };
+
+        (base * level, score_types)
+    }
+
+    fn qualifies_for_back_to_back(self) -> bool {
+        let (t_spin, lines) = self.spin_and_lines();
+        qualifies_for_back_to_back(t_spin, lines)
+    }
+
+    fn breaks_back_to_back(self) -> bool {
+        let (t_spin, lines) = self.spin_and_lines();
+        breaks_back_to_back(t_spin, lines)
+    }
+
+    fn spin_and_lines(self) -> (Option<TSpinKind>, usize) {
+        match self {
+            ScoreAction::NoClear => (None, 0),
+            ScoreAction::Single => (None, 1),
+            ScoreAction::Double => (None, 2),
+            ScoreAction::Triple => (None, 3),
+            ScoreAction::Tetris => (None, 4),
+            ScoreAction::TSpin { kind, lines } => (Some(kind), lines),
+        }
+    }
+}
+
+fn score_action(lines: usize, last_action: Option<&ActionEvent>) -> ScoreAction {
+    if let Some(kind) = legacy_t_spin_kind(lines, last_action) {
+        return ScoreAction::TSpin { kind, lines };
+    }
+
+    match lines {
+        0 => ScoreAction::NoClear,
+        1 => ScoreAction::Single,
+        2 => ScoreAction::Double,
+        3 => ScoreAction::Triple,
+        4 => ScoreAction::Tetris,
+        _ => unreachable!("line count is validated before score_action"),
+    }
+}
+
+fn legacy_t_spin_kind(lines: usize, last_action: Option<&ActionEvent>) -> Option<TSpinKind> {
+    match (lines, last_action) {
+        (_, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, 5))) => Some(TSpinKind::Full),
+        (1, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, _))) => Some(TSpinKind::Full),
+        (2 | 3, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, _))) => Some(TSpinKind::Full),
+        (0, Some(ActionEvent::Rotation(PieceType::T, 3 | 4, _))) => Some(TSpinKind::Full),
+        (0..=1, Some(ActionEvent::Rotation(PieceType::T, _, kick_number)))
+            if used_wall_kick(*kick_number) =>
+        {
+            Some(TSpinKind::Mini)
+        }
+        _ => None,
+    }
 }
 
 fn reset_score(mut scorer: ResMut<Scorer>) {
@@ -162,7 +214,6 @@ fn reset_score(mut scorer: ResMut<Scorer>) {
 | T-Spin Double | 1200 xx level; difficult |
 | T-Spin Triple | 1600 xx level; difficult |
 | Back-to-Back difficult line clears | Action score xx1.5 (excluding soft drop and hard drop) |
-| Combo | 50 xx combo count xx level |
 | Soft drop | 1 per cell |
 | Hard drop | 2 per cell |
  */
@@ -184,7 +235,6 @@ pub enum ScoreType {
     Tetris,
     TSpin,
     MiniTSpin,
-    Combo(usize),
     BackToBack,
 }
 
@@ -198,8 +248,6 @@ fn update_score(
             PlacingEvent::Locked(lines) => scorer.lock_piece(*lines),
         };
 
-        info!("score types: {:?}", score_types);
-        info!("action history: {:?}", scorer.action_history);
         if !score_types.is_empty() {
             ev_score_types.write(ScoreTypes(score_types));
         }
@@ -227,32 +275,20 @@ mod tests {
 
         assert_eq!(scorer.score, 300);
         assert_eq!(scorer.lines, 2);
-        assert_eq!(scorer.combo, 1);
         assert_eq!(score_types, vec![ScoreType::Double]);
     }
 
     #[test]
-    fn consecutive_line_clears_add_combo_bonus() {
+    fn normal_single_double_and_triple_break_back_to_back() {
         let mut scorer = Scorer::default();
+
+        assert_eq!(scorer.lock_piece(4), vec![ScoreType::Tetris]);
+        assert!(scorer.back_to_back_active);
 
         assert_eq!(scorer.lock_piece(1), vec![ScoreType::Single]);
-        assert_eq!(
-            scorer.lock_piece(2),
-            vec![ScoreType::Double, ScoreType::Combo(2)]
-        );
 
-        assert_eq!(scorer.score, 450);
-        assert_eq!(scorer.combo, 2);
-    }
-
-    #[test]
-    fn no_line_clear_resets_combo() {
-        let mut scorer = Scorer::default();
-
-        scorer.lock_piece(1);
-        scorer.lock_piece(0);
-
-        assert_eq!(scorer.combo, 0);
+        assert_eq!(scorer.score, 900);
+        assert!(!scorer.back_to_back_active);
     }
 
     #[test]
@@ -265,36 +301,120 @@ mod tests {
 
         assert_eq!(scorer.score, 1202);
         assert_eq!(score_types, vec![ScoreType::TSpin, ScoreType::Double]);
-        assert!(scorer.difficult_action);
+        assert!(scorer.back_to_back_active);
     }
 
     #[test]
-    fn back_to_back_applies_to_current_difficult_clear() {
+    fn back_to_back_applies_to_subsequent_qualifying_clears() {
         let mut scorer = Scorer::default();
 
         assert_eq!(scorer.lock_piece(4), vec![ScoreType::Tetris]);
         assert_eq!(
             scorer.lock_piece(4),
-            vec![
-                ScoreType::Tetris,
-                ScoreType::Combo(2),
-                ScoreType::BackToBack
-            ]
+            vec![ScoreType::Tetris, ScoreType::BackToBack]
         );
 
-        assert_eq!(scorer.score, 2050);
+        assert_eq!(scorer.score, 2000);
     }
 
     #[test]
-    fn mini_t_spin_no_line_scores_without_combo() {
+    fn zero_line_t_spin_scores_without_starting_back_to_back() {
         let mut scorer = Scorer::default();
-        scorer.record_action(ActionEvent::Rotation(PieceType::T, 2, 2));
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
 
         let score_types = scorer.lock_piece(0);
 
-        assert_eq!(scorer.score, 100);
-        assert_eq!(scorer.combo, 0);
-        assert_eq!(score_types, vec![ScoreType::MiniTSpin]);
+        assert_eq!(scorer.score, 400);
+        assert!(!scorer.back_to_back_active);
+        assert_eq!(score_types, vec![ScoreType::TSpin]);
+    }
+
+    #[test]
+    fn previous_piece_rotation_does_not_leak_into_next_lock() {
+        let mut scorer = Scorer::default();
+
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        assert_eq!(
+            scorer.lock_piece(2),
+            vec![ScoreType::TSpin, ScoreType::Double]
+        );
+
+        assert_eq!(scorer.lock_piece(2), vec![ScoreType::Double]);
+        assert_eq!(scorer.score, 1500);
+        assert!(!scorer.back_to_back_active);
+    }
+
+    #[test]
+    fn two_line_wall_kick_rotation_scores_as_double_not_mini_t_spin_double() {
+        let mut scorer = Scorer::default();
+
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 2, 2));
+        let score_types = scorer.lock_piece(2);
+
+        assert_eq!(score_types, vec![ScoreType::Double]);
+        assert_eq!(scorer.score, 300);
+        assert!(!scorer.back_to_back_active);
+    }
+
+    #[test]
+    fn zero_line_t_spin_preserves_existing_back_to_back() {
+        let mut scorer = Scorer::default();
+
+        scorer.lock_piece(4);
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        assert_eq!(scorer.lock_piece(0), vec![ScoreType::TSpin]);
+
+        assert!(scorer.back_to_back_active);
+        assert_eq!(
+            scorer.lock_piece(4),
+            vec![ScoreType::Tetris, ScoreType::BackToBack]
+        );
+        assert_eq!(scorer.score, 2400);
+    }
+
+    #[test]
+    fn section_13_back_to_back_example_totals_5400_at_level_one() {
+        let mut scorer = Scorer::default();
+
+        assert_eq!(scorer.lock_piece(4), vec![ScoreType::Tetris]);
+
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        assert_eq!(
+            scorer.lock_piece(2),
+            vec![ScoreType::TSpin, ScoreType::Double, ScoreType::BackToBack]
+        );
+
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        assert_eq!(scorer.lock_piece(0), vec![ScoreType::TSpin]);
+
+        assert_eq!(
+            scorer.lock_piece(4),
+            vec![ScoreType::Tetris, ScoreType::BackToBack]
+        );
+
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        assert_eq!(
+            scorer.lock_piece(1),
+            vec![ScoreType::TSpin, ScoreType::Single, ScoreType::BackToBack]
+        );
+
+        assert_eq!(scorer.score, 5400);
+    }
+
+    #[test]
+    fn level_multiplies_line_clear_and_spin_scores_but_not_drop_scores() {
+        let mut scorer = Scorer {
+            level: 2,
+            ..Default::default()
+        };
+
+        scorer.record_action(ActionEvent::Movement(MoveDirection::Down));
+        scorer.record_action(ActionEvent::HardDrop(2));
+        scorer.record_action(ActionEvent::Rotation(PieceType::T, 3, 1));
+        let score_types = scorer.lock_piece(1);
+
+        assert_eq!(score_types, vec![ScoreType::TSpin, ScoreType::Single]);
+        assert_eq!(scorer.score, 1605);
     }
 
     #[test]

@@ -9,9 +9,12 @@ mod engine;
 mod level;
 
 pub use crate::engine::{
-    apply_grounded_move_or_rotation, fall_duration, fall_speed_seconds, soft_drop_duration,
-    soft_drop_speed_seconds, ActivePiece, Engine, EngineConfig, EngineEvent, EngineSnapshot,
-    InputFrame, LockDownMode, PieceAction, PieceRotation, PieceType, RotationDirection,
+    apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_duration,
+    fall_speed_seconds, fixed_goal_for_level, goal_for_level, is_block_out, is_lock_out,
+    is_top_out, qualifies_for_back_to_back, soft_drop_duration, soft_drop_speed_seconds,
+    t_spin_corners, variable_goal_for_level, variable_goal_units, ActivePiece, Engine,
+    EngineConfig, EngineEvent, EngineSnapshot, GoalProgress, GoalSystem, InputFrame, LockDownMode,
+    PieceAction, PieceRotation, PieceType, RotationDirection, TSpinCorners, TSpinKind,
     EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS, MAX_LEVEL, MIN_LEVEL,
 };
 use crate::level::LevelPlugin;

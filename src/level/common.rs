@@ -1,19 +1,19 @@
 use crate::assets::GameAssets;
 use crate::engine::{
-    fall_duration, soft_drop_duration, Board, Cell, LockDownMode, MoveDirection, Piece,
-    PieceGenerator, PieceType, LOCK_DOWN_SECONDS, MIN_LEVEL,
+    fall_duration, is_block_out, soft_drop_duration, Board, Cell, LockDownMode, MoveDirection,
+    Piece, PieceGenerator, PieceType, LOCK_DOWN_SECONDS, MIN_LEVEL,
 };
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
     Color, Commands, Component, Deref, DerefMut, Entity, Event, Message, Res, Resource, Sprite,
-    SubStates, Timer, TimerMode, Transform,
+    SubStates, SystemSet, Timer, TimerMode, Transform,
 };
 use bevy::sprite::Anchor;
 use bevy::state::state::StateSet;
 use std::time::Duration;
 
-use crate::GameState;
+use crate::{DespawnOnExit, GameState};
 
 #[derive(Message, Clone, Debug)]
 pub enum ActionEvent {
@@ -45,6 +45,12 @@ pub enum PlayingState {
     Locking,
 }
 
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+pub(crate) enum LevelSystems {
+    PieceSetup,
+    PlayerInput,
+}
+
 #[derive(Resource, Debug)]
 pub struct LevelConfig {
     pub(crate) block_size: f32,
@@ -53,8 +59,8 @@ pub struct LevelConfig {
     pub(crate) preview_count: usize,
 
     pub(crate) board_height: usize,
-    pub(crate) movement_duration: Duration,
-    pub(crate) movement_speedup: f64,
+    pub(crate) das_delay: Duration,
+    pub(crate) das_repeat_duration: Duration,
     pub(crate) soft_drop_duration: Duration,
     pub(crate) fall_duration: Duration,
     pub(crate) locking_duration: Duration,
@@ -69,9 +75,9 @@ impl Default for LevelConfig {
             board_width: 10,
             board_height: 20,
             preview_count: 6,
-            movement_duration: Duration::from_millis(200),
+            das_delay: Duration::from_millis(300),
+            das_repeat_duration: Duration::from_millis(50),
             soft_drop_duration: soft_drop_duration(MIN_LEVEL),
-            movement_speedup: 1. / 1.0_f64.exp(),
             fall_duration: fall_duration(MIN_LEVEL),
             locking_duration: Duration::from_secs_f32(LOCK_DOWN_SECONDS),
             lock_down_mode: LockDownMode::default(),
@@ -141,9 +147,7 @@ pub struct PieceController {
     pub(crate) locking_timer: Timer,
     pub(crate) hard_dropped: bool,
     pub(crate) used_hold: bool,
-    pub(crate) movement_timer: Timer,
-    pub(crate) active_movement: Option<MoveDirection>,
-    pub(crate) movement_hold_duration: Duration,
+    pub(crate) soft_drop_timer: Timer,
 }
 
 impl Default for PieceController {
@@ -158,11 +162,70 @@ impl PieceController {
         Self {
             falling_timer: Timer::new(config.fall_duration, TimerMode::Repeating),
             locking_timer: Timer::new(config.locking_duration, TimerMode::Once),
-            movement_timer: Timer::new(config.movement_duration, TimerMode::Repeating),
+            soft_drop_timer: Timer::new(config.soft_drop_duration, TimerMode::Repeating),
             hard_dropped: false,
             used_hold: false,
-            active_movement: None,
-            movement_hold_duration: Duration::ZERO,
+        }
+    }
+}
+
+#[derive(Resource, Debug, Default)]
+pub(crate) struct DasState {
+    active_direction: Option<MoveDirection>,
+    held_duration: Duration,
+    repeat_elapsed: Duration,
+}
+
+impl DasState {
+    pub(crate) fn active_direction(&self) -> Option<MoveDirection> {
+        self.active_direction
+    }
+
+    pub(crate) fn next_action(
+        &mut self,
+        held_direction: Option<MoveDirection>,
+        just_pressed: bool,
+        delta: Duration,
+        config: &LevelConfig,
+    ) -> Option<MoveDirection> {
+        let Some(direction) = held_direction else {
+            self.active_direction = None;
+            self.held_duration = Duration::ZERO;
+            self.repeat_elapsed = Duration::ZERO;
+            return None;
+        };
+
+        if self.active_direction != Some(direction) {
+            self.active_direction = Some(direction);
+            self.held_duration = Duration::ZERO;
+            self.repeat_elapsed = Duration::ZERO;
+            return just_pressed.then_some(direction);
+        }
+
+        if just_pressed {
+            self.repeat_elapsed = Duration::ZERO;
+            return Some(direction);
+        }
+
+        let was_waiting_for_delay = self.held_duration < config.das_delay;
+        self.held_duration += delta;
+
+        if was_waiting_for_delay {
+            if self.held_duration >= config.das_delay {
+                self.repeat_elapsed = Duration::ZERO;
+                return Some(direction);
+            }
+            return None;
+        }
+
+        self.repeat_elapsed += delta;
+        if self.repeat_elapsed >= config.das_repeat_duration {
+            self.repeat_elapsed = self
+                .repeat_elapsed
+                .saturating_sub(config.das_repeat_duration);
+            Some(direction)
+        } else {
+            None
         }
     }
 }
@@ -279,14 +342,208 @@ pub fn spawn_piece_blocks(
         .collect()
 }
 
+pub(crate) fn spawn_coords_after_generation_rules(
+    config: &LevelConfig,
+    board: &Board,
+    piece: &Piece,
+) -> Option<(isize, isize)> {
+    let spawn_coords = config.spawn_coords(piece);
+    if is_block_out(piece, board, spawn_coords) {
+        return None;
+    }
+
+    Some(
+        piece
+            .try_move(board, spawn_coords, MoveDirection::Down)
+            .unwrap_or(spawn_coords),
+    )
+}
+
+pub(crate) fn spawn_falling_piece(
+    commands: &mut Commands,
+    config: &LevelConfig,
+    texture_assets: &Res<GameAssets>,
+    piece: Piece,
+    spawn_coords: (isize, isize),
+    used_hold: bool,
+) -> Entity {
+    let block_ids =
+        spawn_piece_blocks(commands, config, texture_assets, &piece, BlockKind::Falling);
+    let piece_entity = commands
+        .spawn((PieceState(piece), DespawnOnExit(GameState::InGame)))
+        .id();
+
+    commands
+        .entity(piece_entity)
+        .insert(Coords::from(spawn_coords))
+        .insert(PieceController {
+            used_hold,
+            ..PieceController::new(config)
+        })
+        .insert(Transform::from_translation(to_translation(
+            spawn_coords.0,
+            spawn_coords.1,
+            config.block_size,
+        )));
+    commands.entity(piece_entity).add_children(&block_ids);
+
+    piece_entity
+}
+
 pub fn piece_color(piece_type: PieceType) -> Color {
     match piece_type {
         PieceType::I => Color::srgb_u8(100, 196, 235), // cyan
-        PieceType::J => Color::srgb_u8(90, 99, 165),   // orange
-        PieceType::L => Color::srgb_u8(224, 127, 58),  // blue
+        PieceType::J => Color::srgb_u8(90, 99, 165),   // blue
+        PieceType::L => Color::srgb_u8(224, 127, 58),  // orange
         PieceType::O => Color::srgb_u8(241, 212, 72),  // yellow
         PieceType::S => Color::srgb_u8(100, 180, 82),  // green
         PieceType::T => Color::srgb_u8(161, 83, 152),  // purple
         PieceType::Z => Color::srgb_u8(216, 57, 52),   // red
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::engine::CellKind;
+
+    #[test]
+    fn das_tap_moves_once_immediately() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+
+        assert_eq!(
+            das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config),
+            Some(MoveDirection::Left)
+        );
+    }
+
+    #[test]
+    fn das_waits_for_initial_delay_before_repeating() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                Duration::from_millis(299),
+                &config
+            ),
+            None
+        );
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                Duration::from_millis(1),
+                &config
+            ),
+            Some(MoveDirection::Left)
+        );
+    }
+
+    #[test]
+    fn das_repeats_at_repeat_interval_after_delay() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config);
+        das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config);
+
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(49),
+                &config
+            ),
+            None
+        );
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(1),
+                &config
+            ),
+            Some(MoveDirection::Right)
+        );
+    }
+
+    #[test]
+    fn das_opposite_direction_press_restarts_delay_after_tap() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
+
+        assert_eq!(
+            das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config),
+            Some(MoveDirection::Right)
+        );
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(299),
+                &config
+            ),
+            None
+        );
+    }
+
+    #[test]
+    fn das_releasing_one_of_two_directions_reapplies_delay() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+
+        assert_eq!(
+            das.next_action(Some(MoveDirection::Right), false, Duration::ZERO, &config),
+            None
+        );
+        assert_eq!(
+            das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config),
+            Some(MoveDirection::Right)
+        );
+    }
+
+    #[test]
+    fn generation_rules_apply_immediate_drop_when_free() {
+        let config = LevelConfig::default();
+        let board = Board::with_top_margin(10, 20, 20);
+        let piece = Piece::from(PieceType::T);
+
+        assert_eq!(
+            spawn_coords_after_generation_rules(&config, &board, &piece),
+            Some((3, 18))
+        );
+    }
+
+    #[test]
+    fn generation_rules_keep_spawn_position_when_blocked_below() {
+        let config = LevelConfig::default();
+        let mut board = Board::with_top_margin(10, 20, 20);
+        let piece = Piece::from(PieceType::T);
+        assert!(board.set(4, 19, CellKind::Some(PieceType::O)));
+
+        assert_eq!(
+            spawn_coords_after_generation_rules(&config, &board, &piece),
+            Some((3, 19))
+        );
+    }
+
+    #[test]
+    fn generation_rules_return_none_on_block_out() {
+        let config = LevelConfig::default();
+        let mut board = Board::with_top_margin(10, 20, 20);
+        let piece = Piece::from(PieceType::T);
+        assert!(board.set(4, 20, CellKind::Some(PieceType::O)));
+
+        assert_eq!(
+            spawn_coords_after_generation_rules(&config, &board, &piece),
+            None
+        );
     }
 }

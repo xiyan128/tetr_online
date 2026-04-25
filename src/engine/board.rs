@@ -1,14 +1,11 @@
 use std::cmp::Ordering;
 use std::fmt::Display;
 
-use crate::core::pieces::PieceType;
+use crate::engine::pieces::PieceType;
 use array2d::Array2D;
-use bevy::prelude::{Component, Transform};
 use itertools::{iproduct, Product};
 use std::ops::Range;
 
-#[derive(Component)]
-#[require(Transform)]
 pub struct Board {
     width: usize,
     height: usize,
@@ -193,6 +190,13 @@ mod tests {
     }
 
     #[test]
+    fn negative_y_is_floor_collision() {
+        let board = Board::new(10, 20);
+
+        assert_eq!(board.get_cell_kind(0, -1), CellKind::Wall);
+    }
+
+    #[test]
     fn top_margin_accepts_hidden_spawn_cells() {
         let mut board = Board::with_top_margin(10, 20, 20);
 
@@ -244,7 +248,7 @@ impl CellKind {
     }
 }
 
-#[derive(Component, Debug, Clone)]
+#[derive(Debug, Clone)]
 pub struct Cell {
     // unique index
     pub(crate) x: isize,

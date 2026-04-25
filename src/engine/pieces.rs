@@ -1,5 +1,4 @@
-use crate::core::board::{Board, CellKind};
-use bevy::prelude::{info, Component, Transform};
+use crate::engine::board::{Board, CellKind};
 use std::fmt::Debug;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -65,7 +64,7 @@ impl std::ops::Add for PieceRotation {
             1 => PieceRotation::R90,
             2 => PieceRotation::R180,
             3 => PieceRotation::R270,
-            _ => PieceRotation::R0,
+            _ => unreachable!("rotation sum is normalized with rem_euclid(4)"),
         }
     }
 }
@@ -83,8 +82,7 @@ pub enum MoveDirection {
     Down,
 }
 
-#[derive(Component, Clone, Debug)]
-#[require(Transform)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct Piece {
     piece_type: PieceType,
     rotation: PieceRotation,
@@ -115,7 +113,7 @@ impl Piece {
     }
 
     fn get_shape(piece_type: PieceType) -> [(isize, isize); 4] {
-        use crate::core::constants::shapes::*;
+        use crate::engine::constants::shapes::*;
         match piece_type {
             PieceType::I => I,
             PieceType::J => J,
@@ -129,7 +127,7 @@ impl Piece {
 
     // margin-less board with fixed rotation
     fn get_avatar_shape(piece_type: PieceType) -> [(isize, isize); 4] {
-        use crate::core::constants::avatar_shapes::*;
+        use crate::engine::constants::avatar_shapes::*;
         match piece_type {
             PieceType::I => I,
             PieceType::J => J,
@@ -142,7 +140,7 @@ impl Piece {
     }
 
     pub(crate) fn avatar_board(&self) -> Board {
-        let shape = Self::get_avatar_shape(self.piece_type).to_vec();
+        let shape = Self::get_avatar_shape(self.piece_type);
         // get width and height of the avatar board
         // those are the max x and y values of the shape
         let (width, height) = shape.iter().fold((0, 0), |(max_x, max_y), (x, y)| {
@@ -161,19 +159,29 @@ impl Piece {
         self.piece_type
     }
 
+    pub fn spawn_coords(&self, board_width: usize, visible_height: usize) -> (isize, isize) {
+        let x = board_width as isize / 2 - 2;
+        let y = match self.piece_type {
+            PieceType::I => visible_height as isize - 2,
+            _ => visible_height as isize - 1,
+        };
+        (x, y)
+    }
+
+    pub fn cells(&self) -> [(isize, isize); 4] {
+        let mut shape = Self::get_shape(self.piece_type);
+        if self.piece_type != PieceType::O {
+            let (_, height) = self.board_size();
+            Self::rotate_shape(height, &mut shape, self.rotation as u8);
+        }
+        shape
+    }
+
     pub fn board(&self) -> Board {
         let (width, height) = self.board_size();
         let mut board = Board::new(width, height);
 
-        let mut shape = Self::get_shape(self.piece_type).to_vec();
-
-        let n = self.rotation as u8;
-
-        if self.piece_type != PieceType::O {
-            Self::rotate_shape(height, &mut shape, n);
-        }
-
-        for (x, y) in shape {
+        for (x, y) in self.cells() {
             board.set(x, y, CellKind::Some(self.piece_type));
         }
 
@@ -192,14 +200,11 @@ impl Piece {
     }
 
     pub fn collide_with(&self, board: &Board, offset: (isize, isize)) -> bool {
-        let piece_board = self.board();
         let (x_offset, y_offset) = offset;
 
-        for (x, y) in self.board().cell_coords() {
-            let piece_cell = piece_board.get_cell_kind(x, y);
+        for (x, y) in self.cells() {
             let board_cell = board.get_cell_kind(x + x_offset, y + y_offset);
-
-            if piece_cell.is_some() && !board_cell.is_none() {
+            if board_cell != CellKind::None {
                 return true;
             }
         }
@@ -231,8 +236,8 @@ impl Piece {
         board: &Board,
         offset: (isize, isize),
         rotation: PieceRotation,
-    ) -> Option<(PieceRotation, (isize, isize), usize)> {
-        use crate::core::constants::{DEFAULT_KICKS, I_KICKS};
+    ) -> Option<(PieceRotation, (isize, isize), u8)> {
+        use crate::engine::constants::{DEFAULT_KICKS, I_KICKS};
 
         if self.piece_type == PieceType::O {
             return Some((PieceRotation::R0, offset, 0)); // O piece doesn't rotate
@@ -268,8 +273,7 @@ impl Piece {
         for (set_idx, (x_offset, y_offset)) in kicks.iter().enumerate() {
             let new_offset = (offset.0 + x_offset, offset.1 + y_offset);
             if let Some(new_rotation) = self.try_rotate(board, new_offset, rotation) {
-                info!("Kicked to {:?} (set {:?})", (x_offset, y_offset), set_idx);
-                return Some((new_rotation, new_offset, set_idx));
+                return Some((new_rotation, new_offset, (set_idx + 1) as u8));
             }
         }
 
@@ -304,6 +308,17 @@ impl From<PieceType> for Piece {
 mod tests {
     use super::*;
 
+    fn global_cells(piece: &Piece, offset: (isize, isize)) -> Vec<(isize, isize)> {
+        let mut cells = piece
+            .board()
+            .cell_coords()
+            .into_iter()
+            .map(|(x, y)| (x + offset.0, y + offset.1))
+            .collect::<Vec<_>>();
+        cells.sort();
+        cells
+    }
+
     #[test]
     fn every_piece_has_four_blocks_in_every_rotation() {
         for piece_type in PieceType::all() {
@@ -317,6 +332,22 @@ mod tests {
                     "{piece_type:?} at {rotation:?} should occupy four cells"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn spawn_coords_match_translated_guideline_cells() {
+        let cases = [
+            (PieceType::I, vec![(3, 20), (4, 20), (5, 20), (6, 20)]),
+            (PieceType::O, vec![(4, 20), (4, 21), (5, 20), (5, 21)]),
+            (PieceType::T, vec![(3, 20), (4, 20), (4, 21), (5, 20)]),
+            (PieceType::J, vec![(3, 20), (3, 21), (4, 20), (5, 20)]),
+        ];
+
+        for (piece_type, expected) in cases {
+            let piece = Piece::new(piece_type);
+
+            assert_eq!(global_cells(&piece, piece.spawn_coords(10, 20)), expected);
         }
     }
 
@@ -375,13 +406,13 @@ mod tests {
     }
 
     #[test]
-    fn wall_kick_can_find_a_valid_rotation_offset() {
+    fn wall_kick_reports_one_based_srs_kick_number() {
         let board = Board::new(10, 20);
         let piece = Piece::new(PieceType::T);
 
         assert_eq!(
             piece.try_rotate_with_kicks(&board, (8, 5), PieceRotation::R90),
-            Some((PieceRotation::R90, (7, 5), 1))
+            Some((PieceRotation::R90, (7, 5), 2))
         );
     }
 }

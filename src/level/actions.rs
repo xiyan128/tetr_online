@@ -3,30 +3,38 @@ use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::engine::{Board, LockDownMode, MoveDirection, Piece, PieceRotation, PieceType};
-use crate::level::common;
 use crate::level::common::{
-    spawn_piece_blocks, ActionEvent, AudioCue, BlockKind, BoardState, Coords, LevelConfig,
-    MatchCoords, PieceController, PieceGeneratorState, PieceHolder, PieceState,
+    spawn_coords_after_generation_rules, spawn_falling_piece, ActionEvent, AudioCue, BoardState,
+    Coords, DasState, LevelConfig, LevelSystems, MatchCoords, PieceController, PieceGeneratorState,
+    PieceHolder, PieceState,
 };
 use crate::GameState;
 use itertools::iproduct;
 use std::iter::zip;
+use std::time::Duration;
 
 pub struct ActionsPlugin;
 
 impl Plugin for ActionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(
-            Update,
-            (
-                handle_movements,
-                handle_rotations,
-                handle_hard_drop,
-                swap_hold,
-            )
-                .run_if(in_state(GameState::InGame)),
-        );
+        app.init_resource::<DasState>()
+            .add_systems(OnEnter(GameState::InGame), reset_das_state)
+            .add_systems(
+                Update,
+                (
+                    handle_movements,
+                    handle_rotations,
+                    handle_hard_drop,
+                    swap_hold,
+                )
+                    .in_set(LevelSystems::PlayerInput)
+                    .run_if(in_state(GameState::InGame)),
+            );
     }
+}
+
+fn reset_das_state(mut das_state: ResMut<DasState>) {
+    *das_state = DasState::default();
 }
 
 #[derive(SystemParam)]
@@ -49,8 +57,9 @@ struct RotationQueries<'w, 's> {
 #[derive(SystemParam)]
 struct HoldQueries<'w, 's> {
     holder: Query<'w, 's, &'static mut PieceHolder>,
-    piece: Query<'w, 's, (Entity, &'static PieceState, &'static mut PieceController)>,
+    piece: Query<'w, 's, (Entity, &'static PieceState, &'static PieceController)>,
     generator: Query<'w, 's, &'static mut PieceGeneratorState>,
+    board: Query<'w, 's, &'static BoardState>,
 }
 
 fn move_piece_and_update(
@@ -79,6 +88,43 @@ fn reset_locking_timer_after_successful_move_or_rotation(
     }
 }
 
+fn horizontal_input(
+    keyboard: &ButtonInput<KeyCode>,
+    das_state: &DasState,
+) -> (Option<MoveDirection>, bool) {
+    let left_pressed = keyboard.pressed(KeyCode::ArrowLeft);
+    let right_pressed = keyboard.pressed(KeyCode::ArrowRight);
+    let left_just_pressed = keyboard.just_pressed(KeyCode::ArrowLeft);
+    let right_just_pressed = keyboard.just_pressed(KeyCode::ArrowRight);
+
+    match (left_pressed, right_pressed) {
+        (true, false) => (Some(MoveDirection::Left), left_just_pressed),
+        (false, true) => (Some(MoveDirection::Right), right_just_pressed),
+        (true, true) if left_just_pressed => (Some(MoveDirection::Left), true),
+        (true, true) if right_just_pressed => (Some(MoveDirection::Right), true),
+        (true, true) => (das_state.active_direction(), false),
+        (false, false) => (None, false),
+    }
+}
+
+fn soft_drop_action(
+    piece_controller: &mut PieceController,
+    keyboard: &ButtonInput<KeyCode>,
+    delta: Duration,
+) -> bool {
+    if !keyboard.pressed(KeyCode::ArrowDown) {
+        piece_controller.soft_drop_timer.reset();
+        return false;
+    }
+
+    piece_controller.soft_drop_timer.tick(delta);
+    keyboard.just_pressed(KeyCode::ArrowDown) || piece_controller.soft_drop_timer.is_finished()
+}
+
+fn reset_piece_to_north(piece: &Piece) -> Piece {
+    Piece::from(piece.piece_type())
+}
+
 fn handle_movements(
     mut query: Query<(
         &PieceState,
@@ -90,8 +136,17 @@ fn handle_movements(
     keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     time: Res<Time>,
+    mut das_state: ResMut<DasState>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
+    let (horizontal_movement, horizontal_just_pressed) = horizontal_input(&keyboard, &das_state);
+    let movement = das_state.next_action(
+        horizontal_movement,
+        horizontal_just_pressed,
+        time.delta(),
+        &config,
+    );
+
     let Ok((piece, mut coords, mut transform, mut piece_controller)) = query.single_mut() else {
         return;
     };
@@ -99,63 +154,28 @@ fn handle_movements(
         return;
     };
 
-    piece_controller.movement_timer.tick(time.delta());
+    let soft_drop = soft_drop_action(&mut piece_controller, &keyboard, time.delta());
 
-    let mut movement = None;
-    let default_duration = config.movement_duration;
-    let mut duration = default_duration;
-    let mut just_pressed = false;
-
-    for move_dir in [
-        MoveDirection::Left,
-        MoveDirection::Right,
-        MoveDirection::Down,
-    ] {
-        let key = key_for_movement(move_dir);
-        if keyboard.pressed(key) {
-            movement = Some(move_dir);
-            just_pressed = keyboard.just_pressed(key);
-
-            if move_dir == MoveDirection::Down {
-                duration = config.soft_drop_duration;
-                break;
-            }
-
-            if piece_controller.active_movement != Some(move_dir) {
-                piece_controller.active_movement = Some(move_dir);
-                piece_controller.movement_hold_duration = Default::default();
-            }
-            piece_controller.movement_hold_duration += time.delta();
-            let press_duration = piece_controller.movement_hold_duration;
-            if press_duration > duration {
-                duration = default_duration.mul_f64(
-                    (config.movement_speedup)
-                        .powf(press_duration.as_secs_f64() / default_duration.as_secs_f64()),
-                );
-            }
-            break;
+    if let Some(movement) = movement {
+        if move_piece_and_update(&config, piece, &mut coords, &mut transform, board, movement) {
+            ev_action.write(ActionEvent::Movement(movement));
+            reset_locking_timer_after_successful_move_or_rotation(&mut piece_controller, &config);
+            return;
         }
     }
 
-    if movement.is_none() {
-        piece_controller.active_movement = None;
-        piece_controller.movement_hold_duration = Default::default();
-    }
-
-    if piece_controller.movement_timer.is_finished() || just_pressed {
-        if let Some(movement) = movement {
-            if move_piece_and_update(&config, piece, &mut coords, &mut transform, board, movement) {
-                ev_action.write(ActionEvent::Movement(movement));
-                reset_locking_timer_after_successful_move_or_rotation(
-                    &mut piece_controller,
-                    &config,
-                );
-                piece_controller.movement_timer.set_duration(duration);
-            }
-            if just_pressed {
-                piece_controller.movement_timer.reset();
-            }
-        }
+    if soft_drop
+        && move_piece_and_update(
+            &config,
+            piece,
+            &mut coords,
+            &mut transform,
+            board,
+            MoveDirection::Down,
+        )
+    {
+        ev_action.write(ActionEvent::Movement(MoveDirection::Down));
+        reset_locking_timer_after_successful_move_or_rotation(&mut piece_controller, &config);
     }
 }
 
@@ -272,11 +292,10 @@ fn swap_hold(
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    mut next_game_state: ResMut<NextState<GameState>>,
     mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    let Ok((current_piece_entity, current_piece, mut piece_controller)) =
-        queries.piece.single_mut()
-    else {
+    let Ok((current_piece_entity, current_piece, piece_controller)) = queries.piece.single() else {
         return;
     };
     if !keyboard.just_pressed(KeyCode::ShiftLeft) || piece_controller.used_hold {
@@ -289,55 +308,52 @@ fn swap_hold(
     let Ok(mut generator) = queries.generator.single_mut() else {
         return;
     };
+    let Ok(board) = queries.board.single() else {
+        return;
+    };
 
     let next_piece = holder
         .piece
         .take()
+        .map(|piece| reset_piece_to_north(&piece))
         .unwrap_or(Piece::from(generator.next().unwrap()));
 
-    let block_ids = spawn_piece_blocks(
+    let Some(spawn_coords) = spawn_coords_after_generation_rules(&config, board, &next_piece)
+    else {
+        next_game_state.set(GameState::GameOver);
+        return;
+    };
+
+    spawn_falling_piece(
         &mut commands,
         &config,
         &texture_assets,
-        &next_piece,
-        BlockKind::Falling,
+        next_piece,
+        spawn_coords,
+        true,
     );
 
-    let spawn_coords = config.spawn_coords(&next_piece);
-    let piece_entity = commands
-        .spawn((PieceState(next_piece), DespawnOnExit(GameState::InGame)))
-        .id();
-
-    // spawn new piece
-    commands
-        .entity(piece_entity)
-        .insert(Coords::from(spawn_coords))
-        .insert(PieceController {
-            used_hold: true, // prevent hold from being used again
-            ..PieceController::new(&config)
-        })
-        .insert(Transform::from_translation(common::to_translation(
-            spawn_coords.0,
-            spawn_coords.1,
-            config.block_size,
-        )));
-
-    commands.entity(piece_entity).add_children(&block_ids);
-
-    holder.piece = Some(current_piece.0.clone());
+    holder.piece = Some(reset_piece_to_north(current_piece));
 
     // remove old piece
     commands.entity(current_piece_entity).despawn();
 
-    piece_controller.used_hold = true;
     ev_action.write(ActionEvent::Hold);
     commands.trigger(AudioCue::Hold);
 }
 
-fn key_for_movement(direction: MoveDirection) -> KeyCode {
-    match direction {
-        MoveDirection::Down => KeyCode::ArrowDown,
-        MoveDirection::Left => KeyCode::ArrowLeft,
-        MoveDirection::Right => KeyCode::ArrowRight,
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn reset_piece_to_north_preserves_type_and_clears_rotation() {
+        let mut piece = Piece::from(PieceType::T);
+        piece.rotate_to(PieceRotation::R90);
+
+        let reset = reset_piece_to_north(&piece);
+
+        assert_eq!(reset.piece_type(), PieceType::T);
+        assert_eq!(reset.rotation(), PieceRotation::R0);
     }
 }

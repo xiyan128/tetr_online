@@ -72,12 +72,21 @@ impl Plugin for LevelPlugin {
             .add_plugins(UIPlugin)
             // resources
             .init_resource::<LevelConfig>()
+            .configure_sets(
+                Update,
+                (LevelSystems::PieceSetup, LevelSystems::PlayerInput).chain(),
+            )
             // setup
             .add_systems(OnEnter(GameState::InGame), level_setup)
             // updates
             .add_systems(
                 Update,
-                (piece_setup, piece_fall, detect_placement, ghost_blocks)
+                (
+                    piece_setup.in_set(LevelSystems::PieceSetup),
+                    piece_fall,
+                    detect_placement,
+                    ghost_blocks,
+                )
                     .run_if(in_state(GameState::InGame)),
             )
             .add_systems(Update, piece_lock.run_if(in_state(PlayingState::Locking)));
@@ -100,6 +109,12 @@ struct LockQueries<'w, 's> {
     board: Query<'w, 's, (Entity, &'static mut BoardState)>,
     falling_blocks: FallingBlockQuery<'w, 's>,
     static_blocks: Query<'w, 's, Entity, With<StaticBlock>>,
+}
+
+#[derive(SystemParam)]
+struct LockStateTransitions<'w> {
+    game: ResMut<'w, NextState<GameState>>,
+    playing: ResMut<'w, NextState<PlayingState>>,
 }
 
 #[derive(SystemParam)]
@@ -180,16 +195,6 @@ fn spawn_static_block(
     spawn_free_block(commands, config, assets, cell, BlockKind::Static)
 }
 
-fn apply_immediate_drop(
-    piece: &Piece,
-    board: &Board,
-    spawn_coords: (isize, isize),
-) -> (isize, isize) {
-    piece
-        .try_move(board, spawn_coords, MoveDirection::Down)
-        .unwrap_or(spawn_coords)
-}
-
 fn piece_setup(
     mut commands: Commands,
     config: Res<LevelConfig>,
@@ -201,54 +206,33 @@ fn piece_setup(
 ) {
     // if there is already a piece, don't spawn a new one
     if piece_query.single().is_ok() {
-        info!("piece already exists");
         return;
     }
     let Ok(mut generator) = generator_query.single_mut() else {
         return;
     };
 
-    info!("piece_setup");
     let next_piece_type = generator.next();
-    info!("preview: {:?}", generator.preview());
     let piece = Piece::from(next_piece_type.unwrap());
-    let spawn_coords = config.spawn_coords(&piece);
 
     let Ok(board) = board_query.single() else {
         return;
     };
 
-    // test collision and game over
-    if piece.collide_with(board, spawn_coords) {
+    let Some(spawn_coords) = spawn_coords_after_generation_rules(&config, board, &piece) else {
         info!("game over");
         next_game_state.set(GameState::GameOver);
         return;
-    }
-    let spawn_coords = apply_immediate_drop(&piece, board, spawn_coords);
+    };
 
-    let block_ids: Vec<Entity> = spawn_piece_blocks(
+    spawn_falling_piece(
         &mut commands,
         &config,
         &texture_assets,
-        &piece,
-        BlockKind::Falling,
+        piece,
+        spawn_coords,
+        false,
     );
-
-    let piece_entity = commands
-        .spawn((PieceState(piece), DespawnOnExit(GameState::InGame)))
-        .id();
-
-    commands
-        .entity(piece_entity)
-        .insert(Coords::from(spawn_coords))
-        .insert(PieceController::new(&config))
-        .insert(Transform::from_translation(common::to_translation(
-            spawn_coords.0,
-            spawn_coords.1,
-            config.block_size,
-        )));
-
-    commands.entity(piece_entity).add_children(&block_ids);
 }
 
 fn piece_fall(
@@ -285,7 +269,7 @@ fn piece_lock(
     time: Res<Time>,
     config: Res<LevelConfig>,
     assets: Res<GameAssets>,
-    mut next_playing_state: ResMut<NextState<PlayingState>>,
+    mut next_states: LockStateTransitions,
     mut ev_placing: MessageWriter<PlacingEvent>,
 ) {
     let Ok((piece_entity, piece, coords, mut piece_controller, children)) =
@@ -304,7 +288,8 @@ fn piece_lock(
     {
         info!("piece_place");
         piece_controller.hard_dropped = false; // reset hard drop flag
-        next_playing_state.set(PlayingState::Falling);
+        next_states.playing.set(PlayingState::Falling);
+        let lock_out = is_lock_out(piece, (coords.x, coords.y), config.board_height);
 
         // hand over children to board
         commands.entity(board_entity).add_children(children);
@@ -329,6 +314,11 @@ fn piece_lock(
                 .insert(StaticBlock {})
                 .remove::<FallingBlock>();
             child_transform.update_coords(child_coords.as_ref(), &config);
+        }
+
+        if lock_out {
+            next_states.game.set(GameState::GameOver);
+            return;
         }
 
         // check for line clears
@@ -529,22 +519,5 @@ mod tests {
             .resource_mut::<NextState<GameState>>()
             .set(GameState::InGame);
         app.update();
-    }
-
-    #[test]
-    fn immediate_drop_moves_spawn_down_when_free() {
-        let board = Board::with_top_margin(10, 20, 20);
-        let piece = Piece::from(PieceType::T);
-
-        assert_eq!(apply_immediate_drop(&piece, &board, (3, 19)), (3, 18));
-    }
-
-    #[test]
-    fn immediate_drop_keeps_spawn_when_blocked_below() {
-        let mut board = Board::with_top_margin(10, 20, 20);
-        let piece = Piece::from(PieceType::T);
-        assert!(board.set(4, 19, CellKind::Some(PieceType::O)));
-
-        assert_eq!(apply_immediate_drop(&piece, &board, (3, 19)), (3, 19));
     }
 }

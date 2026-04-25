@@ -1,5 +1,4 @@
-use crate::level::common::{LevelConfig, PieceController};
-use crate::level::Board;
+use crate::level::common::{BoardState, LevelConfig, PieceController};
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -9,7 +8,7 @@ pub struct LockingTimerBar;
 pub fn spawn_locking_timer_bar(
     mut commands: Commands,
     config: Res<LevelConfig>,
-    board_entity_query: Query<Entity, With<Board>>,
+    board_entity_query: Query<Entity, With<BoardState>>,
 ) {
     let Ok(board_entity) = board_entity_query.single() else {
         return;
@@ -37,17 +36,16 @@ pub fn spawn_locking_timer_bar(
     commands.entity(board_entity).add_child(timer_bar_entity);
 }
 
-// update_locking_timer_bar
 pub fn update_locking_timer_bar(
-    mut piece_controller_query: Query<&mut PieceController>,
+    piece_controller_query: Query<&PieceController>,
     mut bar_query: Query<&mut Sprite, With<LockingTimerBar>>,
     config: Res<LevelConfig>,
 ) {
-    let Ok(mut piece_controller) = piece_controller_query.single_mut() else {
+    let Ok(piece_controller) = piece_controller_query.single() else {
         return;
     };
 
-    let timer = &mut piece_controller.locking_timer;
+    let timer = &piece_controller.locking_timer;
     let Ok(mut bar) = bar_query.single_mut() else {
         return;
     };
@@ -58,12 +56,10 @@ pub fn update_locking_timer_bar(
     bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
 }
 
-// remove_locking_timer_bar
 pub fn despawn_locking_timer_bar(
     bar_query: Query<Entity, With<LockingTimerBar>>,
     mut commands: Commands,
 ) {
-    info!("despawning locking timer bar");
     let Ok(bar) = bar_query.single() else {
         return;
     };

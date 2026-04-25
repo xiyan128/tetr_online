@@ -7,7 +7,7 @@ pub(crate) struct GameOverPlugin;
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::GameOver), (setup_game_over_ui,).chain())
-            .add_systems(Update, button_system);
+            .add_systems(Update, button_system.run_if(in_state(GameState::GameOver)));
     }
 }
 

@@ -4,8 +4,7 @@ mod score_views;
 
 use bevy::prelude::*;
 
-use crate::core::PieceGenerator;
-use crate::level::common::{LevelConfig, PieceHolder, PlayingState};
+use crate::level::common::{LevelConfig, PieceGeneratorState, PieceHolder, PlayingState};
 use crate::level::score::Scorer;
 use crate::level::ui::piece_previewer::*;
 use crate::level::ui::placement_timer_bar::*;
@@ -30,7 +29,7 @@ impl Plugin for UIPlugin {
         .add_systems(
             Update,
             update_piece_previewer.run_if(
-                any_with_component::<PiecePreviewer>.and(any_with_component::<PieceGenerator>),
+                any_with_component::<PiecePreviewer>.and(any_with_component::<PieceGeneratorState>),
             ),
         )
         // update holder viewer

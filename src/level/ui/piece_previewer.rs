@@ -108,7 +108,7 @@ pub fn update_piece_previewer(
 pub fn update_hold_viewer(
     children_query: Query<&Children, With<HoldViewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
-    mut holder_query: Query<&PieceHolder>,
+    holder_query: Query<&PieceHolder, Changed<PieceHolder>>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
@@ -117,7 +117,7 @@ pub fn update_hold_viewer(
         return;
     }
 
-    let Ok(piece_holder) = holder_query.single_mut() else {
+    let Ok(piece_holder) = holder_query.single() else {
         return;
     };
 
@@ -129,15 +129,11 @@ pub fn update_hold_viewer(
         // clear the preview holder
         commands.entity(child).despawn_related::<Children>();
 
-        if let Some(piece_type) = piece_holder.piece.clone() {
+        if let Some(piece) = piece_holder.piece.as_ref() {
             let (_, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
 
-            let (preview_board_size, piece_entity) = spawn_holder_piece(
-                &config,
-                &game_assets,
-                &mut commands,
-                piece_type.piece_type(),
-            );
+            let (preview_board_size, piece_entity) =
+                spawn_holder_piece(&config, &game_assets, &mut commands, piece.piece_type());
 
             commands.entity(child).add_child(piece_entity);
 

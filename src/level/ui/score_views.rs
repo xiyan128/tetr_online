@@ -145,6 +145,10 @@ pub fn fade_out_score_type_text(
     let Ok(mut color) = text_query.single_mut() else {
         return;
     };
+    if color.0.alpha() <= 0.0 {
+        return;
+    }
+
     let alpha = color.0.alpha() - time.delta_secs();
     color.0 = color.0.with_alpha(alpha.max(0.0));
 }
