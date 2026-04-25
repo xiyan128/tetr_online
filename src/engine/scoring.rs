@@ -6,6 +6,8 @@ use crate::engine::t_spin::TSpinKind;
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EngineScoreAction {
+    SoftDrop,
+    HardDrop { cells: usize },
     NoClear,
     Single,
     Double,
@@ -32,6 +34,7 @@ impl EngineScoreAction {
 
     fn base_score(self, level: usize) -> usize {
         let base_score = match self {
+            Self::SoftDrop | Self::HardDrop { .. } => 0,
             Self::NoClear => 0,
             Self::Single => 100,
             Self::Double => 300,
@@ -79,6 +82,7 @@ impl EngineScoreAction {
 
     fn spin_and_lines(self) -> (Option<TSpinKind>, usize) {
         match self {
+            Self::SoftDrop | Self::HardDrop { .. } => (None, 0),
             Self::NoClear => (None, 0),
             Self::Single => (None, 1),
             Self::Double => (None, 2),
@@ -162,6 +166,26 @@ impl ScoreState {
             score,
             total_score: self.score,
             back_to_back_bonus,
+        })
+    }
+
+    pub(crate) fn manual_drop(
+        &mut self,
+        action: EngineScoreAction,
+        cells: usize,
+    ) -> Option<ScoreAward> {
+        let score = match action {
+            EngineScoreAction::SoftDrop => cells,
+            EngineScoreAction::HardDrop { .. } => 2 * cells,
+            _ => 0,
+        };
+        self.score += score;
+
+        (score > 0).then_some(ScoreAward {
+            action,
+            score,
+            total_score: self.score,
+            back_to_back_bonus: false,
         })
     }
 }

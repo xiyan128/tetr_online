@@ -6,7 +6,7 @@ use crate::engine::goals::GoalSystem;
 use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
 use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
-use crate::engine::scoring::{EngineScoreAction, ScoreState};
+use crate::engine::scoring::{EngineScoreAction, ScoreAward, ScoreState};
 use crate::engine::t_spin::{classify_t_spin, TSpinKind};
 use crate::engine::RotationDirection;
 
@@ -335,6 +335,9 @@ impl Engine {
             direction,
             origin,
         });
+        if direction == MoveDirection::Down {
+            self.score_manual_drop(EngineScoreAction::SoftDrop, 1, events);
+        }
     }
 
     fn rotate_active_piece(&mut self, direction: RotationDirection, events: &mut Vec<EngineEvent>) {
@@ -385,6 +388,13 @@ impl Engine {
             piece_type: active.piece_type(),
             cells_dropped,
         });
+        self.score_manual_drop(
+            EngineScoreAction::HardDrop {
+                cells: cells_dropped,
+            },
+            cells_dropped,
+            events,
+        );
         self.lock_active_piece(active, events);
     }
 
@@ -425,12 +435,18 @@ impl Engine {
             self.score_state
                 .lock_result(self.config.goal_system, t_spin, lines_cleared)
         {
-            events.push(EngineEvent::ScoreAwarded {
-                action: score_award.action,
-                score: score_award.score,
-                total_score: score_award.total_score,
-                back_to_back_bonus: score_award.back_to_back_bonus,
-            });
+            push_score_award(events, score_award);
+        }
+    }
+
+    fn score_manual_drop(
+        &mut self,
+        action: EngineScoreAction,
+        cells: usize,
+        events: &mut Vec<EngineEvent>,
+    ) {
+        if let Some(score_award) = self.score_state.manual_drop(action, cells) {
+            push_score_award(events, score_award);
         }
     }
 
@@ -566,6 +582,15 @@ fn update_landing_state(
     } else if grounded_move_or_rotation {
         apply_grounded_move_or_rotation(active, config.lock_down_mode, config.lock_down_seconds);
     }
+}
+
+fn push_score_award(events: &mut Vec<EngineEvent>, score_award: ScoreAward) {
+    events.push(EngineEvent::ScoreAwarded {
+        action: score_award.action,
+        score: score_award.score,
+        total_score: score_award.total_score,
+        back_to_back_bonus: score_award.back_to_back_bonus,
+    });
 }
 
 #[cfg(test)]
@@ -790,11 +815,19 @@ mod tests {
                 soft_drop: true,
                 ..InputFrame::default()
             }),
-            vec![EngineEvent::Moved {
-                piece_type: before.piece_type,
-                direction: MoveDirection::Down,
-                origin: expected_origin,
-            }]
+            vec![
+                EngineEvent::Moved {
+                    piece_type: before.piece_type,
+                    direction: MoveDirection::Down,
+                    origin: expected_origin,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::SoftDrop,
+                    score: 1,
+                    total_score: 1,
+                    back_to_back_bonus: false,
+                },
+            ]
         );
     }
 
@@ -846,6 +879,12 @@ mod tests {
                     piece_type,
                     cells_dropped,
                 },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::HardDrop { cells },
+                    score,
+                    total_score,
+                    back_to_back_bonus: false,
+                },
                 EngineEvent::Locked {
                     piece_type: locked_piece_type,
                     lines_cleared: 0,
@@ -857,6 +896,9 @@ mod tests {
                 && *locked_piece_type == first_piece_type
                 && *spawned_piece_type == second_piece_type
                 && *cells_dropped > 0
+                && *cells == *cells_dropped
+                && *score == *cells_dropped * 2
+                && *total_score == *score
         ));
 
         let snapshot = engine.snapshot();
