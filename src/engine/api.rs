@@ -3,8 +3,8 @@ use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};
 use crate::engine::generator::PieceGenerator;
 use crate::engine::goals::{GoalProgress, GoalSystem};
-use crate::engine::gravity::MIN_LEVEL;
-use crate::engine::lock_down::{LockDownMode, LOCK_DOWN_SECONDS};
+use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
+use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 use crate::engine::RotationDirection;
 
@@ -98,13 +98,16 @@ pub struct SnapshotCell {
     pub piece_type: PieceType,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActivePieceSnapshot {
     pub piece_type: PieceType,
     pub rotation: PieceRotation,
     pub origin: (isize, isize),
     pub cells: Vec<SnapshotCell>,
     pub hold_used: bool,
+    pub landed: bool,
+    pub lock_timer_seconds: f32,
+    pub lock_timer_fraction: f32,
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -132,6 +135,7 @@ pub struct Engine {
     lines: usize,
     goal_progress: GoalProgress,
     game_over: Option<GameOverStatus>,
+    gravity_accumulator_seconds: f32,
 }
 
 impl Engine {
@@ -153,6 +157,7 @@ impl Engine {
             lines: 0,
             goal_progress,
             game_over: None,
+            gravity_accumulator_seconds: 0.0,
         };
         engine.fill_next_queue();
         engine
@@ -167,9 +172,15 @@ impl Engine {
         if self.active.is_none() {
             self.spawn_next_piece(&mut events);
         }
+        if self.game_over.is_some() {
+            return events;
+        }
 
         if input.hold {
             self.hold_active_piece(&mut events);
+        }
+        if self.game_over.is_some() {
+            return events;
         }
 
         if input.hard_drop {
@@ -193,6 +204,8 @@ impl Engine {
             self.move_active_piece(MoveDirection::Down, &mut events);
         }
 
+        self.advance_time(input.dt_seconds.max(0.0), &mut events);
+
         events
     }
 
@@ -200,7 +213,10 @@ impl Engine {
         EngineSnapshot {
             config: self.config.clone(),
             board_cells: self.board_snapshot_cells(),
-            active: self.active.as_ref().map(active_piece_snapshot),
+            active: self
+                .active
+                .as_ref()
+                .map(|active| active_piece_snapshot(active, &self.config)),
             hold: self.hold,
             next_queue: self.next_queue.clone(),
             score: self.score,
@@ -255,7 +271,9 @@ impl Engine {
         if hold_used {
             active.mark_hold_used();
         }
+        update_landing_state(&self.board, &self.config, &mut active, false, false);
         self.active = Some(active);
+        self.gravity_accumulator_seconds = 0.0;
         events.push(EngineEvent::Spawned { piece_type });
     }
 
@@ -283,6 +301,7 @@ impl Engine {
         let Some(active) = self.active.as_mut() else {
             return;
         };
+        let was_landed = active.landed();
         let Some(origin) = active
             .piece()
             .try_move(&self.board, active.origin(), direction)
@@ -295,6 +314,16 @@ impl Engine {
             MoveDirection::Left | MoveDirection::Right => crate::engine::PieceAction::Move,
         };
         active.move_to(origin, action);
+        update_landing_state(
+            &self.board,
+            &self.config,
+            active,
+            was_landed,
+            matches!(direction, MoveDirection::Left | MoveDirection::Right),
+        );
+        if direction == MoveDirection::Down {
+            self.gravity_accumulator_seconds = 0.0;
+        }
         events.push(EngineEvent::Moved {
             piece_type: active.piece_type(),
             direction,
@@ -306,6 +335,7 @@ impl Engine {
         let Some(active) = self.active.as_mut() else {
             return;
         };
+        let was_landed = active.landed();
         let target_rotation = match direction {
             RotationDirection::Clockwise => active.rotation() + PieceRotation::R90,
             RotationDirection::Counterclockwise => active.rotation() + PieceRotation::R270,
@@ -322,6 +352,7 @@ impl Engine {
         }
 
         active.rotate_to(rotation, origin, direction, kick_number, false);
+        update_landing_state(&self.board, &self.config, active, was_landed, true);
         events.push(EngineEvent::Rotated {
             piece_type: active.piece_type(),
             rotation,
@@ -377,6 +408,66 @@ impl Engine {
         self.spawn_next_piece(events);
     }
 
+    fn advance_time(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
+        if dt_seconds == 0.0 || self.active.is_none() {
+            return;
+        }
+
+        if self.active.as_ref().is_some_and(ActivePiece::landed) {
+            self.advance_lock_timer(dt_seconds, events);
+        } else {
+            self.advance_gravity(dt_seconds, events);
+        }
+    }
+
+    fn advance_lock_timer(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
+        let Some(active) = self.active.as_mut() else {
+            return;
+        };
+        let remaining = active.lock_timer_seconds() - dt_seconds;
+        active.set_lock_timer_seconds(remaining);
+        if remaining > 0.0 {
+            return;
+        }
+
+        let active = self.active.take().expect("active piece exists");
+        self.lock_active_piece(active, events);
+    }
+
+    fn advance_gravity(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
+        self.gravity_accumulator_seconds += dt_seconds;
+        let fall_seconds = fall_speed_seconds(self.goal_progress.level());
+
+        while self.gravity_accumulator_seconds >= fall_seconds {
+            self.gravity_accumulator_seconds -= fall_seconds;
+
+            let Some(active) = self.active.as_mut() else {
+                return;
+            };
+            let Some(origin) =
+                active
+                    .piece()
+                    .try_move(&self.board, active.origin(), MoveDirection::Down)
+            else {
+                update_landing_state(&self.board, &self.config, active, false, false);
+                self.gravity_accumulator_seconds = 0.0;
+                return;
+            };
+
+            active.move_to(origin, crate::engine::PieceAction::Fall);
+            update_landing_state(&self.board, &self.config, active, false, false);
+            events.push(EngineEvent::Moved {
+                piece_type: active.piece_type(),
+                direction: MoveDirection::Down,
+                origin,
+            });
+            if active.landed() {
+                self.gravity_accumulator_seconds = 0.0;
+                return;
+            }
+        }
+    }
+
     fn board_snapshot_cells(&self) -> Vec<SnapshotCell> {
         self.board
             .cells()
@@ -393,13 +484,22 @@ impl Engine {
     }
 }
 
-fn active_piece_snapshot(active: &ActivePiece) -> ActivePieceSnapshot {
+fn active_piece_snapshot(active: &ActivePiece, config: &EngineConfig) -> ActivePieceSnapshot {
+    let lock_timer_fraction = if active.lock_timer_active() {
+        (active.lock_timer_seconds() / config.lock_down_seconds).clamp(0.0, 1.0)
+    } else {
+        0.0
+    };
+
     ActivePieceSnapshot {
         piece_type: active.piece_type(),
         rotation: active.rotation(),
         origin: active.origin(),
         cells: piece_snapshot_cells(active.piece(), active.origin()),
         hold_used: active.hold_used_on_this_piece(),
+        landed: active.landed(),
+        lock_timer_seconds: active.lock_timer_seconds(),
+        lock_timer_fraction,
     }
 }
 
@@ -413,6 +513,33 @@ fn piece_snapshot_cells(piece: &Piece, origin: (isize, isize)) -> Vec<SnapshotCe
             piece_type: piece.piece_type(),
         })
         .collect()
+}
+
+fn active_is_grounded(board: &Board, active: &ActivePiece) -> bool {
+    active
+        .piece()
+        .try_move(board, active.origin(), MoveDirection::Down)
+        .is_none()
+}
+
+fn update_landing_state(
+    board: &Board,
+    config: &EngineConfig,
+    active: &mut ActivePiece,
+    was_landed: bool,
+    grounded_move_or_rotation: bool,
+) {
+    if !active_is_grounded(board, active) {
+        active.mark_airborne();
+        return;
+    }
+
+    if !was_landed {
+        active.mark_landed();
+        active.reset_lock_timer(config.lock_down_seconds);
+    } else if grounded_move_or_rotation {
+        apply_grounded_move_or_rotation(active, config.lock_down_mode, config.lock_down_seconds);
+    }
 }
 
 #[cfg(test)]
@@ -706,5 +833,156 @@ mod tests {
             snapshot.active.expect("next active piece").piece_type,
             second_piece_type
         );
+    }
+
+    #[test]
+    fn gravity_uses_accumulated_delta_time_to_fall_one_row() {
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        engine.step(InputFrame::default());
+        let before = engine.snapshot().active.expect("active piece");
+        let half_fall = fall_speed_seconds(engine.snapshot().level) / 2.0;
+
+        assert!(engine
+            .step(InputFrame {
+                dt_seconds: half_fall,
+                ..InputFrame::default()
+            })
+            .is_empty());
+        assert_eq!(
+            engine.snapshot().active.expect("active piece").origin,
+            before.origin
+        );
+
+        assert_eq!(
+            engine.step(InputFrame {
+                dt_seconds: half_fall,
+                ..InputFrame::default()
+            }),
+            vec![EngineEvent::Moved {
+                piece_type: before.piece_type,
+                direction: MoveDirection::Down,
+                origin: (before.origin.0, before.origin.1 - 1),
+            }]
+        );
+    }
+
+    #[test]
+    fn gravity_landing_starts_lock_timer_before_locking_on_next_frame() {
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        engine.active = Some(ActivePiece::new(PieceType::T, (3, 0)));
+
+        assert_eq!(
+            engine.step(InputFrame {
+                dt_seconds: fall_speed_seconds(engine.snapshot().level),
+                ..InputFrame::default()
+            }),
+            vec![EngineEvent::Moved {
+                piece_type: PieceType::T,
+                direction: MoveDirection::Down,
+                origin: (3, -1),
+            }]
+        );
+
+        let active = engine.snapshot().active.expect("landed active piece");
+        assert!(active.landed);
+        assert_eq!(active.lock_timer_seconds, LOCK_DOWN_SECONDS);
+        assert!(engine.snapshot().board_cells.is_empty());
+
+        let events = engine.step(InputFrame {
+            dt_seconds: LOCK_DOWN_SECONDS,
+            ..InputFrame::default()
+        });
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::T,
+                    lines_cleared: 0,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
+        assert_eq!(engine.snapshot().board_cells.len(), 4);
+    }
+
+    #[test]
+    fn extended_lock_down_budget_stops_resetting_after_fifteen_grounded_moves() {
+        let config = EngineConfig {
+            board_width: 40,
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config, 0);
+        let mut active = ActivePiece::new(PieceType::T, (20, -1));
+        active.mark_landed();
+        active.reset_lock_timer(LOCK_DOWN_SECONDS);
+        engine.active = Some(active);
+
+        for _ in 0..crate::engine::EXTENDED_LOCK_RESET_BUDGET {
+            assert_eq!(
+                engine
+                    .step(InputFrame {
+                        left: true,
+                        ..InputFrame::default()
+                    })
+                    .len(),
+                1
+            );
+            assert_eq!(
+                engine
+                    .active
+                    .as_ref()
+                    .expect("active piece")
+                    .lock_timer_seconds(),
+                LOCK_DOWN_SECONDS
+            );
+        }
+
+        engine
+            .active
+            .as_mut()
+            .expect("active piece")
+            .set_lock_timer_seconds(0.1);
+        assert_eq!(
+            engine
+                .active
+                .as_ref()
+                .expect("active piece")
+                .grounded_move_rotate_count_since_lowest(),
+            crate::engine::EXTENDED_LOCK_RESET_BUDGET
+        );
+
+        assert_eq!(
+            engine
+                .step(InputFrame {
+                    left: true,
+                    ..InputFrame::default()
+                })
+                .len(),
+            1
+        );
+        assert_eq!(
+            engine
+                .active
+                .as_ref()
+                .expect("active piece")
+                .lock_timer_seconds(),
+            0.1
+        );
+
+        let events = engine.step(InputFrame {
+            dt_seconds: 0.1,
+            ..InputFrame::default()
+        });
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::T,
+                    lines_cleared: 0,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
     }
 }
