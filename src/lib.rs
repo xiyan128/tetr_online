@@ -24,16 +24,18 @@ pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
-        app.add_state::<GameState>()
+        app.init_state::<GameState>()
             .add_loading_state(
-                LoadingState::new(GameState::Loading).continue_to_state(GameState::InGame),
+                LoadingState::new(GameState::Loading)
+                    .load_collection::<crate::assets::GameAssets>()
+                    .continue_to_state(GameState::InGame),
             )
-            .add_plugin(LevelPlugin);
+            .add_plugins(LevelPlugin);
 
         #[cfg(debug_assertions)]
         {
-            app.add_plugin(FrameTimeDiagnosticsPlugin::default())
-                .add_plugin(LogDiagnosticsPlugin::default());
+            app.add_plugins(FrameTimeDiagnosticsPlugin::default())
+                .add_plugins(LogDiagnosticsPlugin::default());
         }
     }
 }

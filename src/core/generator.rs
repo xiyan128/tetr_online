@@ -12,7 +12,7 @@ pub struct PieceGenerator {
 impl PieceGenerator {
     pub fn new() -> Self {
         let mut bag = PieceType::all();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         bag.shuffle(&mut rng);
 
         Self { bag }
@@ -20,7 +20,7 @@ impl PieceGenerator {
 
     fn refill_bag(&mut self) {
         let mut next_bag = PieceType::all();
-        let mut rng = rand::thread_rng();
+        let mut rng = rand::rng();
         next_bag.shuffle(&mut rng);
 
         self.bag = [&next_bag[..], &self.bag[..]].concat();

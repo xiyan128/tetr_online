@@ -44,7 +44,6 @@ pub struct GameAssets {
 
     // #[asset(path = "sounds/.wav")]
     // pub movement_sound: Handle<AudioSource>,
-
     #[asset(path = "fonts/dogicabold.ttf")]
     pub font: Handle<Font>,
     // #[asset(path = "sounds/hold.wav")]

@@ -2,7 +2,6 @@ use bevy::prelude::*;
 
 use crate::core::*;
 use crate::utils::*;
-use bevy_asset_loader::prelude::*;
 use common::*;
 
 use crate::assets::GameAssets;
@@ -28,44 +27,43 @@ impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             // states
-            .add_state::<LevelState>()
-            .add_state::<PlayingState>()
+            .init_state::<LevelState>()
+            .init_state::<PlayingState>()
             // events
-            .add_event::<ActionEvent>()
-            .add_event::<PlacingEvent>()
+            .add_message::<ActionEvent>()
+            .add_message::<PlacingEvent>()
             // plugins
-            .add_plugin(ActionsPlugin)
-            .add_plugin(GameOverPlugin)
-            .add_plugin(SoundEffectsPlugin)
-            .add_plugin(ScorePlugin)
-            .add_plugin(UIPlugin)
+            .add_plugins(ActionsPlugin)
+            .add_plugins(GameOverPlugin)
+            .add_plugins(SoundEffectsPlugin)
+            .add_plugins(ScorePlugin)
+            .add_plugins(UIPlugin)
             // resources
             .init_resource::<LevelConfig>()
-            // load level game assets
-            .add_collection_to_loading_state::<_, GameAssets>(GameState::Loading)
             // enter setup immediately in game
-            .add_system(
-                continue_to_state(LevelState::Setup).in_schedule(OnEnter(GameState::InGame)),
+            .add_systems(
+                OnEnter(GameState::InGame),
+                continue_to_state(LevelState::Setup),
             )
             // setup
             .add_systems(
-                (level_cleanup, level_setup)
-                    .chain()
-                    .in_schedule(OnEnter(LevelState::Setup)),
+                OnEnter(LevelState::Setup),
+                (level_cleanup, level_setup).chain(),
             )
-            .add_system(piece_setup.in_schedule(OnEnter(LevelState::Playing)))
+            .add_systems(OnEnter(LevelState::Playing), piece_setup)
             // updates
             .add_systems(
-                (piece_fall, detect_placement, ghost_blocks).in_set(OnUpdate(LevelState::Playing)),
+                Update,
+                (piece_fall, detect_placement, ghost_blocks).run_if(in_state(LevelState::Playing)),
             )
-            .add_system(piece_lock.in_set(OnUpdate(PlayingState::Locking)));
+            .add_systems(Update, piece_lock.run_if(in_state(PlayingState::Locking)));
     }
 }
 
 // despawn recursively all entities with the LevelCleanup component
 fn level_cleanup(mut commands: Commands, mut query: Query<Entity, With<LevelCleanup>>) {
     for entity in query.iter_mut() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 }
 
@@ -100,25 +98,23 @@ fn level_setup(
     let board_entity = commands
         .spawn(BoardBundle {
             board,
-            spatial_bundle: SpatialBundle::default(),
+            transform: Transform::default(),
         })
         .insert(LevelCleanup)
         .insert(PieceHolder::default())
         .insert(PieceGenerator::default())
         .id();
 
-    commands.entity(board_entity).push_children(&block_ids);
+    commands.entity(board_entity).add_children(&block_ids);
 
     // look at center of the board
     commands.spawn((
-        Camera2dBundle {
-            transform: Transform::from_translation(Vec3::new(
-                config.block_size * config.board_width as f32 / 2.,
-                config.block_size * config.board_height as f32 / 2.,
-                1.0,
-            )),
-            ..default()
-        },
+        Camera2d,
+        Transform::from_translation(Vec3::new(
+            config.block_size * config.board_width as f32 / 2.,
+            config.block_size * config.board_height as f32 / 2.,
+            1.0,
+        )),
         LevelCleanup,
     ));
 
@@ -156,11 +152,13 @@ fn piece_setup(
     mut generator_query: Query<&mut PieceGenerator>,
 ) {
     // if there is already a piece, don't spawn a new one
-    if piece_query.get_single().is_ok() {
+    if piece_query.single().is_ok() {
         info!("piece already exists");
         return;
     }
-    let mut generator = generator_query.single_mut();
+    let Ok(mut generator) = generator_query.single_mut() else {
+        return;
+    };
 
     info!("piece_setup");
     let next_piece_type = generator.next();
@@ -168,7 +166,9 @@ fn piece_setup(
     let piece = Piece::from(next_piece_type.unwrap());
     let spawn_coords = config.spawn_coords(&piece);
 
-    let board = board_query.single();
+    let Ok(board) = board_query.single() else {
+        return;
+    };
 
     // test collision and game over
     if piece.collide_with(&board, spawn_coords) {
@@ -193,16 +193,13 @@ fn piece_setup(
         .entity(piece_entity)
         .insert(Coords::from(spawn_coords))
         .insert(PieceController::default())
-        .insert(SpatialBundle {
-            transform: Transform::from_translation(common::to_translation(
-                spawn_coords.0,
-                spawn_coords.1,
-                config.block_size,
-            )),
-            ..default()
-        });
+        .insert(Transform::from_translation(common::to_translation(
+            spawn_coords.0,
+            spawn_coords.1,
+            config.block_size,
+        )));
 
-    commands.entity(piece_entity).push_children(&block_ids);
+    commands.entity(piece_entity).add_children(&block_ids);
 }
 
 fn piece_fall(
@@ -216,16 +213,16 @@ fn piece_fall(
     config: Res<LevelConfig>,
     time: Res<Time>,
 ) {
-    if query.get_single_mut().is_err() {
+    let Ok((piece, mut piece_controller, mut coords, mut transform)) = query.single_mut() else {
         return;
-    }
-
-    let (mut piece, mut piece_controller, mut coords, mut transform) = query.single_mut();
-    let board = board_query.single_mut();
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
     piece_controller.falling_timer.tick(time.delta());
 
-    if piece_controller.falling_timer.finished() {
+    if piece_controller.falling_timer.is_finished() {
         if let Ok(new_coords) = piece.try_move(&board, (coords.x, coords.y), MoveDirection::Down) {
             (coords.x, coords.y) = new_coords;
             transform.update_coords(coords.as_ref(), &config);
@@ -246,14 +243,19 @@ fn piece_lock(
     config: Res<LevelConfig>,
     assets: Res<GameAssets>,
     mut next_state: ResMut<NextState<LevelState>>,
-    mut ev_placing: EventWriter<PlacingEvent>,
+    mut ev_placing: MessageWriter<PlacingEvent>,
 ) {
-    let (piece_entity, piece, coords, mut piece_controller, children) = query.single_mut();
-    let (board_entity, mut board) = board_query.single_mut();
+    let Ok((piece_entity, piece, coords, mut piece_controller, children)) = query.single_mut()
+    else {
+        return;
+    };
+    let Ok((board_entity, mut board)) = board_query.single_mut() else {
+        return;
+    };
 
     piece_controller.locking_timer.tick(time.delta());
 
-    if piece_controller.locking_timer.finished() || piece_controller.hard_dropped
+    if piece_controller.locking_timer.is_finished() || piece_controller.hard_dropped
     // after hard drop, place immediately
     {
         info!("piece_place");
@@ -262,13 +264,13 @@ fn piece_lock(
         next_state.set(LevelState::Playing); // enter the next playing loop
 
         // hand over children to board
-        commands.entity(board_entity).push_children(children);
+        commands.entity(board_entity).add_children(children);
 
         commands.entity(piece_entity).despawn();
 
         for child in children.iter() {
             // convert the coordinates of the child to board coordinates
-            let (mut child_coords, mut child_transform) = query_children.get_mut(*child).unwrap();
+            let (mut child_coords, mut child_transform) = query_children.get_mut(child).unwrap();
             child_coords.x += coords.x;
             child_coords.y += coords.y;
 
@@ -279,7 +281,7 @@ fn piece_lock(
             );
 
             commands
-                .entity(*child)
+                .entity(child)
                 .insert(StaticBlock {})
                 .remove::<FallingBlock>();
             child_transform.update_coords(child_coords.as_ref(), &config);
@@ -291,12 +293,12 @@ fn piece_lock(
         if lines_cleared > 0 {
             // remove all static blocks
             for entity in query_static_blocks.iter_mut() {
-                commands.entity(entity).despawn_recursive();
+                commands.entity(entity).despawn();
             }
 
             // remove the current piece's children (which are added to the board but yet to be updated)
             for entity in children.iter() {
-                commands.entity(*entity).despawn_recursive();
+                commands.entity(entity).despawn();
             }
 
             // redraw the board
@@ -308,7 +310,7 @@ fn piece_lock(
             piece_controller.locking_timer.reset();
         }
 
-        ev_placing.send(PlacingEvent::Locked(lines_cleared));
+        ev_placing.write(PlacingEvent::Locked(lines_cleared));
     }
 }
 
@@ -328,11 +330,15 @@ fn ghost_blocks(
     }
 
     for entity in ghost_query.iter() {
-        commands.entity(entity).despawn_recursive();
+        commands.entity(entity).despawn();
     }
 
-    let (coords, piece) = piece_query.single_mut();
-    let board = board_query.single_mut();
+    let Ok((coords, piece)) = piece_query.single_mut() else {
+        return;
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
     let mut ghost_coords = coords.clone();
     let mut ghost_transform = Transform::default();
@@ -363,12 +369,9 @@ fn ghost_blocks(
     let piece_entity = commands
         .spawn(ghost_piece)
         .insert(GhostPiece)
-        .insert(SpatialBundle {
-            transform: ghost_transform,
-            ..Default::default()
-        })
+        .insert(ghost_transform)
         .id();
-    commands.entity(piece_entity).push_children(&block_entities);
+    commands.entity(piece_entity).add_children(&block_entities);
 }
 
 fn detect_placement(
@@ -376,16 +379,20 @@ fn detect_placement(
     mut board_query: Query<&mut Board>,
     mut next_state: ResMut<NextState<PlayingState>>,
     current_state: Res<State<PlayingState>>,
-    mut ev_placing: EventWriter<PlacingEvent>,
+    mut ev_placing: MessageWriter<PlacingEvent>,
 ) {
     if piece_query.is_empty() {
         return;
     }
 
-    let (coords, piece) = piece_query.single_mut();
-    let board = board_query.single_mut();
+    let Ok((coords, piece)) = piece_query.single_mut() else {
+        return;
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
-    let current_state = &current_state.0;
+    let current_state = current_state.get();
 
     if piece
         .try_move(&board, (coords.x, coords.y), MoveDirection::Down)
@@ -395,7 +402,7 @@ fn detect_placement(
             next_state.set(PlayingState::Locking);
             info!("Transitioning to Placing state.");
 
-            ev_placing.send(PlacingEvent::Placed);
+            ev_placing.write(PlacingEvent::Placed);
         }
     } else if current_state == &PlayingState::Locking {
         next_state.set(Falling);

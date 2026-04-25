@@ -6,12 +6,14 @@ pub struct ScorePlugin;
 
 impl Plugin for ScorePlugin {
     fn build(&self, app: &mut App) {
-        app.add_event::<Vec<ScoreType>>()
-            .insert_resource(Scorer::default()).add_systems(
-            (append_action_history, update_score)
-                .chain()
-                .in_set(OnUpdate(LevelState::Playing)),
-        );
+        app.add_message::<ScoreTypes>()
+            .insert_resource(Scorer::default())
+            .add_systems(
+                Update,
+                (append_action_history, update_score)
+                    .chain()
+                    .run_if(in_state(LevelState::Playing)),
+            );
     }
 }
 
@@ -44,10 +46,8 @@ pub struct Scorer {
 | Hard drop | 2 per cell |
  */
 
-fn append_action_history(mut ev_action: EventReader<ActionEvent>,
-                         mut scorer: ResMut<Scorer>
-) {
-    for ev in ev_action.iter() {
+fn append_action_history(mut ev_action: MessageReader<ActionEvent>, mut scorer: ResMut<Scorer>) {
+    for ev in ev_action.read() {
         scorer.action_history.push(ev.clone());
 
         // hard/soft drop action scores
@@ -63,6 +63,9 @@ fn append_action_history(mut ev_action: EventReader<ActionEvent>,
     }
 }
 
+#[derive(Message, Debug)]
+pub struct ScoreTypes(pub Vec<ScoreType>);
+
 #[derive(Debug)]
 pub enum ScoreType {
     Single,
@@ -75,12 +78,14 @@ pub enum ScoreType {
     BackToBack,
 }
 
-fn update_score(mut ev_placing: EventReader<PlacingEvent>,
-                mut ev_score_types: EventWriter<Vec<ScoreType>>,
-                mut scorer: ResMut<Scorer>) {
-    for ev in ev_placing.iter() {
-
-        if matches!(ev, PlacingEvent::Placed) { // we don't want to update score on Placed event
+fn update_score(
+    mut ev_placing: MessageReader<PlacingEvent>,
+    mut ev_score_types: MessageWriter<ScoreTypes>,
+    mut scorer: ResMut<Scorer>,
+) {
+    for ev in ev_placing.read() {
+        if matches!(ev, PlacingEvent::Placed) {
+            // we don't want to update score on Placed event
             continue;
         }
         // add lines cleared
@@ -196,7 +201,7 @@ fn update_score(mut ev_placing: EventReader<PlacingEvent>,
         info!("score types: {:?}", score_types);
         info!("action history: {:?}", scorer.action_history);
         if !score_types.is_empty() {
-            ev_score_types.send(score_types);
+            ev_score_types.write(ScoreTypes(score_types));
         }
     }
 }

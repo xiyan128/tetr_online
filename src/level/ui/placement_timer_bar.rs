@@ -11,25 +11,26 @@ pub fn spawn_locking_timer_bar(
     config: Res<LevelConfig>,
     board_entity_query: Query<Entity, With<Board>>,
 ) {
-    let board_entity = board_entity_query.single();
+    let Ok(board_entity) = board_entity_query.single() else {
+        return;
+    };
 
     let bar_height = config.block_size * 0.2;
 
     // spawn the timer bar
     let timer_bar_entity = commands
-        .spawn(SpriteBundle {
-            transform: Transform::from_translation(Vec3::new(0., -bar_height, 1.)),
-            sprite: Sprite {
+        .spawn((
+            Sprite {
                 custom_size: Some(Vec2::new(
                     config.block_size * config.board_width as f32,
                     bar_height,
                 )),
-                color: Color::GRAY,
-                anchor: Anchor::BottomLeft,
+                color: Color::srgb(0.5, 0.5, 0.5),
                 ..Default::default()
             },
-            ..Default::default()
-        })
+            Anchor::BOTTOM_LEFT,
+            Transform::from_translation(Vec3::new(0., -bar_height, 1.)),
+        ))
         .insert(LockingTimerBar)
         .id();
 
@@ -42,12 +43,16 @@ pub fn update_locking_timer_bar(
     mut bar_query: Query<&mut Sprite, With<LockingTimerBar>>,
     config: Res<LevelConfig>,
 ) {
-    let mut piece_controller = piece_controller_query.single_mut();
+    let Ok(mut piece_controller) = piece_controller_query.single_mut() else {
+        return;
+    };
 
     let timer = &mut piece_controller.locking_timer;
-    let mut bar = bar_query.single_mut();
+    let Ok(mut bar) = bar_query.single_mut() else {
+        return;
+    };
 
-    let progress = timer.percent();
+    let progress = timer.fraction();
     let width = config.block_size * config.board_width as f32 * progress;
 
     bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
@@ -55,10 +60,12 @@ pub fn update_locking_timer_bar(
 
 // remove_locking_timer_bar
 pub fn despawn_locking_timer_bar(
-    mut bar_query: Query<Entity, With<LockingTimerBar>>,
+    bar_query: Query<Entity, With<LockingTimerBar>>,
     mut commands: Commands,
 ) {
     info!("despawning locking timer bar");
-    let bar = bar_query.single();
-    commands.entity(bar).despawn_recursive();
+    let Ok(bar) = bar_query.single() else {
+        return;
+    };
+    commands.entity(bar).despawn();
 }

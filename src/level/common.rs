@@ -1,16 +1,16 @@
 use crate::assets::GameAssets;
 use crate::core::{Board, Cell, MoveDirection, Piece, PieceRotation, PieceType};
 use bevy::asset::Handle;
+use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
-    default, Bundle, Color, Commands, Component, Entity, Image, Res, Resource, SpatialBundle,
-    Sprite, SpriteBundle, States, Timer, TimerMode, Transform,
+    Bundle, Color, Commands, Component, Entity, Image, Message, Res, Resource, Sprite, States,
+    Timer, TimerMode, Transform,
 };
-use bevy::render::texture::DEFAULT_IMAGE_HANDLE;
 use bevy::sprite::Anchor;
 use std::time::Duration;
 
-#[derive(Clone, Debug)]
+#[derive(Message, Clone, Debug)]
 pub enum ActionEvent {
     Rotation(PieceRotation, PieceType, usize, bool), // rotation, piece type, occupied cells (only for T-Spin), wall kick
     Movement(MoveDirection),
@@ -18,7 +18,7 @@ pub enum ActionEvent {
     Hold,
 }
 
-#[derive(Clone)]
+#[derive(Message, Clone)]
 pub enum PlacingEvent {
     Locked(usize), // lines cleared
     Placed,
@@ -74,7 +74,7 @@ impl Default for LevelConfig {
 
 impl LevelConfig {
     pub(crate) fn spawn_coords(&self, piece: &Piece) -> (isize, isize) {
-        let (offset_x, offset_y) = piece.board_size();
+        let (offset_x, _) = piece.board_size();
         (
             self.board_width as isize / 2 - offset_x as isize / 2,
             self.board_height as isize,
@@ -157,8 +157,9 @@ impl BlockComponent for GhostBlock {
 
 #[derive(Bundle)]
 pub struct BlockBundle {
-    #[bundle]
-    pub(crate) sprite_bundle: SpriteBundle,
+    pub(crate) sprite: Sprite,
+    pub(crate) transform: Transform,
+    pub(crate) anchor: Anchor,
 }
 
 #[derive(Component)]
@@ -168,6 +169,8 @@ pub struct PieceController {
     pub(crate) hard_dropped: bool,
     pub(crate) used_hold: bool,
     pub(crate) movement_timer: Timer,
+    pub(crate) active_movement: Option<MoveDirection>,
+    pub(crate) movement_hold_duration: Duration,
 }
 
 impl Default for PieceController {
@@ -180,6 +183,8 @@ impl Default for PieceController {
             movement_timer: Timer::new(config.movement_duration, TimerMode::Repeating),
             hard_dropped: false,
             used_hold: false,
+            active_movement: None,
+            movement_hold_duration: Duration::ZERO,
         }
     }
 }
@@ -187,8 +192,7 @@ impl Default for PieceController {
 #[derive(Bundle)]
 pub struct BoardBundle {
     pub(crate) board: Board,
-    #[bundle]
-    pub(crate) spatial_bundle: SpatialBundle,
+    pub(crate) transform: Transform,
 }
 
 pub(crate) trait MatchCoords {
@@ -225,7 +229,11 @@ impl BlockBundle {
     }
 
     pub(crate) fn transparent(config: &LevelConfig, transform: Transform, color: Color) -> Self {
-        return BlockBundle::new(config, transform, color, DEFAULT_IMAGE_HANDLE.typed());
+        Self {
+            sprite: Sprite::from_color(color, Vec2::new(config.block_size, config.block_size)),
+            transform,
+            anchor: Anchor::BOTTOM_LEFT,
+        }
     }
 
     fn new(
@@ -234,20 +242,14 @@ impl BlockBundle {
         color: Color,
         texture: Handle<Image>,
     ) -> Self {
-        let sprite = Sprite {
-            custom_size: Some(Vec2::new(config.block_size, config.block_size)),
-            color,
-            anchor: Anchor::BottomLeft,
-            ..default()
-        };
+        let mut sprite = Sprite::from_image(texture);
+        sprite.custom_size = Some(Vec2::new(config.block_size, config.block_size));
+        sprite.color = color;
 
         Self {
-            sprite_bundle: SpriteBundle {
-                texture,
-                sprite,
-                transform,
-                ..default()
-            },
+            sprite,
+            transform,
+            anchor: Anchor::BOTTOM_LEFT,
         }
     }
 }
@@ -273,8 +275,8 @@ pub fn spawn_free_block(
         BlockComponentKind::Falling | BlockComponentKind::Preview | BlockComponentKind::Static => {
             piece_color(cell.cell_kind().unwrap())
         }
-        BlockComponentKind::Ghost => Color::GRAY.set_a(0.5).as_rgba(),
-        BlockComponentKind::Background => Color::rgb(0.1, 0.1, 0.1),
+        BlockComponentKind::Ghost => Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
+        BlockComponentKind::Background => Color::srgb(0.1, 0.1, 0.1),
     };
 
     let coords = Coords::from((x, y));
@@ -285,7 +287,7 @@ pub fn spawn_free_block(
         _ => BlockBundle::with_texture(&config, &texture_assets, transform, color),
     };
 
-    bundle.sprite_bundle.transform.translation.z = match block_kind {
+    bundle.transform.translation.z = match block_kind {
         BlockComponentKind::Ghost => -0.1, // ghost is behind falling block
         BlockComponentKind::Background => -1., // background is behind everything
         _ => 0.,
@@ -325,13 +327,13 @@ pub fn spawn_piece_blocks(
 
 pub fn piece_color(piece_type: PieceType) -> Color {
     let color = match piece_type {
-        PieceType::I => Color::rgb_u8(100, 196, 235), // cyan
-        PieceType::J => Color::rgb_u8(90, 99, 165),   // orange
-        PieceType::L => Color::rgb_u8(224, 127, 58),  // blue
-        PieceType::O => Color::rgb_u8(241, 212, 72),  // yellow
-        PieceType::S => Color::rgb_u8(100, 180, 82),  // green
-        PieceType::T => Color::rgb_u8(161, 83, 152),  // purple
-        PieceType::Z => Color::rgb_u8(216, 57, 52),   // red
+        PieceType::I => Color::srgb_u8(100, 196, 235), // cyan
+        PieceType::J => Color::srgb_u8(90, 99, 165),   // orange
+        PieceType::L => Color::srgb_u8(224, 127, 58),  // blue
+        PieceType::O => Color::srgb_u8(241, 212, 72),  // yellow
+        PieceType::S => Color::srgb_u8(100, 180, 82),  // green
+        PieceType::T => Color::srgb_u8(161, 83, 152),  // purple
+        PieceType::Z => Color::srgb_u8(216, 57, 52),   // red
     };
     color
 }

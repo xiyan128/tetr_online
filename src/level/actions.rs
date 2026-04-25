@@ -1,12 +1,11 @@
 use bevy::prelude::*;
-use leafwing_input_manager::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::core::{Board, MoveDirection, Piece, PieceGenerator, PieceRotation, PieceType};
 use crate::level::common;
 use crate::level::common::{
-    spawn_piece_blocks, ActionEvent, Coords, FallingBlock, LevelCleanup, LevelConfig, LevelState,
-    MatchCoords, PieceController, PieceHolder,
+    spawn_piece_blocks, ActionEvent, Coords, FallingBlock, LevelConfig, LevelState, MatchCoords,
+    PieceController, PieceHolder,
 };
 use itertools::iproduct;
 use std::iter::zip;
@@ -15,39 +14,17 @@ pub struct ActionsPlugin;
 
 impl Plugin for ActionsPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugin(InputManagerPlugin::<GameControl>::default())
-            .add_system(setup_input_manager.in_schedule(OnEnter(LevelState::Setup)))
-            .add_systems(
-                (
-                    handle_movements,
-                    handle_rotations,
-                    handle_hard_drop,
-                    swap_hold,
-                )
-                    .in_set(OnUpdate(LevelState::Playing)),
-            );
+        app.add_systems(
+            Update,
+            (
+                handle_movements,
+                handle_rotations,
+                handle_hard_drop,
+                swap_hold,
+            )
+                .run_if(in_state(LevelState::Playing)),
+        );
     }
-}
-
-fn setup_input_manager(mut commands: Commands) {
-    commands
-        .spawn(InputManagerBundle::<GameControl> {
-            // Stores "which actions are currently pressed"
-            action_state: ActionState::default(),
-            // Describes how to convert from player inputs into those actions
-            input_map: InputMap::new([
-                (KeyCode::Space, GameControl::HardDrop),
-                (KeyCode::Left, GameControl::Left),
-                (KeyCode::Right, GameControl::Right),
-                (KeyCode::Up, GameControl::RotateClockwise),
-                (KeyCode::Z, GameControl::RotateCounterClockwise),
-                (KeyCode::X, GameControl::RotateClockwise),
-                (KeyCode::Down, GameControl::Down),
-                (KeyCode::LShift, GameControl::Hold),
-            ]),
-            ..default()
-        })
-        .insert(LevelCleanup);
 }
 
 fn move_piece_and_update(
@@ -68,7 +45,6 @@ fn move_piece_and_update(
 }
 
 pub(crate) fn handle_movements(
-    action_query: Query<&mut ActionState<GameControl>>,
     mut query: Query<(
         &mut Piece,
         &mut Coords,
@@ -76,18 +52,18 @@ pub(crate) fn handle_movements(
         &mut PieceController,
     )>,
     mut board_query: Query<&mut Board>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
     time: Res<Time>,
-    mut ev_action: EventWriter<ActionEvent>,
+    mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    if query.get_single_mut().is_err() {
+    let Ok((mut piece, mut coords, mut transform, mut piece_controller)) = query.single_mut()
+    else {
         return;
-    }
-
-    let action_state = action_query.single();
-
-    let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
-    let board = board_query.single_mut();
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
     piece_controller.movement_timer.tick(time.delta());
 
@@ -101,16 +77,22 @@ pub(crate) fn handle_movements(
         MoveDirection::Right,
         MoveDirection::Down,
     ] {
-        if action_state.pressed(move_dir.into()) {
+        let key = key_for_movement(move_dir);
+        if keyboard.pressed(key) {
             movement = Some(move_dir);
-            just_pressed = action_state.just_pressed(move_dir.into());
+            just_pressed = keyboard.just_pressed(key);
 
             if move_dir == MoveDirection::Down {
                 duration = config.soft_drop_duration;
                 break;
             }
 
-            let press_duration = action_state.current_duration(move_dir.into());
+            if piece_controller.active_movement != Some(move_dir) {
+                piece_controller.active_movement = Some(move_dir);
+                piece_controller.movement_hold_duration = Default::default();
+            }
+            piece_controller.movement_hold_duration += time.delta();
+            let press_duration = piece_controller.movement_hold_duration;
             if press_duration > duration {
                 duration = default_duration.mul_f64(
                     (config.movement_speedup)
@@ -121,7 +103,12 @@ pub(crate) fn handle_movements(
         }
     }
 
-    if piece_controller.movement_timer.finished() || just_pressed {
+    if movement.is_none() {
+        piece_controller.active_movement = None;
+        piece_controller.movement_hold_duration = Default::default();
+    }
+
+    if piece_controller.movement_timer.is_finished() || just_pressed {
         if let Some(movement) = movement {
             if move_piece_and_update(
                 &config,
@@ -131,7 +118,7 @@ pub(crate) fn handle_movements(
                 &board,
                 movement,
             ) {
-                ev_action.send(ActionEvent::Movement(movement));
+                ev_action.write(ActionEvent::Movement(movement));
                 piece_controller.locking_timer.reset();
                 piece_controller.movement_timer.set_duration(duration);
             }
@@ -143,7 +130,6 @@ pub(crate) fn handle_movements(
 }
 
 pub(crate) fn handle_hard_drop(
-    mut action_query: Query<&ActionState<GameControl>>,
     mut query: Query<(
         &mut Piece,
         &mut Coords,
@@ -151,19 +137,19 @@ pub(crate) fn handle_hard_drop(
         &mut PieceController,
     )>,
     mut board_query: Query<&mut Board>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
-    mut ev_action: EventWriter<ActionEvent>,
+    mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    if query.get_single_mut().is_err() {
+    let Ok((mut piece, mut coords, mut transform, mut piece_controller)) = query.single_mut()
+    else {
         return;
-    }
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
-    let action_state = action_query.single_mut();
-
-    let (mut piece, mut coords, mut transform, mut piece_controller) = query.single_mut();
-    let board = board_query.single_mut();
-
-    let hard_drop = action_state.just_pressed(GameControl::HardDrop);
+    let hard_drop = keyboard.just_pressed(KeyCode::Space);
 
     if hard_drop {
         let mut lines = 0;
@@ -180,31 +166,32 @@ pub(crate) fn handle_hard_drop(
         }
         piece_controller.hard_dropped = true;
 
-        ev_action.send(ActionEvent::HardDrop(lines));
+        ev_action.write(ActionEvent::HardDrop(lines));
     }
 }
 
 pub(crate) fn handle_rotations(
-    action_query: Query<&ActionState<GameControl>>,
     mut query: Query<(&mut Piece, &mut Coords, &mut Transform, &Children)>,
     mut children_query: Query<(&mut Coords, &mut Transform), Without<Piece>>,
     mut board_query: Query<&mut Board>,
     mut piece_controller_query: Query<&mut PieceController>,
+    keyboard: Res<ButtonInput<KeyCode>>,
     config: Res<LevelConfig>,
-    mut ev_action: EventWriter<ActionEvent>,
+    mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    if query.get_single_mut().is_err() {
+    let Ok((mut piece, mut coords, mut transform, children)) = query.single_mut() else {
         return;
-    }
+    };
+    let Ok(mut piece_controller) = piece_controller_query.single_mut() else {
+        return;
+    };
+    let Ok(board) = board_query.single_mut() else {
+        return;
+    };
 
-    let action_state = action_query.single();
-    let mut piece_controller = piece_controller_query.single_mut();
-
-    let (mut piece, mut coords, mut transform, children) = query.single_mut();
-    let board = board_query.single_mut();
-
-    let rotation = action_state.just_pressed(GameControl::RotateClockwise) as isize
-        - action_state.just_pressed(GameControl::RotateCounterClockwise) as isize;
+    let rotation = (keyboard.just_pressed(KeyCode::ArrowUp) || keyboard.just_pressed(KeyCode::KeyX))
+        as isize
+        - keyboard.just_pressed(KeyCode::KeyZ) as isize;
 
     let rotation = match rotation {
         1 => Some(PieceRotation::R90 + piece.rotation()),
@@ -222,7 +209,7 @@ pub(crate) fn handle_rotations(
 
             for (child_entity, cell) in zip(children.iter(), piece.board().cells().iter()) {
                 let (mut child_coords, mut child_transform) =
-                    children_query.get_mut(*child_entity).unwrap();
+                    children_query.get_mut(child_entity).unwrap();
                 child_coords.set_if_neq(Coords::from(cell.coords()));
                 child_transform.update_coords(child_coords.as_ref(), &config);
             }
@@ -240,10 +227,10 @@ pub(crate) fn handle_rotations(
                 }
             }
 
-            ev_action.send(ActionEvent::Rotation(
-                rotation, // rotation that was performed
+            ev_action.write(ActionEvent::Rotation(
+                rotation,           // rotation that was performed
                 piece.piece_type(), // type of piece that was rotated
-                t_spin_corners, // (only for t-spin) number of corners occupied by other blocks
+                t_spin_corners,     // (only for t-spin) number of corners occupied by other blocks
                 wall_kick_set != 0, // if wall kick was performed
             ));
         }
@@ -257,21 +244,23 @@ fn swap_hold(
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
     mut generator_query: Query<&mut PieceGenerator>,
-    action_query: Query<&ActionState<GameControl>>,
-    mut ev_action: EventWriter<ActionEvent>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut ev_action: MessageWriter<ActionEvent>,
 ) {
-    if piece_query.get_single_mut().is_err() {
+    let Ok((current_piece_entity, current_piece, mut piece_controller)) = piece_query.single_mut()
+    else {
+        return;
+    };
+    if !keyboard.just_pressed(KeyCode::ShiftLeft) || piece_controller.used_hold {
         return;
     }
 
-    let action_state = action_query.single();
-    let (current_piece_entity, current_piece, mut piece_controller) = piece_query.single_mut();
-    if !action_state.just_pressed(GameControl::Hold) || piece_controller.used_hold {
+    let Ok(mut holder) = holder_query.single_mut() else {
         return;
-    }
-
-    let mut holder = holder_query.single_mut();
-    let mut generator = generator_query.single_mut();
+    };
+    let Ok(mut generator) = generator_query.single_mut() else {
+        return;
+    };
 
     let next_piece = holder
         .piece
@@ -297,44 +286,27 @@ fn swap_hold(
             used_hold: true, // prevent hold from being used again
             ..default()
         })
-        .insert(SpatialBundle {
-            transform: Transform::from_translation(common::to_translation(
-                spawn_coords.0,
-                spawn_coords.1,
-                config.block_size,
-            )),
-            ..default()
-        });
+        .insert(Transform::from_translation(common::to_translation(
+            spawn_coords.0,
+            spawn_coords.1,
+            config.block_size,
+        )));
 
-    commands.entity(piece_entity).push_children(&block_ids);
+    commands.entity(piece_entity).add_children(&block_ids);
 
     holder.piece = Some(current_piece.clone());
 
     // remove old piece
-    commands.entity(current_piece_entity).despawn_recursive();
+    commands.entity(current_piece_entity).despawn();
 
     piece_controller.used_hold = true;
-    ev_action.send(ActionEvent::Hold);
+    ev_action.write(ActionEvent::Hold);
 }
 
-#[derive(Actionlike, PartialEq, Eq, Clone, Copy, Hash, Debug)]
-pub enum GameControl {
-    Up,
-    Down,
-    Left,
-    Right,
-    HardDrop,
-    RotateClockwise,
-    RotateCounterClockwise,
-    Hold,
-}
-
-impl From<MoveDirection> for GameControl {
-    fn from(direction: MoveDirection) -> Self {
-        match direction {
-            MoveDirection::Down => Self::Down,
-            MoveDirection::Left => Self::Left,
-            MoveDirection::Right => Self::Right,
-        }
+fn key_for_movement(direction: MoveDirection) -> KeyCode {
+    match direction {
+        MoveDirection::Down => KeyCode::ArrowDown,
+        MoveDirection::Left => KeyCode::ArrowLeft,
+        MoveDirection::Right => KeyCode::ArrowRight,
     }
 }

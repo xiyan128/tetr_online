@@ -6,29 +6,34 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-itertools = "0.10.5"
-rand = "0.8.5"
-leafwing-input-manager = "0.9.1"
-array2d = "0.3.0"
-bevy_asset_loader = "0.15.0"
+array2d = "0.3.2"
+bevy_asset_loader = "0.26.0"
+itertools = "0.14.0"
+rand = "0.10.1"
 
 [dependencies.bevy]
-version = "0.10.1"
+version = "0.18.1"
 default-features = false
 features = [
+    "bevy_asset",
+    "bevy_log",
+    "bevy_state",
     "bevy_sprite",
+    "bevy_sprite_render",
     "bevy_render",
     "bevy_audio",
     "bevy_text",
     "bevy_ui",
+    "bevy_ui_render",
     "bevy_winit",
     "bevy_core_pipeline",
     "vorbis",
-    "png"
+    "png",
+    "webgl2",
 ]
 
-[target.wasm32-unknown-unknown]
-runner = "wasm-server-runner"
+[target.wasm32-unknown-unknown.dependencies]
+getrandom = { version = "0.4", features = ["wasm_js"] }
 
 [profile.release]
 # optimize for size

@@ -1,5 +1,5 @@
 use crate::assets::GameAssets;
-use crate::core::{Board, Piece, PieceGenerator, PieceType};
+use crate::core::{Piece, PieceGenerator, PieceType};
 use crate::level::common::spawn_free_block;
 use crate::level::common::{to_translation, FallingBlock, LevelCleanup, LevelConfig, PieceHolder};
 use crate::level::ui::calc_ui_offset;
@@ -23,22 +23,19 @@ pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
 
     let piece_previewer_entity = commands
         .spawn(PiecePreviewer)
-        .insert(SpatialBundle {
-            transform: Transform::from_translation(
-                to_translation(
-                    config.board_width as isize,
-                    (config.board_height) as isize,
-                    config.block_size,
-                ) + offset,
-            ),
-            ..Default::default()
-        })
+        .insert(Transform::from_translation(
+            to_translation(
+                config.board_width as isize,
+                (config.board_height) as isize,
+                config.block_size,
+            ) + offset,
+        ))
         .insert(LevelCleanup)
         .id();
 
     for i in 0..config.preview_count {
         let box_entity = commands
-            .spawn((SpatialBundle::default(), PreviewHolder { index: i }))
+            .spawn((Transform::default(), PreviewHolder { index: i }))
             .id();
 
         commands
@@ -52,17 +49,14 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
 
     let hold_viewer = commands
         .spawn(HoldViewer)
-        .insert(SpatialBundle {
-            transform: Transform::from_translation(
-                to_translation(0, (config.board_height) as isize, config.block_size) + offset,
-            ),
-            ..Default::default()
-        })
+        .insert(Transform::from_translation(
+            to_translation(0, (config.board_height) as isize, config.block_size) + offset,
+        ))
         .insert(LevelCleanup)
         .id();
 
     let box_entity = commands
-        .spawn((SpatialBundle::default(), PreviewHolder { index: 0 }))
+        .spawn((Transform::default(), PreviewHolder { index: 0 }))
         .id();
 
     commands.entity(hold_viewer).add_child(box_entity);
@@ -81,18 +75,22 @@ pub fn update_piece_previewer(
     }
     info!("updating piece previewer");
 
-    let mut generator = generator_query.single_mut();
+    let Ok(mut generator) = generator_query.single_mut() else {
+        return;
+    };
 
-    let children = children_query.single();
+    let Ok(children) = children_query.single() else {
+        return;
+    };
 
     let bag_preview = generator.preview();
 
     let mut holders_height = 0.;
     for child in children.iter() {
         // clear the preview holder
-        commands.entity(*child).despawn_descendants();
+        commands.entity(child).despawn_related::<Children>();
 
-        let (preview_holder, mut holder_transform) = preview_holder_query.get_mut(*child).unwrap();
+        let (preview_holder, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
 
         let idx = preview_holder.index;
 
@@ -101,7 +99,7 @@ pub fn update_piece_previewer(
         let (preview_board_size, piece_entity) =
             spawn_holder_piece(&config, &game_assets, &mut commands, piece_type);
 
-        commands.entity(*child).add_child(piece_entity);
+        commands.entity(child).add_child(piece_entity);
 
         // stack the holders
         holders_height += preview_board_size.y + calc_ui_offset(&config);
@@ -121,17 +119,20 @@ pub fn update_hold_viewer(
         return;
     }
 
-    let piece_holder = holder_query.single_mut();
+    let Ok(piece_holder) = holder_query.single_mut() else {
+        return;
+    };
 
-    let children = children_query.single();
+    let Ok(children) = children_query.single() else {
+        return;
+    };
 
     for child in children.iter() {
         // clear the preview holder
-        commands.entity(*child).despawn_descendants();
+        commands.entity(child).despawn_related::<Children>();
 
         if let Some(piece_type) = piece_holder.piece.clone() {
-            let (preview_holder, mut holder_transform) =
-                preview_holder_query.get_mut(*child).unwrap();
+            let (_, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
 
             let (preview_board_size, piece_entity) = spawn_holder_piece(
                 &config,
@@ -140,7 +141,7 @@ pub fn update_hold_viewer(
                 piece_type.piece_type(),
             );
 
-            commands.entity(*child).add_child(piece_entity);
+            commands.entity(child).add_child(piece_entity);
 
             // move down and left by board size
             holder_transform.translation = -preview_board_size.extend(0.);
@@ -189,16 +190,15 @@ fn spawn_holder_piece(
 
     let piece_entity = commands
         .spawn(piece)
-        .insert(SpriteBundle {
-            sprite: Sprite {
+        .insert((
+            Sprite {
                 custom_size: Some(preview_board_size),
-                color: Color::NONE,
-                anchor: Anchor::BottomLeft,
+                color: Color::srgba(0.0, 0.0, 0.0, 0.0),
                 ..Default::default()
             },
-            transform: Transform::from_scale(Vec3::splat(scale)),
-            ..Default::default()
-        })
+            Anchor::BOTTOM_LEFT,
+            Transform::from_scale(Vec3::splat(scale)),
+        ))
         .id();
 
     for block_id in block_ids {

@@ -1,7 +1,6 @@
 use crate::core::board::{Board, CellKind};
 use bevy::prelude::{info, Component};
-use itertools::Itertools;
-use std::fmt::{Debug, Display};
+use std::fmt::Debug;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PieceType {
@@ -147,7 +146,7 @@ impl Piece {
     }
 
     pub(crate) fn avatar_board(&self) -> Board {
-        let mut shape = Self::get_avatar_shape(self.piece_type).to_vec();
+        let shape = Self::get_avatar_shape(self.piece_type).to_vec();
         // get width and height of the avatar board
         // those are the max x and y values of the shape
         let (width, height) = shape.iter().fold((0, 0), |(max_x, max_y), (x, y)| {
