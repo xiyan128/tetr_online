@@ -2,10 +2,13 @@ use crate::engine::active_piece::ActivePiece;
 use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};
 use crate::engine::generator::PieceGenerator;
-use crate::engine::goals::{GoalProgress, GoalSystem};
+use crate::engine::goals::{
+    breaks_back_to_back, qualifies_for_back_to_back, variable_goal_units, GoalProgress, GoalSystem,
+};
 use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
 use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
+use crate::engine::t_spin::{classify_t_spin, TSpinKind};
 use crate::engine::RotationDirection;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -76,6 +79,12 @@ pub enum EngineEvent {
         piece_type: PieceType,
         lines_cleared: usize,
     },
+    ScoreAwarded {
+        action: EngineScoreAction,
+        score: usize,
+        total_score: usize,
+        back_to_back_bonus: bool,
+    },
     Held {
         held: PieceType,
         active: PieceType,
@@ -89,6 +98,91 @@ pub enum EngineEvent {
 pub enum GameOverStatus {
     BlockOut,
     LockOut,
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq)]
+pub enum EngineScoreAction {
+    NoClear,
+    Single,
+    Double,
+    Triple,
+    Tetris,
+    TSpin { kind: TSpinKind, lines: usize },
+}
+
+impl EngineScoreAction {
+    fn from_lock_result(t_spin: Option<TSpinKind>, lines: usize) -> Self {
+        if let Some(kind) = t_spin {
+            return Self::TSpin { kind, lines };
+        }
+
+        match lines {
+            0 => Self::NoClear,
+            1 => Self::Single,
+            2 => Self::Double,
+            3 => Self::Triple,
+            4 => Self::Tetris,
+            _ => Self::NoClear,
+        }
+    }
+
+    fn base_score(self, level: usize) -> usize {
+        let base_score = match self {
+            Self::NoClear => 0,
+            Self::Single => 100,
+            Self::Double => 300,
+            Self::Triple => 500,
+            Self::Tetris => 800,
+            Self::TSpin {
+                kind: TSpinKind::Mini,
+                lines: 0,
+            } => 100,
+            Self::TSpin {
+                kind: TSpinKind::Mini,
+                lines: 1,
+            } => 200,
+            Self::TSpin {
+                kind: TSpinKind::Full,
+                lines: 0,
+            } => 400,
+            Self::TSpin {
+                kind: TSpinKind::Full,
+                lines: 1,
+            } => 800,
+            Self::TSpin {
+                kind: TSpinKind::Full,
+                lines: 2,
+            } => 1200,
+            Self::TSpin {
+                kind: TSpinKind::Full,
+                lines: 3,
+            } => 1600,
+            Self::TSpin { .. } => 0,
+        };
+
+        base_score * level
+    }
+
+    fn qualifies_for_back_to_back(self) -> bool {
+        let (t_spin, lines) = self.spin_and_lines();
+        qualifies_for_back_to_back(t_spin, lines)
+    }
+
+    fn breaks_back_to_back(self) -> bool {
+        let (t_spin, lines) = self.spin_and_lines();
+        breaks_back_to_back(t_spin, lines)
+    }
+
+    fn spin_and_lines(self) -> (Option<TSpinKind>, usize) {
+        match self {
+            Self::NoClear => (None, 0),
+            Self::Single => (None, 1),
+            Self::Double => (None, 2),
+            Self::Triple => (None, 3),
+            Self::Tetris => (None, 4),
+            Self::TSpin { kind, lines } => (Some(kind), lines),
+        }
+    }
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -121,6 +215,7 @@ pub struct EngineSnapshot {
     pub lines: usize,
     pub level: u8,
     pub goal_remaining: usize,
+    pub back_to_back_active: bool,
     pub game_over: Option<GameOverStatus>,
 }
 
@@ -133,6 +228,7 @@ pub struct Engine {
     hold: Option<PieceType>,
     score: usize,
     lines: usize,
+    back_to_back_active: bool,
     goal_progress: GoalProgress,
     game_over: Option<GameOverStatus>,
     gravity_accumulator_seconds: f32,
@@ -155,6 +251,7 @@ impl Engine {
             hold: None,
             score: 0,
             lines: 0,
+            back_to_back_active: false,
             goal_progress,
             game_over: None,
             gravity_accumulator_seconds: 0.0,
@@ -223,6 +320,7 @@ impl Engine {
             lines: self.lines,
             level: self.goal_progress.level(),
             goal_remaining: self.goal_progress.remaining(),
+            back_to_back_active: self.back_to_back_active,
             game_over: self.game_over,
         }
     }
@@ -384,6 +482,7 @@ impl Engine {
 
     fn lock_active_piece(&mut self, active: ActivePiece, events: &mut Vec<EngineEvent>) {
         let piece_type = active.piece_type();
+        let t_spin = classify_t_spin(&active, &self.board);
         let lock_out = is_lock_out(active.piece(), active.origin(), self.config.visible_height);
         for cell in piece_snapshot_cells(active.piece(), active.origin()) {
             self.board
@@ -396,6 +495,7 @@ impl Engine {
             piece_type,
             lines_cleared,
         });
+        self.score_lock_result(t_spin, lines_cleared, events);
 
         if lock_out {
             self.game_over = Some(GameOverStatus::LockOut);
@@ -406,6 +506,44 @@ impl Engine {
         }
 
         self.spawn_next_piece(events);
+    }
+
+    fn score_lock_result(
+        &mut self,
+        t_spin: Option<TSpinKind>,
+        lines_cleared: usize,
+        events: &mut Vec<EngineEvent>,
+    ) {
+        let action = EngineScoreAction::from_lock_result(t_spin, lines_cleared);
+        let base_score = action.base_score(self.goal_progress.level() as usize);
+        let back_to_back_bonus = action.qualifies_for_back_to_back() && self.back_to_back_active;
+        let score = if back_to_back_bonus {
+            base_score + base_score / 2
+        } else {
+            base_score
+        };
+
+        if action.qualifies_for_back_to_back() {
+            self.back_to_back_active = true;
+        } else if action.breaks_back_to_back() {
+            self.back_to_back_active = false;
+        }
+
+        let goal_units = match self.config.goal_system {
+            GoalSystem::Fixed => lines_cleared,
+            GoalSystem::Variable => variable_goal_units(t_spin, lines_cleared, back_to_back_bonus),
+        };
+        self.goal_progress.award(goal_units);
+        self.score += score;
+
+        if score > 0 {
+            events.push(EngineEvent::ScoreAwarded {
+                action,
+                score,
+                total_score: self.score,
+                back_to_back_bonus,
+            });
+        }
     }
 
     fn advance_time(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
@@ -548,6 +686,12 @@ mod tests {
 
     fn active_piece_type(engine: &Engine) -> PieceType {
         engine.snapshot().active.expect("active piece").piece_type
+    }
+
+    fn lock_piece(engine: &mut Engine, active: ActivePiece) -> Vec<EngineEvent> {
+        let mut events = Vec::new();
+        engine.lock_active_piece(active, &mut events);
+        events
     }
 
     #[test]
@@ -984,5 +1128,148 @@ mod tests {
                 EngineEvent::Spawned { .. },
             ]
         ));
+    }
+
+    #[test]
+    fn lock_line_clear_scores_single_and_advances_fixed_goal() {
+        let config = EngineConfig {
+            board_width: 4,
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config, 0);
+        let active = ActivePiece::new(PieceType::I, (0, -2));
+
+        let events = lock_piece(&mut engine, active);
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::I,
+                    lines_cleared: 1,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::Single,
+                    score: 100,
+                    total_score: 100,
+                    back_to_back_bonus: false,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
+
+        let snapshot = engine.snapshot();
+        assert_eq!(snapshot.score, 100);
+        assert_eq!(snapshot.lines, 1);
+        assert_eq!(snapshot.goal_remaining, 9);
+        assert!(!snapshot.back_to_back_active);
+    }
+
+    #[test]
+    fn lock_tetris_scores_back_to_back_bonus_on_second_qualifying_clear() {
+        fn fill_tetris_well(engine: &mut Engine) {
+            for y in 0..4 {
+                for x in 0..3 {
+                    assert!(engine.board.set(x, y, CellKind::Some(PieceType::O)));
+                }
+            }
+        }
+
+        fn vertical_i() -> ActivePiece {
+            let mut active = ActivePiece::new(PieceType::I, (1, 0));
+            active.rotate_to(
+                PieceRotation::R90,
+                (1, 0),
+                RotationDirection::Clockwise,
+                1,
+                false,
+            );
+            active
+        }
+
+        let config = EngineConfig {
+            board_width: 4,
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config, 0);
+
+        fill_tetris_well(&mut engine);
+        let first_events = lock_piece(&mut engine, vertical_i());
+        assert!(matches!(
+            first_events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::I,
+                    lines_cleared: 4,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::Tetris,
+                    score: 800,
+                    total_score: 800,
+                    back_to_back_bonus: false,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
+        assert!(engine.snapshot().back_to_back_active);
+
+        fill_tetris_well(&mut engine);
+        let second_events = lock_piece(&mut engine, vertical_i());
+        assert!(matches!(
+            second_events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::I,
+                    lines_cleared: 4,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::Tetris,
+                    score: 1200,
+                    total_score: 2000,
+                    back_to_back_bonus: true,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
+        assert_eq!(engine.snapshot().score, 2000);
+    }
+
+    #[test]
+    fn lock_uses_t_spin_classifier_for_score_action() {
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        for (x, y) in [(4, 6), (6, 6), (4, 4)] {
+            assert!(engine.board.set(x, y, CellKind::Some(PieceType::O)));
+        }
+        let mut active = ActivePiece::new(PieceType::T, (4, 4));
+        active.rotate_to(
+            PieceRotation::R0,
+            (4, 4),
+            RotationDirection::Clockwise,
+            1,
+            false,
+        );
+
+        let events = lock_piece(&mut engine, active);
+
+        assert!(matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::T,
+                    lines_cleared: 0,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::TSpin {
+                        kind: TSpinKind::Full,
+                        lines: 0,
+                    },
+                    score: 400,
+                    total_score: 400,
+                    back_to_back_bonus: false,
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ));
+        assert_eq!(engine.snapshot().score, 400);
     }
 }
