@@ -11,7 +11,10 @@ mod pieces;
 mod t_spin;
 
 pub use active_piece::{ActivePiece, PieceAction, RotationDirection};
-pub use api::{Engine, EngineConfig, EngineEvent, EngineSnapshot, InputFrame};
+pub use api::{
+    ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
+    InputFrame, SnapshotCell,
+};
 pub use board::{Board, Cell, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
 pub use generator::PieceGenerator;
