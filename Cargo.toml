@@ -10,6 +10,27 @@ array2d = "0.3.2"
 bevy_asset_loader = "0.26.0"
 itertools = "0.14.0"
 rand = "0.10.1"
+# Dev-only ECS inspector overlay (egui). Optional + behind the `dev` feature so
+# release builds never pull or compile egui — keeps the size-optimized wasm
+# clean. Run with `cargo run --features dev`. (Bevy 0.18 ↔ inspector 0.36.)
+# default-features off: the inspector's defaults (and its `bevy_render` feature,
+# required by `quick::WorldInspectorPlugin`) assume a 3D-capable Bevy — they fail
+# to compile `Mesh::generate_tangents` and panic registering 3D types
+# (GizmoConfigStore) that this curated 2D build never adds. So we skip the `quick`
+# plugin and drive the inspector via the core manual API (DefaultInspectorConfigPlugin
+# + bevy_inspector::ui_for_world), which needs none of those features. See lib.rs.
+bevy-inspector-egui = { version = "0.36", default-features = false, features = [
+    "egui_clipboard",
+], optional = true }
+# bevy_egui (the egui<->bevy bridge) as a DIRECT dep: bevy-inspector-egui only
+# re-exports it behind its `bevy_render` feature (which we can't enable — see
+# above), so we pull the matching 0.39 directly for EguiPlugin/EguiContext/egui.
+bevy_egui = { version = "0.39", optional = true }
+
+[features]
+# Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
+# never touches release builds. Usage: `cargo run --features dev`.
+dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = "5.0"

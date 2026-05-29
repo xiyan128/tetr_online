@@ -15,6 +15,10 @@ use bevy::app::App;
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
+#[cfg(feature = "dev")]
+use bevy_egui::{egui, EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
+#[cfg(feature = "dev")]
+use bevy_inspector_egui::{bevy_inspector, DefaultInspectorConfigPlugin};
 
 pub mod ai;
 mod assets;
@@ -130,5 +134,43 @@ impl Plugin for GamePlugin {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default())
                 .add_plugins(LogDiagnosticsPlugin::default());
         }
+
+        // Dev-only ECS inspector overlay (egui). Behind the `dev` cargo feature
+        // (not `debug_assertions`) so release builds never compile egui — keeps
+        // the size-optimized wasm clean. We drive it via the core manual API
+        // (`DefaultInspectorConfigPlugin` + a `ui_for_world` window) rather than
+        // `quick::WorldInspectorPlugin`: the `quick` module requires the
+        // inspector's `bevy_render` feature, which assumes a 3D-capable Bevy this
+        // curated 2D build doesn't enable (it fails to compile `generate_tangents`
+        // and panics registering `GizmoConfigStore`). The window reads the
+        // `register_type` registrations above to show entities / components /
+        // resources by name. Run with `cargo run --features dev`.
+        #[cfg(feature = "dev")]
+        {
+            app.add_plugins(EguiPlugin::default())
+                .add_plugins(DefaultInspectorConfigPlugin)
+                .add_systems(EguiPrimaryContextPass, dev_inspector_ui);
+        }
     }
+}
+
+/// Draw the dev ECS inspector window — entities, components, resources, assets.
+/// Only compiled with the `dev` feature; reads the `register_type` registry (see
+/// `GamePlugin::build`) so custom components/resources show by name.
+#[cfg(feature = "dev")]
+fn dev_inspector_ui(world: &mut World) {
+    // Clone the primary egui context handle so the world borrow is released
+    // before we hand `world` to the inspector below.
+    let Ok(mut egui_context) = world
+        .query_filtered::<&mut EguiContext, With<PrimaryEguiContext>>()
+        .single(world)
+        .cloned()
+    else {
+        return;
+    };
+    egui::Window::new("Inspector").show(egui_context.get_mut(), |ui| {
+        egui::ScrollArea::both().show(ui, |ui| {
+            bevy_inspector::ui_for_world(world, ui);
+        });
+    });
 }
