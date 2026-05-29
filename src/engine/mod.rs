@@ -1,11 +1,13 @@
 mod active_piece;
 mod api;
+mod attack;
 mod board;
 mod constants;
 mod game_over;
 mod generator;
 mod goals;
 mod gravity;
+mod lock_clear;
 mod lock_down;
 mod pieces;
 mod scoring;
@@ -16,6 +18,7 @@ pub use api::{
     ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
     InputFrame, SnapshotCell,
 };
+pub use attack::{apply_attack, AttackOutcome};
 pub use board::{Board, Cell, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
 pub use generator::PieceGenerator;
@@ -27,6 +30,7 @@ pub use gravity::{
     fall_duration, fall_speed_seconds, soft_drop_duration, soft_drop_speed_seconds, MAX_LEVEL,
     MIN_LEVEL,
 };
+pub use lock_clear::{lock_and_clear, LockOutcome};
 pub use lock_down::{
     apply_grounded_move_or_rotation, LockDownMode, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS,
 };

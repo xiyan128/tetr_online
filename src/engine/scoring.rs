@@ -4,6 +4,34 @@ use crate::engine::goals::{
 use crate::engine::gravity::MIN_LEVEL;
 use crate::engine::t_spin::TSpinKind;
 
+/// Apply a scoring action to a `ScoreState` and return the resulting award, if
+/// any.
+///
+/// Free function so future placement / replay code can run the scoring rules
+/// against a borrowed state without having to construct an `Engine`. The
+/// state-mutation surface is explicit (`&mut ScoreState`) per ADR-7.
+///
+/// `goal_system` is required only for lock-result actions; manual drops ignore
+/// it.
+pub(crate) fn score_action(
+    state: &mut ScoreState,
+    goal_system: GoalSystem,
+    action: EngineScoreAction,
+) -> Option<ScoreAward> {
+    match action {
+        EngineScoreAction::SoftDrop => state.manual_drop(action, 1),
+        EngineScoreAction::HardDrop { cells } => state.manual_drop(action, cells),
+        EngineScoreAction::NoClear => state.lock_result(goal_system, None, 0),
+        EngineScoreAction::Single => state.lock_result(goal_system, None, 1),
+        EngineScoreAction::Double => state.lock_result(goal_system, None, 2),
+        EngineScoreAction::Triple => state.lock_result(goal_system, None, 3),
+        EngineScoreAction::Tetris => state.lock_result(goal_system, None, 4),
+        EngineScoreAction::TSpin { kind, lines } => {
+            state.lock_result(goal_system, Some(kind), lines)
+        }
+    }
+}
+
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum EngineScoreAction {
     SoftDrop,
