@@ -445,16 +445,17 @@ fn persist(storage: &StorageResource, settings: &GameSettings) {
 /// format: unknown lines are ignored on decode and any missing field falls back
 /// to its [`Default`], so older/newer blobs degrade gracefully.
 fn encode_settings(s: &GameSettings) -> String {
+    use std::fmt::Write as _;
+
     let mut out = String::new();
-    out.push_str(&format!("next_count={}\n", s.next_count));
-    out.push_str(&format!("hold_enabled={}\n", s.hold_enabled));
-    out.push_str(&format!("ghost_enabled={}\n", s.ghost_enabled));
-    out.push_str(&format!(
-        "lock_down_mode={}\n",
-        lock_down_token(s.lock_down_mode)
-    ));
-    out.push_str(&format!("music_volume={}\n", s.music_volume));
-    out.push_str(&format!("sfx_volume={}\n", s.sfx_volume));
+    // Writing into a `String` is infallible, so the `writeln!` results can't
+    // error; `let _ =` keeps that explicit without unwrap noise.
+    let _ = writeln!(out, "next_count={}", s.next_count);
+    let _ = writeln!(out, "hold_enabled={}", s.hold_enabled);
+    let _ = writeln!(out, "ghost_enabled={}", s.ghost_enabled);
+    let _ = writeln!(out, "lock_down_mode={}", lock_down_token(s.lock_down_mode));
+    let _ = writeln!(out, "music_volume={}", s.music_volume);
+    let _ = writeln!(out, "sfx_volume={}", s.sfx_volume);
     for action in GameAction::ALL {
         let (primary, secondary) = s.keybinds.get(action);
         // Persist primary (+ optional secondary) as key codes.
@@ -463,7 +464,7 @@ fn encode_settings(s: &GameSettings) -> String {
             .map(|t| format!(",{t}"))
             .unwrap_or_default();
         if let Some(prim) = key_code_token(primary) {
-            out.push_str(&format!("bind.{}={}{}\n", action_token(action), prim, sec));
+            let _ = writeln!(out, "bind.{}={}{}", action_token(action), prim, sec);
         }
     }
     out

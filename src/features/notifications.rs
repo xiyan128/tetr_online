@@ -23,6 +23,8 @@
 //!
 //! Touch only this file.
 
+use std::collections::BTreeMap;
+
 use bevy::color::Alpha;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -454,7 +456,6 @@ fn spawn_hard_drop_trail(
     }
 
     // Per column: lowest pre-drop cell (the leading edge of the streak).
-    use std::collections::BTreeMap;
     let mut column_bottom: BTreeMap<isize, (isize, PieceColor)> = BTreeMap::new();
     for cell in start_cells {
         column_bottom

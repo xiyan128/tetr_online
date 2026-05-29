@@ -294,17 +294,21 @@ mod codec {
 
     /// Serialize every variant's table to the line format described above.
     pub fn serialize(scores: &HighScores) -> String {
+        use std::fmt::Write as _;
+
         let mut out = String::new();
         for variant in Variant::ALL {
             for entry in scores.table(variant) {
-                out.push_str(&format!(
-                    "{} {} {} {} {}\n",
+                // Writing into a `String` is infallible.
+                let _ = writeln!(
+                    out,
+                    "{} {} {} {} {}",
                     tag(variant),
                     entry.score,
                     entry.time_seconds,
                     entry.lines,
                     entry.level,
-                ));
+                );
             }
         }
         out

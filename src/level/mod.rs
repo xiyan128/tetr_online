@@ -60,6 +60,9 @@ impl Plugin for LevelPlugin {
             // Shared M1 contracts the gameplay systems read. `init_resource` is
             // idempotent, so `GamePlugin` remains the canonical owner while
             // `LevelPlugin` stays self-sufficient (headless tests, fan-out).
+            // Contract: keep `init_resource` here — do NOT switch to
+            // `insert_resource`, which would clobber the values `GamePlugin`
+            // already inserted (e.g. the player's persisted `GameSettings`).
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
@@ -286,8 +289,7 @@ fn update_playing_state(
         .0
         .active
         .as_ref()
-        .map(|active| active.landed)
-        .unwrap_or(false);
+        .is_some_and(|active| active.landed);
 
     let desired = if landed {
         PlayingState::Locking
@@ -382,12 +384,12 @@ fn reconcile_ghost_piece(
     }
     // Hide the ghost when it would coincide with the active piece (piece already
     // resting on the stack), matching the old renderer's "no ghost when grounded".
+    // No active piece ⇒ treat as "landed" so the ghost stays hidden.
     let landed = snapshot
         .0
         .active
         .as_ref()
-        .map(|active| active.landed)
-        .unwrap_or(true);
+        .is_none_or(|active| active.landed);
     if landed {
         return;
     }
@@ -439,8 +441,7 @@ fn emit_audio_cues(
         .0
         .active
         .as_ref()
-        .map(|active| active.landed)
-        .unwrap_or(false);
+        .is_some_and(|active| active.landed);
     if landed && !*prev_landed {
         commands.trigger(AudioCue::Placed);
     }

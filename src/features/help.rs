@@ -191,7 +191,7 @@ fn spawn_keybind_row(
     let (primary, secondary) = binds.get(action);
     let keys = match secondary {
         Some(second) => format!("{} / {}", key_label(primary), key_label(second)),
-        None => key_label(primary).to_string(),
+        None => key_label(primary),
     };
     spawn_body_label(
         commands,

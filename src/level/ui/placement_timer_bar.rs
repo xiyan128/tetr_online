@@ -50,8 +50,7 @@ pub fn update_locking_timer_bar(
         .0
         .active
         .as_ref()
-        .map(|active| active.lock_timer_fraction)
-        .unwrap_or(1.0);
+        .map_or(1.0, |active| active.lock_timer_fraction);
     let progress = 1.0 - remaining;
     let width = config.block_size * config.board_width as f32 * progress;
 
