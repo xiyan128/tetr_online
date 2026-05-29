@@ -100,30 +100,25 @@ pub struct GameField;
 
 #[derive(Component, Clone, Reflect)]
 #[reflect(Component)]
-#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct BackgroundBlock;
 
 /// A cell of the active (falling) piece. Reconciled from `snapshot.active`.
 #[derive(Component, Clone, Reflect)]
 #[reflect(Component)]
-#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct FallingBlock;
 
 /// A locked board mino. Reconciled from `snapshot.board_cells`.
 #[derive(Component, Clone, Reflect)]
 #[reflect(Component)]
-#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct StaticBlock;
 
 /// A ghost-piece cell. Reconciled from `snapshot.ghost_cells`.
 #[derive(Component, Clone, Reflect)]
 #[reflect(Component)]
-#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct GhostBlock;
 
 #[derive(Component, Clone, Reflect)]
 #[reflect(Component)]
-#[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct PreviewBlock;
 
 pub fn to_translation(x: isize, y: isize, block_size: f32) -> Vec3 {
