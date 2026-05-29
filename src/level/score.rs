@@ -9,7 +9,7 @@
 
 use crate::engine::{EngineScoreAction, TSpinKind};
 use crate::level::engine_bridge::{FrameEvents, LatestSnapshot};
-use crate::GameState;
+use crate::{GameState, InGameplay};
 use bevy::prelude::*;
 
 pub struct ScorePlugin;
@@ -18,7 +18,8 @@ impl Plugin for ScorePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ScoreTypes>()
             .insert_resource(Scorer::default())
-            .add_systems(OnEnter(GameState::Playing), reset_score)
+            // Reset once per session (not on resume from pause).
+            .add_systems(OnEnter(InGameplay), reset_score)
             .add_systems(
                 Update,
                 (mirror_snapshot_score, emit_score_types)

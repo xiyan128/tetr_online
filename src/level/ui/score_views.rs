@@ -2,7 +2,7 @@ use crate::assets::GameAssets;
 use crate::level::common::{to_translation, LevelConfig};
 use crate::level::score::{ScoreTypes, Scorer};
 use crate::level::ui::calc_ui_offset;
-use crate::GameState;
+use crate::InGameplay;
 use bevy::color::Alpha;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -46,7 +46,7 @@ pub fn spawn_score_text(
             Anchor::TOP_LEFT,
         ))
         .insert(ScoreText)
-        .insert(DespawnOnExit(GameState::Playing));
+        .insert(DespawnOnExit(InGameplay));
 }
 
 pub fn spawn_line_count_text(
@@ -71,7 +71,7 @@ pub fn spawn_line_count_text(
             Anchor::TOP_LEFT,
         ))
         .insert(LineCountText)
-        .insert(DespawnOnExit(GameState::Playing));
+        .insert(DespawnOnExit(InGameplay));
 }
 
 pub fn spawn_score_type_text(
@@ -101,7 +101,7 @@ pub fn spawn_score_type_text(
             Anchor::TOP_RIGHT,
         ))
         .insert(ScoreTypeText)
-        .insert(DespawnOnExit(GameState::Playing));
+        .insert(DespawnOnExit(InGameplay));
 }
 
 pub fn update_score_text(mut text_query: Query<&mut Text2d, With<ScoreText>>, scorer: Res<Scorer>) {

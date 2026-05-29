@@ -18,6 +18,12 @@ mod mode_select;
 mod options;
 mod title;
 
+// Screen-root markers, re-exported so the corresponding feature plugins in
+// `crate::features` can attach their content under the right entity.
+pub(crate) use help::HelpRoot;
+pub(crate) use high_scores::HighScoresRoot;
+pub(crate) use options::OptionsRoot;
+
 /// Registers every menu screen plugin.
 pub struct ScreensPlugin;
 

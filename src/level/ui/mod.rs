@@ -9,14 +9,15 @@ use crate::level::score::Scorer;
 use crate::level::ui::piece_previewer::*;
 use crate::level::ui::placement_timer_bar::*;
 use crate::level::ui::score_views::*;
-use crate::GameState;
+use crate::{GameState, InGameplay};
 
 pub(crate) struct UIPlugin;
 
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
+        // Spawned once per session so they survive a pause/resume round-trip.
         app.add_systems(
-            OnEnter(GameState::Playing),
+            OnEnter(InGameplay),
             (
                 spawn_piece_previewer,
                 spawn_hold_viewer,

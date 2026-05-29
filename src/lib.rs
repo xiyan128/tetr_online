@@ -6,7 +6,7 @@ use bevy_asset_loader::prelude::*;
 
 mod assets;
 pub mod engine;
-mod features;
+pub(crate) mod features;
 pub mod high_scores;
 pub(crate) mod level;
 pub mod player;
@@ -57,11 +57,30 @@ pub enum GameState {
     GameOver,
 }
 
+/// Computed state that is active whenever a gameplay session is alive — i.e.
+/// [`GameState::Playing`] **or** [`GameState::Paused`]. Gameplay entities and the
+/// level `OnEnter` setup are scoped to this (via `OnEnter(InGameplay)` /
+/// `DespawnOnExit(InGameplay)`) so the board survives a `Playing -> Paused ->
+/// Playing` round-trip instead of being despawned and rebuilt (which would reset
+/// the run). Per-frame run conditions stay on `GameState::Playing`, so the
+/// simulation still freezes while paused.
+#[derive(Clone, PartialEq, Eq, Hash, Debug)]
+pub struct InGameplay;
+
+impl ComputedStates for InGameplay {
+    type SourceStates = GameState;
+
+    fn compute(sources: GameState) -> Option<Self> {
+        matches!(sources, GameState::Playing | GameState::Paused).then_some(InGameplay)
+    }
+}
+
 pub struct GamePlugin;
 
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
+            .add_computed_state::<InGameplay>()
             .add_loading_state(
                 LoadingState::new(GameState::Loading)
                     .load_collection::<crate::assets::GameAssets>()

@@ -4,7 +4,7 @@ use crate::level::common::spawn_free_block;
 use crate::level::common::{to_translation, BlockKind, LevelConfig};
 use crate::level::engine_bridge::LatestSnapshot;
 use crate::level::ui::calc_ui_offset;
-use crate::GameState;
+use crate::InGameplay;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -32,7 +32,7 @@ pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
                 config.block_size,
             ) + offset,
         ))
-        .insert(DespawnOnExit(GameState::Playing))
+        .insert(DespawnOnExit(InGameplay))
         .id();
 
     for i in 0..config.preview_count {
@@ -54,7 +54,7 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
         Transform::from_translation(
             to_translation(0, (config.board_height) as isize, config.block_size) + offset,
         ),
-        DespawnOnExit(GameState::Playing),
+        DespawnOnExit(InGameplay),
         children![(Transform::default(), PreviewHolder { index: 0 })],
     ));
 }

@@ -10,7 +10,7 @@ use crate::level::score::ScorePlugin;
 use crate::level::sound_effects::SoundEffectsPlugin;
 use crate::level::ui::UIPlugin;
 use crate::player::{KeyboardController, KeyboardInput, PlayerController};
-use crate::GameState;
+use crate::{GameState, InGameplay};
 
 pub(crate) mod common;
 pub(crate) mod engine_bridge;
@@ -26,6 +26,11 @@ impl Plugin for LevelPlugin {
         app
             // states
             .add_sub_state::<PlayingState>()
+            // Session scope (Playing or Paused). Idempotent: `add_computed_state`
+            // guards on the transition-event resource, so `GamePlugin` registering
+            // it too just warns. Keeps `LevelPlugin` self-sufficient for headless
+            // tests that add it without `GamePlugin`.
+            .add_computed_state::<InGameplay>()
             // plugins
             .add_plugins(GameOverPlugin)
             .add_plugins(SoundEffectsPlugin)
@@ -41,9 +46,11 @@ impl Plugin for LevelPlugin {
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
-            // setup
+            // setup — scoped to the whole session so a pause/resume round-trip
+            // doesn't rebuild the engine. The per-frame driver/reconcilers below
+            // stay gated on `Playing`, so the sim still freezes while paused.
             .add_systems(
-                OnEnter(GameState::Playing),
+                OnEnter(InGameplay),
                 (level_setup, crate::variant::reset_variant_progress),
             )
             // The driver runs first, then everything that reads its snapshot/events.
@@ -114,7 +121,7 @@ fn level_setup(
             GameField,
             Transform::default(),
             Visibility::default(),
-            DespawnOnExit(GameState::Playing),
+            DespawnOnExit(InGameplay),
         ))
         .id();
     let mut block_ids = Vec::new();
@@ -138,7 +145,7 @@ fn level_setup(
             config.block_size * config.board_height as f32 / 2.,
             1.0,
         )),
-        DespawnOnExit(GameState::Playing),
+        DespawnOnExit(InGameplay),
     ));
 }
 
@@ -156,6 +163,7 @@ fn level_setup(
 fn engine_driver(
     time: Res<Time>,
     keyboard: Res<ButtonInput<KeyCode>>,
+    settings: Res<crate::settings::GameSettings>,
     mut engine: ResMut<EngineState>,
     mut snapshot: ResMut<LatestSnapshot>,
     mut frame_events: ResMut<FrameEvents>,
@@ -177,8 +185,14 @@ fn engine_driver(
 
         // Stage this fixed slice's input. Edge-triggered actions (rotate, hold,
         // hard drop) are only honored on the first slice of the frame so one key
-        // press maps to one action even if several slices run this frame.
-        let input = KeyboardInput::from_keyboard(&keyboard, SIM_DT_SECONDS);
+        // press maps to one action even if several slices run this frame. Input is
+        // read through the player's configurable keybinds so options-screen
+        // rebinds take effect (defaults reproduce the legacy hard-coded mapping).
+        let input = crate::features::options::keyboard_input_from_keybinds(
+            &keyboard,
+            &settings.keybinds,
+            SIM_DT_SECONDS,
+        );
         let input = if stepped { suppress_edges(input) } else { input };
         player.0.set_input(input);
 

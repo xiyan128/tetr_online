@@ -21,7 +21,7 @@ mod help;
 mod high_scores;
 mod info_panel;
 mod notifications;
-mod options;
+pub(crate) mod options;
 mod pause;
 mod sfx;
 
