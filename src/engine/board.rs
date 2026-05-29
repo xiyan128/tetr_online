@@ -14,6 +14,7 @@ use array2d::Array2D;
 use itertools::{iproduct, Product};
 use std::ops::Range;
 
+#[derive(Clone)]
 pub struct Board {
     width: usize,
     height: usize,

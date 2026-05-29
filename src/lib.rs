@@ -16,6 +16,7 @@ use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 
+pub mod ai;
 mod assets;
 pub mod engine;
 pub(crate) mod features;
