@@ -1,3 +1,11 @@
+//! The piece currently in play and its lock-down bookkeeping.
+//!
+//! [`ActivePiece`] wraps a [`Piece`] with the mutable state the lock-down and
+//! T-spin rules need: its board origin, lock-timer status, the lowest row it has
+//! reached (for Extended Placement reset budgeting), and a record of the last
+//! successful action / rotation kick. Methods are deliberately fine-grained so
+//! the engine drives state transitions explicitly rather than inferring them.
+
 use crate::engine::pieces::{Piece, PieceRotation, PieceType};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]

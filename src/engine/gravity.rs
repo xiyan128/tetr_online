@@ -1,3 +1,10 @@
+//! Gravity timing: how long a piece takes to fall one row at each level.
+//!
+//! Implements the guideline fall-speed curve as seconds-per-row, with soft drop
+//! fixed at 20x normal speed. Levels outside [`MIN_LEVEL`]..=[`MAX_LEVEL`] are
+//! clamped. Both the raw `f32` seconds and ready-to-use [`Duration`]s are
+//! exposed so the timing layer can pick whichever it needs.
+
 use std::time::Duration;
 
 pub const MIN_LEVEL: u8 = 1;

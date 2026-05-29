@@ -1,3 +1,12 @@
+//! T-spin detection and Mini/Full classification.
+//!
+//! A T-spin requires a T piece whose last successful action was a rotation (or
+//! the kick-5-into-slot exception) and at least three of its four diagonal
+//! corners blocked. [`t_spin_corners`] reports the corners relative to the
+//! piece's facing (front pair `a`/`b`, back pair `c`/`d`); [`classify_t_spin`]
+//! turns that into [`TSpinKind`] per the guideline, including the SRS kick-5
+//! override that promotes a Mini to Full.
+
 use crate::engine::active_piece::{ActivePiece, PieceAction};
 use crate::engine::board::{Board, CellKind};
 use crate::engine::pieces::{PieceRotation, PieceType};

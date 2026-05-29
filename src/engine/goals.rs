@@ -1,3 +1,11 @@
+//! Level-goal progression and the Back-to-Back qualification rules.
+//!
+//! Two goal systems are supported: Fixed (prorated start level, then ten lines
+//! per level) and Variable (per-clear "goal units" weighted by clear type, §25.9).
+//! [`GoalProgress`] tracks the current level and lines remaining and advances on
+//! [`GoalProgress::award`]. The free functions also expose which clears qualify
+//! for or break a Back-to-Back chain, shared with [`scoring`](crate::engine::scoring).
+
 use crate::engine::gravity::{MAX_LEVEL, MIN_LEVEL};
 use crate::engine::t_spin::TSpinKind;
 

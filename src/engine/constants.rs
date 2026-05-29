@@ -1,3 +1,10 @@
+//! SRS wall-kick tables and tetromino cell layouts.
+//!
+//! [`I_KICKS`] / [`DEFAULT_KICKS`] hold the five `(dx, dy)` offsets tried for
+//! each of the eight rotation transitions (the I piece uses its own table). The
+//! [`shapes`] module gives each piece's four cells inside its spawn bounding box;
+//! [`avatar_shapes`] gives tight, margin-less layouts for preview/hold rendering.
+
 // Some constant data are from https://github.com/DavideCanton/rust-tetris/blob/master/rust_tetris_core/src/constants.rs#L9
 pub type Kick = (isize, isize);
 

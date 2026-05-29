@@ -1,3 +1,10 @@
+//! Guideline scoring: line clears, T-spins, drops, and Back-to-Back.
+//!
+//! [`EngineScoreAction`] names every scoreable event; [`ScoreState`] accumulates
+//! score, lines, level/goal progress, and the Back-to-Back chain. Awards are
+//! computed by [`score_action`] as a pure transition over a borrowed state so
+//! placement/replay code can score without owning an `Engine` (ADR-7).
+
 use crate::engine::goals::{
     breaks_back_to_back, qualifies_for_back_to_back, variable_goal_units, GoalProgress, GoalSystem,
 };

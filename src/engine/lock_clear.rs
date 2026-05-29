@@ -1,3 +1,10 @@
+//! Locking a piece and clearing completed rows.
+//!
+//! [`lock_and_clear`] writes the active piece's cells onto the board, clears any
+//! now-full rows, and reports what happened via [`LockOutcome`]. It is a pure,
+//! board-shaped operation (no engine/tick state) so search bots, replay
+//! validators, and garbage solvers can reuse it (ADR-7, roadmap §10).
+
 use crate::engine::active_piece::ActivePiece;
 use crate::engine::board::{Board, CellKind};
 
@@ -57,12 +64,8 @@ pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {
 
 fn full_rows(board: &Board) -> Vec<isize> {
     let width = board.width();
-    let mut rows: Vec<isize> = board
-        .cells()
-        .iter()
-        .map(|cell| cell.coords().1)
-        .collect();
-    rows.sort();
+    let mut rows: Vec<isize> = board.cells().iter().map(|cell| cell.coords().1).collect();
+    rows.sort_unstable();
     rows.dedup();
     rows.into_iter()
         .filter(|y| board.row_cells(*y as usize).count() == width)
@@ -70,11 +73,7 @@ fn full_rows(board: &Board) -> Vec<isize> {
 }
 
 fn highest_occupied_y(board: &Board) -> Option<isize> {
-    board
-        .cells()
-        .iter()
-        .map(|cell| cell.coords().1)
-        .max()
+    board.cells().iter().map(|cell| cell.coords().1).max()
 }
 
 #[cfg(test)]

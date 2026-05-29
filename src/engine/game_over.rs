@@ -1,3 +1,12 @@
+//! Top-out detection: the three guideline lose conditions.
+//!
+//! - **Block out** — a freshly spawned piece overlaps an existing block.
+//! - **Lock out** — a piece locks entirely above the visible skyline.
+//! - **Top out** — a piece is forced above the total (including hidden) board.
+//!
+//! Each is a pure predicate so the engine can check them at the relevant moment
+//! without owning the game-over policy.
+
 use crate::engine::board::Board;
 use crate::engine::pieces::Piece;
 

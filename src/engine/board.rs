@@ -1,5 +1,13 @@
+//! The playfield grid and its cells.
+//!
+//! [`Board`] is a row-major matrix of [`Cell`]s addressed by signed `(x, y)`
+//! coordinates with the origin at the bottom-left. An optional top margin holds
+//! the hidden spawn rows above the visible field. Off-grid reads resolve to
+//! [`CellKind::Wall`] (sides/floor) so collision checks need no bounds special-
+//! casing.
+
 use std::cmp::Ordering;
-use std::fmt::Display;
+use std::fmt::{Display, Write};
 
 use crate::engine::pieces::PieceType;
 use array2d::Array2D;
@@ -133,22 +141,19 @@ impl Board {
 
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        // show board representation
-        let board = self;
-        let mut s = String::new();
-
-        for row in board.rows().iter().rev() {
+        // Render top row first so the output reads like the on-screen board.
+        for row in self.rows().iter().rev() {
             for cell in row {
-                s.push_str(match cell.cell_kind {
+                f.write_str(match cell.cell_kind {
                     CellKind::Some(_) => "X",
                     CellKind::None => "#",
-                    _ => " ",
-                });
+                    CellKind::Wall => " ",
+                })?;
             }
-            s.push('\n');
+            f.write_char('\n')?;
         }
 
-        write!(f, "{}", s)
+        Ok(())
     }
 }
 

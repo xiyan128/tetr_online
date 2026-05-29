@@ -1,3 +1,11 @@
+//! Lock-down timer reset policy.
+//!
+//! When a grounded piece is moved or rotated, whether its lock timer resets
+//! depends on [`LockDownMode`]: Extended Placement allows a bounded number of
+//! resets ([`EXTENDED_LOCK_RESET_BUDGET`]) per new lowest row, Infinite always
+//! resets, and Classic never does. [`apply_grounded_move_or_rotation`] applies
+//! the policy and reports whether the timer was reset.
+
 use crate::engine::active_piece::ActivePiece;
 
 pub const LOCK_DOWN_SECONDS: f32 = 0.5;

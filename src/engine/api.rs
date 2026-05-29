@@ -1,3 +1,14 @@
+//! The public engine facade: [`Engine`], its config, inputs, events, and
+//! snapshots.
+//!
+//! This is the one type the host (the Bevy layer) talks to. [`Engine::step`]
+//! advances the simulation by one [`InputFrame`] and returns the [`EngineEvent`]s
+//! that occurred; [`Engine::snapshot`] produces a self-contained [`EngineSnapshot`]
+//! for rendering. The engine owns the board, the active piece, the seven-bag
+//! generator, hold slot, and score/goal state, and wires together the pure rule
+//! modules in this crate. Per ADR-7 the engine carries no rendering or Bevy
+//! types; it is driven entirely through these plain data structures.
+
 use crate::engine::active_piece::ActivePiece;
 use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};

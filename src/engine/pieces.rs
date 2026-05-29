@@ -1,3 +1,12 @@
+//! Tetromino geometry: shapes, rotation, and SRS wall kicks.
+//!
+//! A [`Piece`] is a [`PieceType`] plus a [`PieceRotation`]. Cell layouts come
+//! from the shape tables in [`constants`](crate::engine::constants); rotation is
+//! applied by rotating those cells within the piece's bounding box. Movement and
+//! rotation queries ([`Piece::try_move`], [`Piece::try_rotate_with_kicks`])
+//! return the resolved offset/rotation when unobstructed, implementing the SRS
+//! kick tables, and `None` otherwise.
+
 use crate::engine::board::{Board, CellKind};
 use std::fmt::Debug;
 

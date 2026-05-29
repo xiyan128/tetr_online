@@ -1,3 +1,14 @@
+//! Engine-agnostic Tetris core.
+//!
+//! Everything under this module implements the game rules as plain Rust with no
+//! Bevy (or other engine) dependency, per ADR-7 — the host drives it through the
+//! [`Engine`] facade using plain data ([`InputFrame`] in, [`EngineEvent`]s and
+//! [`EngineSnapshot`] out). Submodules are split by concern: board/piece
+//! geometry, the seven-bag generator, gravity and lock-down timing, line
+//! clearing, scoring, level goals, T-spin detection, and game-over conditions.
+//! Most of those concerns are exposed as pure free functions so they can be
+//! reused outside the per-frame loop (search bots, replay validators).
+
 mod active_piece;
 mod api;
 mod attack;
