@@ -110,7 +110,7 @@ fn button_system(
                 *color = PRESSED_BUTTON.into();
                 match menu_actions {
                     MenuActions::Restart => {
-                        next_game_state.set(GameState::InGame);
+                        next_game_state.set(GameState::Playing);
                     }
                     MenuActions::Quit => {
                         next_game_state.set(GameState::MainMenu);

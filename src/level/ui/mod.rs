@@ -16,7 +16,7 @@ pub(crate) struct UIPlugin;
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(
-            OnEnter(GameState::InGame),
+            OnEnter(GameState::Playing),
             (
                 spawn_piece_previewer,
                 spawn_hold_viewer,
@@ -29,12 +29,12 @@ impl Plugin for UIPlugin {
         .add_systems(
             Update,
             update_piece_previewer
-                .run_if(in_state(GameState::InGame).and(any_with_component::<PiecePreviewer>)),
+                .run_if(in_state(GameState::Playing).and(any_with_component::<PiecePreviewer>)),
         )
         .add_systems(
             Update,
             update_hold_viewer
-                .run_if(in_state(GameState::InGame).and(any_with_component::<HoldViewer>)),
+                .run_if(in_state(GameState::Playing).and(any_with_component::<HoldViewer>)),
         )
         .add_systems(
             Update,
@@ -59,7 +59,7 @@ impl Plugin for UIPlugin {
         .add_systems(
             Update,
             update_locking_timer_bar
-                .run_if(in_state(GameState::InGame).and(any_with_component::<LockingTimerBar>)),
+                .run_if(in_state(GameState::Playing).and(any_with_component::<LockingTimerBar>)),
         )
         .add_systems(OnExit(PlayingState::Locking), despawn_locking_timer_bar);
     }

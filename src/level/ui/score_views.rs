@@ -46,7 +46,7 @@ pub fn spawn_score_text(
             Anchor::TOP_LEFT,
         ))
         .insert(ScoreText)
-        .insert(DespawnOnExit(GameState::InGame));
+        .insert(DespawnOnExit(GameState::Playing));
 }
 
 pub fn spawn_line_count_text(
@@ -71,7 +71,7 @@ pub fn spawn_line_count_text(
             Anchor::TOP_LEFT,
         ))
         .insert(LineCountText)
-        .insert(DespawnOnExit(GameState::InGame));
+        .insert(DespawnOnExit(GameState::Playing));
 }
 
 pub fn spawn_score_type_text(
@@ -101,7 +101,7 @@ pub fn spawn_score_type_text(
             Anchor::TOP_RIGHT,
         ))
         .insert(ScoreTypeText)
-        .insert(DespawnOnExit(GameState::InGame));
+        .insert(DespawnOnExit(GameState::Playing));
 }
 
 pub fn update_score_text(mut text_query: Query<&mut Text2d, With<ScoreText>>, scorer: Res<Scorer>) {

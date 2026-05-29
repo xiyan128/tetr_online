@@ -18,11 +18,11 @@ impl Plugin for ScorePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ScoreTypes>()
             .insert_resource(Scorer::default())
-            .add_systems(OnEnter(GameState::InGame), reset_score)
+            .add_systems(OnEnter(GameState::Playing), reset_score)
             .add_systems(
                 Update,
                 (mirror_snapshot_score, emit_score_types)
-                    .run_if(in_state(GameState::InGame)),
+                    .run_if(in_state(GameState::Playing)),
             );
     }
 }

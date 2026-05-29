@@ -28,7 +28,7 @@ pub enum AudioCue {
 /// Falling vs. Locking, derived each frame from `snapshot.active.landed`. Drives
 /// the lock-down timer bar's visibility (it only shows while Locking).
 #[derive(SubStates, PartialEq, Eq, Debug, Clone, Hash, Default)]
-#[source(GameState = GameState::InGame)]
+#[source(GameState = GameState::Playing)]
 pub enum PlayingState {
     #[default]
     Falling,
@@ -196,7 +196,7 @@ pub fn spawn_snapshot_block(
     let entity = spawn_free_block(commands, config, texture_assets, &cell, block_kind);
     commands
         .entity(entity)
-        .insert(DespawnOnExit(GameState::InGame));
+        .insert(DespawnOnExit(GameState::Playing));
     entity
 }
 

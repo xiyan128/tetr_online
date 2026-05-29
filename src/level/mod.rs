@@ -12,8 +12,8 @@ use crate::level::ui::UIPlugin;
 use crate::player::{KeyboardController, KeyboardInput, PlayerController};
 use crate::GameState;
 
-mod common;
-mod engine_bridge;
+pub(crate) mod common;
+pub(crate) mod engine_bridge;
 mod game_over;
 mod score;
 mod sound_effects;
@@ -35,14 +35,23 @@ impl Plugin for LevelPlugin {
             .init_resource::<LevelConfig>()
             .init_resource::<SimClock>()
             .init_resource::<FrameEvents>()
+            // Shared M1 contracts the gameplay systems read. `init_resource` is
+            // idempotent, so `GamePlugin` remains the canonical owner while
+            // `LevelPlugin` stays self-sufficient (headless tests, fan-out).
+            .init_resource::<crate::settings::GameSettings>()
+            .init_resource::<crate::variant::ActiveVariant>()
+            .init_resource::<crate::variant::VariantProgress>()
             // setup
-            .add_systems(OnEnter(GameState::InGame), level_setup)
+            .add_systems(
+                OnEnter(GameState::Playing),
+                (level_setup, crate::variant::reset_variant_progress),
+            )
             // The driver runs first, then everything that reads its snapshot/events.
             .configure_sets(
                 Update,
                 (LevelSystems::EngineDriver, LevelSystems::Reconcile)
                     .chain()
-                    .run_if(in_state(GameState::InGame)),
+                    .run_if(in_state(GameState::Playing)),
             )
             .add_systems(
                 Update,
@@ -57,6 +66,7 @@ impl Plugin for LevelPlugin {
                     reconcile_ghost_piece,
                     emit_audio_cues,
                     handle_game_over,
+                    crate::variant::check_variant_end_conditions,
                 )
                     .in_set(LevelSystems::Reconcile),
             );
@@ -68,11 +78,21 @@ impl Plugin for LevelPlugin {
 // ---------------------------------------------------------------------------
 
 /// Build the authoritative engine, the player controller, the background grid,
-/// and the camera. Runs on entering `InGame` (including restart from game over).
-fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets: Res<GameAssets>) {
-    info!("level_setup");
+/// and the camera. Runs on entering `Playing` (including restart from game over).
+fn level_setup(
+    mut commands: Commands,
+    mut config: ResMut<LevelConfig>,
+    settings: Res<crate::settings::GameSettings>,
+    active_variant: Res<crate::variant::ActiveVariant>,
+    texture_assets: Res<GameAssets>,
+) {
+    info!("level_setup ({})", active_variant.0.display_name());
 
-    let engine_config = engine_config_from_level(&config);
+    // Mirror the player's chosen next-count into LevelConfig so the previewer
+    // (which reads LevelConfig.preview_count) and the engine queue agree.
+    config.preview_count = settings.next_count;
+
+    let engine_config = engine_config_for_game(&config, &settings, active_variant.0);
     let engine = Engine::new(engine_config, DEFAULT_SEED);
     let snapshot = engine.snapshot();
 
@@ -94,7 +114,7 @@ fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets:
             GameField,
             Transform::default(),
             Visibility::default(),
-            DespawnOnExit(GameState::InGame),
+            DespawnOnExit(GameState::Playing),
         ))
         .id();
     let mut block_ids = Vec::new();
@@ -118,7 +138,7 @@ fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets:
             config.block_size * config.board_height as f32 / 2.,
             1.0,
         )),
-        DespawnOnExit(GameState::InGame),
+        DespawnOnExit(GameState::Playing),
     ));
 }
 
@@ -285,11 +305,16 @@ fn reconcile_ghost_piece(
     mut commands: Commands,
     snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
+    settings: Res<crate::settings::GameSettings>,
     texture_assets: Res<GameAssets>,
     existing: Query<Entity, With<GhostBlock>>,
 ) {
     for entity in existing.iter() {
         commands.entity(entity).despawn();
+    }
+    // Player can disable the ghost entirely (GameSettings.ghost_enabled).
+    if !settings.ghost_enabled {
+        return;
     }
     // Hide the ghost when it would coincide with the active piece (piece already
     // resting on the stack), matching the old renderer's "no ghost when grounded".
@@ -401,9 +426,9 @@ mod tests {
 
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
-            .set(GameState::InGame);
+            .set(GameState::Playing);
         app.update();
-        // A second update applies the InGame state transition and runs setup.
+        // A second update applies the Playing state transition and runs setup.
         app.update();
 
         assert!(app.world().get_resource::<EngineState>().is_some());
@@ -530,7 +555,7 @@ mod tests {
             .add_plugins(LevelPlugin);
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
-            .set(GameState::InGame);
+            .set(GameState::Playing);
         app.update();
         app.update();
         app

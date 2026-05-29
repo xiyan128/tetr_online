@@ -13,6 +13,8 @@ use bevy::prelude::*;
 use crate::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot};
 use crate::level::common::LevelConfig;
 use crate::player::{DasConfig, KeyboardController};
+use crate::settings::GameSettings;
+use crate::variant::Variant;
 
 /// Fixed simulation rate. Real frame `dt` is accumulated and the engine is
 /// stepped in fixed slices so gravity/lock-down advance deterministically
@@ -67,6 +69,26 @@ pub fn engine_config_from_level(config: &LevelConfig) -> EngineConfig {
         starting_level: crate::engine::MIN_LEVEL,
         goal_system: crate::engine::GoalSystem::Fixed,
     }
+}
+
+/// Build the [`EngineConfig`] for a concrete game: start from the renderer's
+/// [`LevelConfig`], overlay the player's [`GameSettings`] (preview/next count and
+/// lock-down rule), then apply the [`Variant`]'s engine overrides (goal system).
+///
+/// This is the single seam where shared M1 contracts feed the engine, so the
+/// previewer (which reads `LevelConfig.preview_count`), the engine queue, and the
+/// variant goal system all stay consistent. Callers also mirror
+/// `settings.next_count` into `LevelConfig.preview_count` before building UI.
+pub fn engine_config_for_game(
+    config: &LevelConfig,
+    settings: &GameSettings,
+    variant: Variant,
+) -> EngineConfig {
+    let mut engine_config = engine_config_from_level(config);
+    engine_config.preview_count = settings.next_count;
+    engine_config.lock_down_mode = settings.lock_down_mode;
+    variant.def().apply_engine_overrides(&mut engine_config);
+    engine_config
 }
 
 /// Build the player-side [`DasConfig`] from the renderer's [`LevelConfig`] DAS

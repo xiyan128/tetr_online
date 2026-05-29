@@ -6,8 +6,14 @@ use bevy_asset_loader::prelude::*;
 
 mod assets;
 pub mod engine;
-mod level;
+mod features;
+pub mod high_scores;
+pub(crate) mod level;
 pub mod player;
+mod screens;
+pub mod settings;
+pub(crate) mod ui;
+pub mod variant;
 
 pub use crate::engine::{
     apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_duration,
@@ -21,12 +27,32 @@ pub use crate::engine::{
 };
 use crate::level::LevelPlugin;
 
+/// Top-level screen the app is on. Drives which plugins' systems run and which
+/// UI is spawned. Flow: `Loading` (asset load) -> `Title` -> `MainMenu`, with
+/// `ModeSelect`/`Options`/`Help`/`HighScores` reachable from the menu, `Playing`
+/// the active game, and `Paused`/`GameOver` layered over/after it.
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 pub enum GameState {
+    /// Asset loading; advances to [`GameState::Title`] when assets are ready.
     #[default]
     Loading,
+    /// Splash/title screen; any key advances to the main menu.
+    Title,
+    /// Root navigation menu (Play / Options / Help / High Scores).
     MainMenu,
-    InGame,
+    /// Choose a [`variant::Variant`] (Marathon/Sprint/Ultra) before playing.
+    ModeSelect,
+    /// Settings screen (filled by the options feature).
+    Options,
+    /// Controls/about screen (filled by the help feature).
+    Help,
+    /// Leaderboards (filled by the high-scores feature).
+    HighScores,
+    /// Active gameplay (formerly `InGame`). The engine is authoritative here.
+    Playing,
+    /// Gameplay paused; overlay shown by the pause feature, engine frozen.
+    Paused,
+    /// Post-game results; offers restart / back to menu.
     GameOver,
 }
 
@@ -38,9 +64,17 @@ impl Plugin for GamePlugin {
             .add_loading_state(
                 LoadingState::new(GameState::Loading)
                     .load_collection::<crate::assets::GameAssets>()
-                    .continue_to_state(GameState::InGame),
+                    .continue_to_state(GameState::Title),
             )
-            .add_plugins(LevelPlugin);
+            // Shared M1 contracts (defined once, read everywhere).
+            .init_resource::<crate::settings::GameSettings>()
+            .init_resource::<crate::variant::ActiveVariant>()
+            .init_resource::<crate::variant::VariantProgress>()
+            .init_resource::<crate::high_scores::HighScores>()
+            // Gameplay + screen-shell + feature plugins.
+            .add_plugins(LevelPlugin)
+            .add_plugins(crate::screens::ScreensPlugin)
+            .add_plugins(crate::features::FeaturesPlugin);
 
         #[cfg(debug_assertions)]
         {

@@ -32,7 +32,7 @@ pub fn spawn_piece_previewer(mut commands: Commands, config: Res<LevelConfig>) {
                 config.block_size,
             ) + offset,
         ))
-        .insert(DespawnOnExit(GameState::InGame))
+        .insert(DespawnOnExit(GameState::Playing))
         .id();
 
     for i in 0..config.preview_count {
@@ -54,7 +54,7 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
         Transform::from_translation(
             to_translation(0, (config.board_height) as isize, config.block_size) + offset,
         ),
-        DespawnOnExit(GameState::InGame),
+        DespawnOnExit(GameState::Playing),
         children![(Transform::default(), PreviewHolder { index: 0 })],
     ));
 }
