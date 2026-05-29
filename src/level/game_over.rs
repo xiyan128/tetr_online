@@ -7,7 +7,10 @@ pub(crate) struct GameOverPlugin;
 impl Plugin for GameOverPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::GameOver), (setup_game_over_ui,).chain())
-            .add_systems(Update, button_system.run_if(in_state(GameState::GameOver)));
+            .add_systems(
+                Update,
+                (button_system, keyboard_nav).run_if(in_state(GameState::GameOver)),
+            );
     }
 }
 
@@ -18,6 +21,10 @@ enum MenuActions {
 }
 
 pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) {
+    // The gameplay camera is despawned on leaving `InGameplay`, so the game-over
+    // screen needs its own camera or its UI renders to nothing (a blank screen).
+    commands.spawn((Camera2d, DespawnOnExit(GameState::GameOver)));
+
     let font = TextFont {
         font: game_assets.font.clone(),
         font_size: 12.0,
@@ -124,5 +131,19 @@ fn button_system(
                 *color = NORMAL_BUTTON.into();
             }
         }
+    }
+}
+
+/// Keyboard fallback so the game-over screen behaves like every other screen:
+/// Enter/Space restarts the run, Esc returns to the main menu. (The buttons
+/// above are mouse-driven; this makes the screen keyboard-navigable.)
+fn keyboard_nav(keys: Res<ButtonInput<KeyCode>>, mut next_game_state: ResMut<NextState<GameState>>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        next_game_state.set(GameState::MainMenu);
+    } else if keys.just_pressed(KeyCode::Enter)
+        || keys.just_pressed(KeyCode::NumpadEnter)
+        || keys.just_pressed(KeyCode::Space)
+    {
+        next_game_state.set(GameState::Playing);
     }
 }
