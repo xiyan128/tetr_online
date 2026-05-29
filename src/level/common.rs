@@ -509,6 +509,171 @@ mod tests {
         );
     }
 
+    // --- E0.13 DAS acceptance (reference §6.2 / §25.3) ---
+
+    // 1. Initial 0.3s delay before the first auto-shift.
+    #[test]
+    fn das_e0_13_initial_delay_is_300ms() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        // Tap consumes the initial press; the hold begins charging from here.
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+
+        // One frame short of 300ms must not auto-shift yet.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                Duration::from_millis(299),
+                &config
+            ),
+            None,
+        );
+        // Crossing the 300ms threshold yields the first auto-shift.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                Duration::from_millis(1),
+                &config
+            ),
+            Some(MoveDirection::Left),
+        );
+    }
+
+    // 2. ~50ms repeat interval after the initial delay elapses.
+    #[test]
+    fn das_e0_13_repeat_interval_is_50ms() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config);
+        // Charge through the initial delay so we are in the repeat phase.
+        das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config);
+
+        // Just under the repeat interval: no shift.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(49),
+                &config
+            ),
+            None,
+        );
+        // Reaching 50ms fires one repeat.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(1),
+                &config
+            ),
+            Some(MoveDirection::Right),
+        );
+        // Cadence continues: the next 50ms window fires again.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                config.das_repeat_duration,
+                &config
+            ),
+            Some(MoveDirection::Right),
+        );
+    }
+
+    // 3. Pressing the opposite direction restarts the full 0.3s delay.
+    #[test]
+    fn das_e0_13_opposite_direction_restarts_delay() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+        // Fully charge Left into the repeat phase.
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
+
+        // Opposite press: immediate one-cell tap, charge resets.
+        assert_eq!(
+            das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config),
+            Some(MoveDirection::Right),
+        );
+        // The accumulated Left charge must NOT carry into Right: a full delay
+        // shy of 300ms produces no auto-shift.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(299),
+                &config
+            ),
+            None,
+        );
+        // Crossing 300ms from the restart yields the first Right auto-shift.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Right),
+                false,
+                Duration::from_millis(1),
+                &config
+            ),
+            Some(MoveDirection::Right),
+        );
+    }
+
+    // 4. CARRY-OVER across pieces: DasState is a persistent Bevy Resource, and
+    // neither piece_setup nor piece_lock (src/level/mod.rs) reset it. So while a
+    // direction stays held through Lock Down + the next spawn, the charge is
+    // preserved. This drives DasState exactly as the per-frame system would: the
+    // held direction never releases (held_direction stays Some, just_pressed
+    // stays false) as the old piece locks and a new one spawns. The new piece
+    // must continue on the 50ms repeat cadence, NOT a fresh 300ms delay.
+    #[test]
+    fn das_e0_13_charge_carries_over_into_next_piece() {
+        let config = LevelConfig::default();
+        let mut das = DasState::default();
+
+        // --- Piece A: hold Left and charge fully into the repeat phase. ---
+        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
+        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
+        // Confirm we are actually repeating before the lock event.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                config.das_repeat_duration,
+                &config
+            ),
+            Some(MoveDirection::Left),
+        );
+
+        // --- Piece A locks; Piece B spawns. The system does NOT touch DasState,
+        // and the player is still holding Left (no release, no new press). The
+        // very first frame of Piece B must auto-shift on the 50ms cadence... ---
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                config.das_repeat_duration,
+                &config
+            ),
+            Some(MoveDirection::Left),
+            "carried-over DAS must keep repeating on the new piece",
+        );
+
+        // ...and crucially it must NOT behave like a fresh hold: a sub-300ms
+        // frame still fires on the repeat cadence rather than waiting out a new
+        // initial delay.
+        assert_eq!(
+            das.next_action(
+                Some(MoveDirection::Left),
+                false,
+                config.das_repeat_duration,
+                &config
+            ),
+            Some(MoveDirection::Left),
+            "carry-over must not re-arm the 300ms initial delay",
+        );
+    }
+
     #[test]
     fn generation_rules_apply_immediate_drop_when_free() {
         let config = LevelConfig::default();
