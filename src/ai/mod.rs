@@ -16,6 +16,8 @@
 //! engine's own board primitives ([`lock_and_clear`](crate::engine::lock_and_clear)),
 //! so it can never disagree with the real rules.
 
+pub mod eval;
 pub mod state;
 
+pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
 pub use state::{BagState, SearchState};
