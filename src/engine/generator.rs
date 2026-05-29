@@ -1,7 +1,7 @@
 use crate::engine::pieces::PieceType;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::{RngExt, SeedableRng};
+use rand::SeedableRng;
 
 use std::iter::Iterator;
 
@@ -11,11 +11,6 @@ pub struct PieceGenerator {
 }
 
 impl PieceGenerator {
-    pub fn new() -> Self {
-        let seed = rand::rng().random();
-        Self::with_seed(seed)
-    }
-
     pub fn with_seed(seed: u64) -> Self {
         let mut rng = StdRng::seed_from_u64(seed);
         let mut bag = Vec::from(PieceType::all());
@@ -38,12 +33,6 @@ impl PieceGenerator {
             .rev()
             .copied()
             .collect()
-    }
-}
-
-impl Default for PieceGenerator {
-    fn default() -> Self {
-        Self::new()
     }
 }
 

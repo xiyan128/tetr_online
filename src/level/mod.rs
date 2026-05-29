@@ -169,7 +169,8 @@ fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets:
         .spawn((BoardState(board), Transform::default()))
         .insert(DespawnOnExit(GameState::InGame))
         .insert(PieceHolder::default())
-        .insert(PieceGeneratorState(PieceGenerator::default()))
+        // TODO(P2.x): renderer should consume EngineSnapshot, dropping this entry point.
+        .insert(PieceGeneratorState(PieceGenerator::with_seed(0)))
         .id();
 
     commands.entity(board_entity).add_children(&block_ids);
