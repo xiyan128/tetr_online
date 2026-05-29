@@ -354,7 +354,10 @@ fn o_footprint_unchanged_through_rotation() {
         "O must emit no Rotated event (engine rejects kick 0), got {events:?}"
     );
 
-    let after = engine.snapshot().active.expect("active O after rotate input");
+    let after = engine
+        .snapshot()
+        .active
+        .expect("active O after rotate input");
     assert_eq!(
         after.rotation,
         PieceRotation::R0,

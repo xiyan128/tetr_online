@@ -204,10 +204,7 @@ fn hold_with_empty_hold_stores_active_and_spawns_next() {
     let snapshot = engine.snapshot();
     assert_eq!(snapshot.hold, Some(first_piece_type));
     assert_eq!(
-        snapshot
-            .active
-            .expect("active piece after hold")
-            .piece_type,
+        snapshot.active.expect("active piece after hold").piece_type,
         next_piece_type,
     );
 }
@@ -223,10 +220,7 @@ fn held_piece_respawns_north_facing() {
         ..InputFrame::default()
     });
 
-    let active = engine
-        .snapshot()
-        .active
-        .expect("active piece after hold");
+    let active = engine.snapshot().active.expect("active piece after hold");
     assert_eq!(
         active.rotation,
         PieceRotation::R0,

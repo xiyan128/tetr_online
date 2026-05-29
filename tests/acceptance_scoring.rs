@@ -114,13 +114,7 @@ fn vertical_i_at(ox: isize, oy: isize) -> ActivePiece {
 /// `lock_uses_t_spin_classifier_for_score_action`.
 fn rotated_t_at(rotation: PieceRotation, origin: (isize, isize)) -> ActivePiece {
     let mut active = ActivePiece::new(PieceType::T, origin);
-    active.rotate_to(
-        rotation,
-        origin,
-        RotationDirection::Clockwise,
-        1,
-        false,
-    );
+    active.rotate_to(rotation, origin, RotationDirection::Clockwise, 1, false);
     active
 }
 
@@ -353,7 +347,17 @@ fn t_spin_double_1200_and_triple_1600() {
         // Row 6 around T col {5} (this also blocks A=NW(4,6) and B=NE(6,6)).
         fill(
             &mut engine,
-            &[(0, 6), (1, 6), (2, 6), (3, 6), (4, 6), (6, 6), (7, 6), (8, 6), (9, 6)],
+            &[
+                (0, 6),
+                (1, 6),
+                (2, 6),
+                (3, 6),
+                (4, 6),
+                (6, 6),
+                (7, 6),
+                (8, 6),
+                (9, 6),
+            ],
         );
         // Back corner C=SW(4,4) so full-by-corners holds (A & B & (C|D)).
         block(&mut engine, 4, 4);
@@ -380,17 +384,46 @@ fn t_spin_double_1200_and_triple_1600() {
         // Row 4 around T col {5}.
         fill(
             &mut engine,
-            &[(0, 4), (1, 4), (2, 4), (3, 4), (4, 4), (6, 4), (7, 4), (8, 4), (9, 4)],
+            &[
+                (0, 4),
+                (1, 4),
+                (2, 4),
+                (3, 4),
+                (4, 4),
+                (6, 4),
+                (7, 4),
+                (8, 4),
+                (9, 4),
+            ],
         );
         // Row 5 around T cols {5, 6} (spine + nub).
         fill(
             &mut engine,
-            &[(0, 5), (1, 5), (2, 5), (3, 5), (4, 5), (7, 5), (8, 5), (9, 5)],
+            &[
+                (0, 5),
+                (1, 5),
+                (2, 5),
+                (3, 5),
+                (4, 5),
+                (7, 5),
+                (8, 5),
+                (9, 5),
+            ],
         );
         // Row 6 around T col {5}.
         fill(
             &mut engine,
-            &[(0, 6), (1, 6), (2, 6), (3, 6), (4, 6), (6, 6), (7, 6), (8, 6), (9, 6)],
+            &[
+                (0, 6),
+                (1, 6),
+                (2, 6),
+                (3, 6),
+                (4, 6),
+                (6, 6),
+                (7, 6),
+                (8, 6),
+                (9, 6),
+            ],
         );
         let events = engine.lock_active_for_test(rotated_t_at(PieceRotation::R90, (4, 4)));
         let (action, score, total, b2b) = assert_lock(&events, 3);
@@ -470,7 +503,17 @@ fn b2b_example_totals_5400() {
     );
     fill(
         &mut engine,
-        &[(0, 6), (1, 6), (2, 6), (3, 6), (4, 6), (6, 6), (7, 6), (8, 6), (9, 6)],
+        &[
+            (0, 6),
+            (1, 6),
+            (2, 6),
+            (3, 6),
+            (4, 6),
+            (6, 6),
+            (7, 6),
+            (8, 6),
+            (9, 6),
+        ],
     );
     block(&mut engine, 4, 4);
     let events = engine.lock_active_for_test(rotated_t_at(PieceRotation::R0, (4, 4)));

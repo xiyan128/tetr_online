@@ -97,7 +97,15 @@ fn whole_piece_locked_above_skyline_is_lock_out_via_engine() {
     // The piece must lock (zero lines cleared) and then end the game as a Lock Out.
     let locked_at = events
         .iter()
-        .position(|e| matches!(e, EngineEvent::Locked { lines_cleared: 0, .. }))
+        .position(|e| {
+            matches!(
+                e,
+                EngineEvent::Locked {
+                    lines_cleared: 0,
+                    ..
+                }
+            )
+        })
         .unwrap_or_else(|| panic!("expected a zero-line Locked event, got {events:?}"));
     let game_over_at = events
         .iter()

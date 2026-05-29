@@ -66,9 +66,9 @@ impl KeyboardController {
             self.das.active_direction(),
         );
 
-        let pulse = self
-            .das
-            .next_pulse(held_direction, just_pressed, input.dt_seconds, &self.config);
+        let pulse =
+            self.das
+                .next_pulse(held_direction, just_pressed, input.dt_seconds, &self.config);
 
         InputFrame {
             dt_seconds: input.dt_seconds,

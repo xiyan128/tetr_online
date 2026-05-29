@@ -44,17 +44,15 @@ pub mod theme {
 /// A full-window, centered vertical column to parent a screen's content into.
 /// Pair with a [`DespawnOnExit`] for the screen's state on the caller side.
 pub fn screen_root() -> impl Bundle {
-    (
-        Node {
-            width: percent(100),
-            height: percent(100),
-            flex_direction: FlexDirection::Column,
-            align_items: AlignItems::Center,
-            justify_content: JustifyContent::Center,
-            row_gap: px(12),
-            ..default()
-        },
-    )
+    (Node {
+        width: percent(100),
+        height: percent(100),
+        flex_direction: FlexDirection::Column,
+        align_items: AlignItems::Center,
+        justify_content: JustifyContent::Center,
+        row_gap: px(12),
+        ..default()
+    },)
 }
 
 /// A large heading.
