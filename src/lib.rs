@@ -12,6 +12,7 @@ pub(crate) mod level;
 pub mod player;
 mod screens;
 pub mod settings;
+pub mod storage;
 pub(crate) mod ui;
 pub mod variant;
 
@@ -71,6 +72,9 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
+            .insert_resource(crate::storage::StorageResource(
+                crate::storage::default_storage(),
+            ))
             // Gameplay + screen-shell + feature plugins.
             .add_plugins(LevelPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
