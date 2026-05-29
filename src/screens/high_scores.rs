@@ -15,13 +15,15 @@ pub struct HighScoresScreenPlugin;
 
 impl Plugin for HighScoresScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::HighScores), setup)
+        app.register_type::<HighScoresRoot>()
+            .add_systems(OnEnter(GameState::HighScores), setup)
             .add_systems(Update, back.run_if(in_state(GameState::HighScores)));
     }
 }
 
 /// Screen-root marker. The high-scores feature queries this to attach tables.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct HighScoresRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {

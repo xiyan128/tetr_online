@@ -41,6 +41,17 @@ impl Plugin for LevelPlugin {
             .init_resource::<SimClock>()
             .init_resource::<PendingEdges>()
             .init_resource::<FrameEvents>()
+            // Reflection registration for inspector/scene support. Engine-wrapping
+            // resources (EngineState/LatestSnapshot/FrameEvents/SimClock/
+            // PendingEdges) are deliberately NOT registered: reflecting them would
+            // force Bevy `Reflect` onto the engine-agnostic crate.
+            .register_type::<LevelConfig>()
+            .register_type::<GameField>()
+            .register_type::<BackgroundBlock>()
+            .register_type::<FallingBlock>()
+            .register_type::<StaticBlock>()
+            .register_type::<GhostBlock>()
+            .register_type::<PreviewBlock>()
             // Shared M1 contracts the gameplay systems read. `init_resource` is
             // idempotent, so `GamePlugin` remains the canonical owner while
             // `LevelPlugin` stays self-sufficient (headless tests, fan-out).
@@ -61,10 +72,7 @@ impl Plugin for LevelPlugin {
                     .chain()
                     .run_if(in_state(GameState::Playing)),
             )
-            .add_systems(
-                Update,
-                engine_driver.in_set(LevelSystems::EngineDriver),
-            )
+            .add_systems(Update, engine_driver.in_set(LevelSystems::EngineDriver))
             .add_systems(
                 Update,
                 (

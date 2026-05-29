@@ -30,7 +30,8 @@ use crate::{DespawnOnExit, GameState};
 /// Marks the looping background-music entity so its sink is volumed against
 /// [`GameSettings::music_volume`] instead of `sfx_volume`, and so live volume
 /// changes can target it specifically.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct MusicTrack;
 
 /// Optional handle to a looping background-music asset.
@@ -39,7 +40,8 @@ struct MusicTrack;
 /// playback stays dormant. Once an asset exists, the integrator can load it into
 /// [`GameAssets`](crate::assets::GameAssets) and populate this resource (see
 /// report) and the music path lights up with zero further changes here.
-#[derive(Resource, Default)]
+#[derive(Resource, Default, Reflect)]
+#[reflect(Resource)]
 struct MusicAsset(Option<Handle<AudioSource>>);
 
 /// Music playback + volume control.
@@ -48,6 +50,9 @@ pub struct SfxPlugin;
 impl Plugin for SfxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<MusicAsset>()
+            // Inspector/scene registration for this feature's resource + marker.
+            .register_type::<MusicAsset>()
+            .register_type::<MusicTrack>()
             // Re-volume every newly spawned sink (SFX cues + music) to honor the
             // current settings. Runs every frame; the `Added` filter keeps it to
             // only the sinks Bevy inserted this frame.

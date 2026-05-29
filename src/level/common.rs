@@ -3,7 +3,8 @@ use crate::engine::{Cell, LockDownMode, PieceType};
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
-    Color, Commands, Component, Entity, Res, Resource, Sprite, SubStates, SystemSet, Transform,
+    Color, Commands, Component, Entity, Reflect, ReflectComponent, ReflectResource, Res, Resource,
+    Sprite, SubStates, SystemSet, Transform,
 };
 use bevy::sprite::Anchor;
 use bevy::state::state::StateSet;
@@ -45,7 +46,8 @@ pub(crate) enum LevelSystems {
     Reconcile,
 }
 
-#[derive(Resource, Debug)]
+#[derive(Resource, Debug, Reflect)]
+#[reflect(Resource)]
 pub struct LevelConfig {
     pub(crate) block_size: f32,
     pub(crate) preview_scale: f32,
@@ -58,6 +60,10 @@ pub struct LevelConfig {
     pub(crate) das_delay: Duration,
     pub(crate) das_repeat_duration: Duration,
     pub(crate) locking_duration: Duration,
+    // `LockDownMode` lives in the engine-agnostic `engine/` crate, which must not
+    // depend on Bevy (no `Reflect`). Skip it for reflection rather than couple the
+    // engine to Bevy; the inspector simply won't surface this one field.
+    #[reflect(ignore)]
     pub(crate) lock_down_mode: LockDownMode,
 }
 
@@ -88,29 +94,35 @@ pub enum BlockKind {
 
 /// Anchor entity at the board origin. The lock-down timer bar parents to it so
 /// the bar's local transform maps cleanly into board space.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct GameField;
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct BackgroundBlock;
 
 /// A cell of the active (falling) piece. Reconciled from `snapshot.active`.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct FallingBlock;
 
 /// A locked board mino. Reconciled from `snapshot.board_cells`.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct StaticBlock;
 
 /// A ghost-piece cell. Reconciled from `snapshot.ghost_cells`.
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct GhostBlock;
 
-#[derive(Component, Clone)]
+#[derive(Component, Clone, Reflect)]
+#[reflect(Component)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct PreviewBlock;
 
@@ -158,7 +170,9 @@ pub fn spawn_free_block(
         _ => 0.,
     };
 
-    let entity = commands.spawn((sprite, transform, Anchor::BOTTOM_LEFT)).id();
+    let entity = commands
+        .spawn((sprite, transform, Anchor::BOTTOM_LEFT))
+        .id();
 
     match block_kind {
         BlockKind::Background => {
@@ -194,9 +208,7 @@ pub fn spawn_snapshot_block(
 ) -> Entity {
     let cell = Cell::new(x, y, crate::engine::CellKind::Some(piece_type));
     let entity = spawn_free_block(commands, config, texture_assets, &cell, block_kind);
-    commands
-        .entity(entity)
-        .insert(DespawnOnExit(InGameplay));
+    commands.entity(entity).insert(DespawnOnExit(InGameplay));
     entity
 }
 

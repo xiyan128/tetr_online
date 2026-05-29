@@ -91,6 +91,19 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
+            // Reflection registration for the shared M1 contracts (canonical
+            // owner). Inner non-engine types embedded in these (Keybinds,
+            // GameAction, Variant, HighScore) are registered so the inspector can
+            // descend into them. Engine-typed fields (LockDownMode) are
+            // `#[reflect(ignore)]`d at the field to preserve the engine boundary.
+            .register_type::<crate::settings::GameSettings>()
+            .register_type::<crate::settings::Keybinds>()
+            .register_type::<crate::settings::GameAction>()
+            .register_type::<crate::variant::ActiveVariant>()
+            .register_type::<crate::variant::Variant>()
+            .register_type::<crate::variant::VariantProgress>()
+            .register_type::<crate::high_scores::HighScores>()
+            .register_type::<crate::high_scores::HighScore>()
             .insert_resource(crate::storage::StorageResource(
                 crate::storage::default_storage(),
             ))

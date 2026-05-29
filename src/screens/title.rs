@@ -10,12 +10,14 @@ pub struct TitleScreenPlugin;
 
 impl Plugin for TitleScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Title), setup)
+        app.register_type::<TitleUi>()
+            .add_systems(OnEnter(GameState::Title), setup)
             .add_systems(Update, advance.run_if(in_state(GameState::Title)));
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct TitleUi;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {

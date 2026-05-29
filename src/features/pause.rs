@@ -41,6 +41,9 @@ pub struct PausePlugin;
 impl Plugin for PausePlugin {
     fn build(&self, app: &mut App) {
         app
+            // Inspector/scene registration for this feature's markers.
+            .register_type::<PauseRoot>()
+            .register_type::<PauseAction>()
             // Enter pause from gameplay on the Pause keybind.
             .add_systems(
                 Update,
@@ -67,7 +70,8 @@ impl Plugin for PausePlugin {
 }
 
 /// Menu rows on the pause overlay, in display (focus) order.
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Reflect)]
+#[reflect(Component)]
 enum PauseAction {
     Resume,
     Quit,
@@ -79,7 +83,8 @@ const ITEMS: [(PauseAction, &str); 2] = [
 ];
 
 /// Marker for the pause overlay's screen-root (carries the [`FocusList`]).
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct PauseRoot;
 
 /// True on the rising edge of the bound Pause action (primary or secondary key).

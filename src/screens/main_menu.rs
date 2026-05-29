@@ -16,7 +16,9 @@ pub struct MainMenuPlugin;
 
 impl Plugin for MainMenuPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::MainMenu), setup)
+        app.register_type::<MainMenuRoot>()
+            .register_type::<MainMenuAction>()
+            .add_systems(OnEnter(GameState::MainMenu), setup)
             .add_systems(
                 Update,
                 (focus_navigation::<MainMenuRoot>, activate)
@@ -26,10 +28,12 @@ impl Plugin for MainMenuPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct MainMenuRoot;
 
-#[derive(Component, Clone, Copy)]
+#[derive(Component, Clone, Copy, Reflect)]
+#[reflect(Component)]
 enum MainMenuAction {
     Play,
     Options,

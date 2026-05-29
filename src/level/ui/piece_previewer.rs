@@ -8,13 +8,16 @@ use crate::InGameplay;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct PiecePreviewer;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct HoldViewer;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct PreviewHolder {
     index: usize,
 }

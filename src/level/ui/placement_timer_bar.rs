@@ -3,7 +3,8 @@ use crate::level::engine_bridge::LatestSnapshot;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct LockingTimerBar;
 
 pub fn spawn_locking_timer_bar(

@@ -22,7 +22,7 @@ pub const MAX_ENTRIES_PER_VARIANT: usize = 10;
 /// Both `score` and `time_seconds` are always recorded; which one is the
 /// *primary* ranking key is decided by the variant's [`ScoreKind`]. `lines` and
 /// `level` are kept for display.
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Reflect)]
 pub struct HighScore {
     pub score: usize,
     pub time_seconds: f32,
@@ -43,7 +43,8 @@ impl HighScore {
 }
 
 /// Per-variant top-10 boards. Lookups/inserts go through [`Variant`].
-#[derive(Resource, Debug, Clone, Default)]
+#[derive(Resource, Debug, Clone, Default, Reflect)]
+#[reflect(Resource)]
 pub struct HighScores {
     marathon: Vec<HighScore>,
     sprint: Vec<HighScore>,

@@ -29,13 +29,19 @@ pub struct ScreensPlugin;
 
 impl Plugin for ScreensPlugin {
     fn build(&self, app: &mut App) {
-        app.add_plugins((
-            title::TitleScreenPlugin,
-            main_menu::MainMenuPlugin,
-            mode_select::ModeSelectPlugin,
-            options::OptionsScreenPlugin,
-            help::HelpScreenPlugin,
-            high_scores::HighScoresScreenPlugin,
-        ));
+        app
+            // Shared menu-focus components, registered once here (their closest
+            // owning plugin) so every screen's `Focusable`/`FocusList` is
+            // inspectable. Each screen plugin registers its own root marker.
+            .register_type::<crate::ui::focus::Focusable>()
+            .register_type::<crate::ui::focus::FocusList>()
+            .add_plugins((
+                title::TitleScreenPlugin,
+                main_menu::MainMenuPlugin,
+                mode_select::ModeSelectPlugin,
+                options::OptionsScreenPlugin,
+                help::HelpScreenPlugin,
+                high_scores::HighScoresScreenPlugin,
+            ));
     }
 }

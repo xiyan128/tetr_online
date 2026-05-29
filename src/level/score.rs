@@ -18,18 +18,19 @@ impl Plugin for ScorePlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<ScoreTypes>()
             .insert_resource(Scorer::default())
+            .register_type::<Scorer>()
             // Reset once per session (not on resume from pause).
             .add_systems(OnEnter(InGameplay), reset_score)
             .add_systems(
                 Update,
-                (mirror_snapshot_score, emit_score_types)
-                    .run_if(in_state(GameState::Playing)),
+                (mirror_snapshot_score, emit_score_types).run_if(in_state(GameState::Playing)),
             );
     }
 }
 
 /// Read-only mirror of the engine's scalar score fields, for UI consumption.
-#[derive(Resource, PartialEq, Eq)]
+#[derive(Resource, PartialEq, Eq, Reflect)]
+#[reflect(Resource)]
 pub struct Scorer {
     pub level: usize,
     pub score: usize,
@@ -82,7 +83,10 @@ pub enum ScoreType {
 /// Translate an engine score action (+ its back-to-back flag) into the labels
 /// shown in the score-type popup. Drop actions (soft/hard) and no-clear locks
 /// produce no labels.
-pub(crate) fn score_types_for(action: EngineScoreAction, back_to_back_bonus: bool) -> Vec<ScoreType> {
+pub(crate) fn score_types_for(
+    action: EngineScoreAction,
+    back_to_back_bonus: bool,
+) -> Vec<ScoreType> {
     let mut types = match action {
         EngineScoreAction::SoftDrop
         | EngineScoreAction::HardDrop { .. }

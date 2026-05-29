@@ -16,7 +16,8 @@ pub struct ModeSelectPlugin;
 
 impl Plugin for ModeSelectPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::ModeSelect), setup)
+        app.register_type::<ModeSelectRoot>()
+            .add_systems(OnEnter(GameState::ModeSelect), setup)
             .add_systems(
                 Update,
                 (focus_navigation::<ModeSelectRoot>, activate)
@@ -26,7 +27,8 @@ impl Plugin for ModeSelectPlugin {
     }
 }
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct ModeSelectRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
@@ -46,7 +48,11 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 
     for (index, variant) in Variant::ALL.into_iter().enumerate() {
         let button = commands
-            .spawn(menu_button(index, variant.display_name(), assets.font.clone()))
+            .spawn(menu_button(
+                index,
+                variant.display_name(),
+                assets.font.clone(),
+            ))
             .id();
         commands.entity(root).add_child(button);
     }

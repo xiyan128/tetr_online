@@ -15,6 +15,14 @@ pub(crate) struct UIPlugin;
 
 impl Plugin for UIPlugin {
     fn build(&self, app: &mut App) {
+        // Inspector/scene registration for the in-game UI markers owned here.
+        app.register_type::<PiecePreviewer>()
+            .register_type::<HoldViewer>()
+            .register_type::<PreviewHolder>()
+            .register_type::<LockingTimerBar>()
+            .register_type::<ScoreText>()
+            .register_type::<LineCountText>()
+            .register_type::<ScoreTypeText>();
         // Spawned once per session so they survive a pause/resume round-trip.
         app.add_systems(
             OnEnter(InGameplay),

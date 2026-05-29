@@ -7,13 +7,16 @@ use bevy::color::Alpha;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct ScoreText;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct LineCountText;
 
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct ScoreTypeText;
 
 fn make_line_count_text(scorer: &Scorer) -> String {

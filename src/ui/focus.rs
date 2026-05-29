@@ -16,7 +16,8 @@ use super::theme;
 
 /// A selectable menu row. `index` is its position within the screen's
 /// [`FocusList`] (0-based, top to bottom).
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component)]
 pub struct Focusable {
     pub index: usize,
 }
@@ -29,7 +30,8 @@ impl Focusable {
 
 /// Per-screen focus cursor. Place one on the screen root entity. `count` is the
 /// number of [`Focusable`] rows; `index` is the focused one.
-#[derive(Component, Debug, Clone, Copy)]
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component)]
 pub struct FocusList {
     pub index: usize,
     pub count: usize,

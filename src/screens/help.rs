@@ -11,13 +11,15 @@ pub struct HelpScreenPlugin;
 
 impl Plugin for HelpScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Help), setup)
+        app.register_type::<HelpRoot>()
+            .add_systems(OnEnter(GameState::Help), setup)
             .add_systems(Update, back.run_if(in_state(GameState::Help)));
     }
 }
 
 /// Screen-root marker. The help feature queries this to attach its content.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct HelpRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {

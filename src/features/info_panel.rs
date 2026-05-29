@@ -33,7 +33,8 @@ use crate::level::common::LevelSystems;
 use crate::level::engine_bridge::{FrameEvents, LatestSnapshot};
 use crate::ui::theme;
 use crate::variant::{
-    ActiveVariant, EndCondition, ScoreKind, Variant, VariantDef, VariantProgress, MARATHON_END_LEVEL,
+    ActiveVariant, EndCondition, ScoreKind, Variant, VariantDef, VariantProgress,
+    MARATHON_END_LEVEL,
 };
 use crate::GameState;
 
@@ -43,6 +44,10 @@ pub struct InfoPanelPlugin;
 impl Plugin for InfoPanelPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<RunStats>()
+            // Inspector/scene registration for this feature's resource + markers.
+            .register_type::<RunStats>()
+            .register_type::<InfoPanelRoot>()
+            .register_type::<Metric>()
             .add_systems(
                 OnEnter(GameState::Playing),
                 (reset_run_stats, spawn_info_panel),
@@ -64,18 +69,21 @@ impl Plugin for InfoPanelPlugin {
 
 /// Per-run counters the snapshot doesn't expose. Currently just the number of
 /// pieces locked (for the optional TPM figure). Reset on entering `Playing`.
-#[derive(Resource, Debug, Default)]
+#[derive(Resource, Debug, Default, Reflect)]
+#[reflect(Resource)]
 struct RunStats {
     pieces_locked: usize,
 }
 
 /// Marker for the panel's root node (one per `Playing` session).
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct InfoPanelRoot;
 
 /// The figures the panel can display, in render order. Each is a `Text` row
 /// tagged with this enum so [`update_info_panel`] can target it.
-#[derive(Component, Clone, Copy, PartialEq, Eq)]
+#[derive(Component, Clone, Copy, PartialEq, Eq, Reflect)]
+#[reflect(Component)]
 enum Metric {
     Mode,
     Level,
@@ -254,7 +262,9 @@ fn metric_value(
 
         // Optional rates. Both are hidden until there's enough elapsed time to be
         // meaningful (avoids a divide-by-near-zero spike on the first frames).
-        Metric::Tpm => rate_per_minute(stats.pieces_locked, elapsed).map(|tpm| format!("TPM: {tpm:.0}")),
+        Metric::Tpm => {
+            rate_per_minute(stats.pieces_locked, elapsed).map(|tpm| format!("TPM: {tpm:.0}"))
+        }
         Metric::Lpm => rate_per_minute(snap.lines, elapsed).map(|lpm| format!("LPM: {lpm:.0}")),
     }
 }
@@ -280,7 +290,12 @@ mod tests {
     use crate::engine::{Engine, EngineConfig};
     use crate::high_scores::HighScore;
 
-    fn snapshot_with(level: u8, lines: usize, score: usize, goal_remaining: usize) -> crate::engine::EngineSnapshot {
+    fn snapshot_with(
+        level: u8,
+        lines: usize,
+        score: usize,
+        goal_remaining: usize,
+    ) -> crate::engine::EngineSnapshot {
         let mut snap = Engine::new(EngineConfig::default(), 0).snapshot();
         snap.level = level;
         snap.lines = lines;
@@ -350,9 +365,15 @@ mod tests {
             Some("LINES LEFT: 28".to_string())
         );
         // Score is hidden for the time-primary board.
-        assert_eq!(metric_value(Metric::Score, &def, &snap, 0.0, None, &no_stats()), None);
+        assert_eq!(
+            metric_value(Metric::Score, &def, &snap, 0.0, None, &no_stats()),
+            None
+        );
         // The engine "next level" goal is hidden (Sprint's goal is its lines).
-        assert_eq!(metric_value(Metric::Goal, &def, &snap, 0.0, None, &no_stats()), None);
+        assert_eq!(
+            metric_value(Metric::Goal, &def, &snap, 0.0, None, &no_stats()),
+            None
+        );
         // Elapsed timer counts up (no limit).
         assert_eq!(
             metric_value(Metric::Time, &def, &snap, 42.0, None, &no_stats()),
@@ -385,7 +406,10 @@ mod tests {
             Some("SCORE: 54000".to_string())
         );
         // Goal row is hidden (Ultra's goal is the clock).
-        assert_eq!(metric_value(Metric::Goal, &def, &snap, 0.0, None, &no_stats()), None);
+        assert_eq!(
+            metric_value(Metric::Goal, &def, &snap, 0.0, None, &no_stats()),
+            None
+        );
     }
 
     #[test]
@@ -400,17 +424,38 @@ mod tests {
 
         // Score-primary variants show the score.
         assert_eq!(
-            metric_value(Metric::HighScore, &Variant::Marathon.def(), &snap, 0.0, Some(entry), &no_stats()),
+            metric_value(
+                Metric::HighScore,
+                &Variant::Marathon.def(),
+                &snap,
+                0.0,
+                Some(entry),
+                &no_stats()
+            ),
             Some("BEST: 9000".to_string())
         );
         // Sprint (time-primary) shows the time.
         assert_eq!(
-            metric_value(Metric::HighScore, &Variant::Sprint.def(), &snap, 0.0, Some(entry), &no_stats()),
+            metric_value(
+                Metric::HighScore,
+                &Variant::Sprint.def(),
+                &snap,
+                0.0,
+                Some(entry),
+                &no_stats()
+            ),
             Some("BEST: 1:15".to_string())
         );
         // No entry yet => placeholder.
         assert_eq!(
-            metric_value(Metric::HighScore, &Variant::Marathon.def(), &snap, 0.0, None, &no_stats()),
+            metric_value(
+                Metric::HighScore,
+                &Variant::Marathon.def(),
+                &snap,
+                0.0,
+                None,
+                &no_stats()
+            ),
             Some("BEST: --".to_string())
         );
     }
@@ -430,6 +475,9 @@ mod tests {
             Some("LPM: 20".to_string())
         );
         // Suppressed before 1s elapsed.
-        assert_eq!(metric_value(Metric::Tpm, &def, &snap, 0.5, None, &stats), None);
+        assert_eq!(
+            metric_value(Metric::Tpm, &def, &snap, 0.5, None, &stats),
+            None
+        );
     }
 }

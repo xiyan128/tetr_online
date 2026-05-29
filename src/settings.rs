@@ -26,7 +26,7 @@ pub const MAX_NEXT_COUNT: usize = 6;
 
 /// A logical, rebindable player action. The keyboard controller maps the bound
 /// [`KeyCode`]s to its raw input each frame; the Options screen rebinds them.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
 pub enum GameAction {
     MoveLeft,
     MoveRight,
@@ -72,7 +72,8 @@ impl GameAction {
 /// (e.g. rotate-CW defaults to both `ArrowUp` and `KeyX`, matching the existing
 /// hard-coded controller). The keyboard controller reads `pressed`/`just_pressed`
 /// for *either* key.
-#[derive(Resource, Debug, Clone, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, PartialEq, Eq, Reflect)]
+#[reflect(Resource)]
 pub struct Keybinds {
     pub move_left: (KeyCode, Option<KeyCode>),
     pub move_right: (KeyCode, Option<KeyCode>),
@@ -135,7 +136,8 @@ impl Keybinds {
 }
 
 /// Player-facing settings. The single shared, mutable contract for tunables.
-#[derive(Resource, Debug, Clone, PartialEq)]
+#[derive(Resource, Debug, Clone, PartialEq, Reflect)]
+#[reflect(Resource)]
 pub struct GameSettings {
     /// Number of next-piece previews shown (clamped to `MIN_NEXT_COUNT..=MAX_NEXT_COUNT`).
     pub next_count: usize,
@@ -143,7 +145,10 @@ pub struct GameSettings {
     pub hold_enabled: bool,
     /// Whether the ghost piece is rendered.
     pub ghost_enabled: bool,
-    /// Engine lock-down rule.
+    /// Engine lock-down rule. `LockDownMode` lives in the engine-agnostic
+    /// `engine/` crate (no Bevy `Reflect`), so it is skipped for reflection
+    /// rather than coupling the engine to Bevy.
+    #[reflect(ignore)]
     pub lock_down_mode: LockDownMode,
     /// Music volume, 0.0..=1.0.
     pub music_volume: f32,
@@ -205,7 +210,10 @@ mod tests {
     #[test]
     fn rotate_cw_defaults_to_arrow_up_and_x() {
         let binds = Keybinds::default();
-        assert_eq!(binds.get(GameAction::RotateCw), (KeyCode::ArrowUp, Some(KeyCode::KeyX)));
+        assert_eq!(
+            binds.get(GameAction::RotateCw),
+            (KeyCode::ArrowUp, Some(KeyCode::KeyX))
+        );
     }
 
     #[test]

@@ -121,23 +121,27 @@ impl Notification {
 
 /// The full-window column that toasts are parented into. Spawned on entering
 /// `Playing`, torn down on exit via [`DespawnOnExit`].
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct NotificationStack;
 
 /// A live toast label. Tracks its own age so it can fade + rise independently.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct Toast {
     elapsed: f32,
 }
 
 /// The world-space white sheet shown on a line clear.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct LineClearFlash {
     elapsed: f32,
 }
 
 /// A world-space vertical streak left by a hard drop.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 struct HardDropTrail {
     elapsed: f32,
 }
@@ -153,6 +157,11 @@ pub struct NotificationsPlugin;
 impl Plugin for NotificationsPlugin {
     fn build(&self, app: &mut App) {
         app.add_message::<Notification>()
+            // Inspector/scene registration for this feature's transient markers.
+            .register_type::<NotificationStack>()
+            .register_type::<Toast>()
+            .register_type::<LineClearFlash>()
+            .register_type::<HardDropTrail>()
             .add_systems(OnEnter(GameState::Playing), spawn_notification_stack)
             // Translate engine events into Notifications + spawn world effects.
             // Runs in the Reconcile set so it sees the same frame's snapshot the
@@ -234,7 +243,12 @@ fn notify_from_engine_events(
         match event {
             EngineEvent::HardDropped { cells_dropped, .. } => {
                 hard_dropped_this_frame = true;
-                spawn_hard_drop_trail(&mut commands, &config, last_active.as_slice(), *cells_dropped);
+                spawn_hard_drop_trail(
+                    &mut commands,
+                    &config,
+                    last_active.as_slice(),
+                    *cells_dropped,
+                );
             }
             // `Locked` is the authority on how many lines cleared, so it drives
             // the flash + combo bookkeeping. The *callout text* comes from the

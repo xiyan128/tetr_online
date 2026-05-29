@@ -18,7 +18,7 @@
 
 use bevy::prelude::*;
 
-use crate::engine::{EngineConfig, GoalSystem, EngineSnapshot, MAX_LEVEL};
+use crate::engine::{EngineConfig, EngineSnapshot, GoalSystem, MAX_LEVEL};
 use crate::level::engine_bridge::LatestSnapshot;
 use crate::GameState;
 
@@ -30,7 +30,7 @@ pub const DEFAULT_ULTRA_SECONDS: f32 = 120.0;
 pub const MARATHON_END_LEVEL: u8 = MAX_LEVEL;
 
 /// The three single-player modes.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Reflect)]
 pub enum Variant {
     /// Endless-style climb to the final level; score-primary.
     Marathon,
@@ -130,7 +130,8 @@ impl VariantDef {
 }
 
 /// The chosen variant for the next/current game. Default [`Variant::Marathon`].
-#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Resource, Debug, Clone, Copy, PartialEq, Eq, Reflect)]
+#[reflect(Resource)]
 pub struct ActiveVariant(pub Variant);
 
 impl Default for ActiveVariant {
@@ -143,7 +144,8 @@ impl Default for ActiveVariant {
 /// while `Playing`; `ended` latches once an end condition fires so we transition
 /// to GameOver exactly once. The info-panel reads `elapsed_seconds` for the Ultra
 /// countdown / Sprint timer; high-scores read it for the Sprint time result.
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq)]
+#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Reflect)]
+#[reflect(Resource)]
 pub struct VariantProgress {
     pub elapsed_seconds: f32,
     pub ended: bool,
@@ -152,7 +154,11 @@ pub struct VariantProgress {
 impl VariantProgress {
     /// Whether the variant-level end condition has been met for `snapshot` at the
     /// current elapsed time. Pure so it can be unit-tested without a running app.
-    pub fn end_condition_met(def: &VariantDef, snapshot: &EngineSnapshot, elapsed_seconds: f32) -> bool {
+    pub fn end_condition_met(
+        def: &VariantDef,
+        snapshot: &EngineSnapshot,
+        elapsed_seconds: f32,
+    ) -> bool {
         match def.end_condition {
             EndCondition::ReachLevel(level) => snapshot.level >= level,
             EndCondition::ClearLines(lines) => snapshot.lines >= lines,
@@ -213,8 +219,16 @@ mod tests {
     #[test]
     fn marathon_ends_at_final_level() {
         let def = Variant::Marathon.def();
-        assert!(!VariantProgress::end_condition_met(&def, &snapshot_with(14, 0), 9_999.0));
-        assert!(VariantProgress::end_condition_met(&def, &snapshot_with(MARATHON_END_LEVEL, 0), 0.0));
+        assert!(!VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(14, 0),
+            9_999.0
+        ));
+        assert!(VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(MARATHON_END_LEVEL, 0),
+            0.0
+        ));
     }
 
     #[test]
@@ -222,16 +236,32 @@ mod tests {
         let def = Variant::Sprint.def();
         assert_eq!(def.line_target, Some(DEFAULT_SPRINT_LINES));
         assert_eq!(def.score_kind, ScoreKind::Time);
-        assert!(!VariantProgress::end_condition_met(&def, &snapshot_with(1, 39), 0.0));
-        assert!(VariantProgress::end_condition_met(&def, &snapshot_with(1, 40), 0.0));
+        assert!(!VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(1, 39),
+            0.0
+        ));
+        assert!(VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(1, 40),
+            0.0
+        ));
     }
 
     #[test]
     fn ultra_ends_at_time_limit() {
         let def = Variant::Ultra.def();
         assert_eq!(def.score_kind, ScoreKind::Score);
-        assert!(!VariantProgress::end_condition_met(&def, &snapshot_with(1, 0), 119.9));
-        assert!(VariantProgress::end_condition_met(&def, &snapshot_with(1, 0), DEFAULT_ULTRA_SECONDS));
+        assert!(!VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(1, 0),
+            119.9
+        ));
+        assert!(VariantProgress::end_condition_met(
+            &def,
+            &snapshot_with(1, 0),
+            DEFAULT_ULTRA_SECONDS
+        ));
     }
 
     #[test]

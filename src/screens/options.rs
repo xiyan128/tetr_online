@@ -14,13 +14,15 @@ pub struct OptionsScreenPlugin;
 
 impl Plugin for OptionsScreenPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Options), setup)
+        app.register_type::<OptionsRoot>()
+            .add_systems(OnEnter(GameState::Options), setup)
             .add_systems(Update, back.run_if(in_state(GameState::Options)));
     }
 }
 
 /// Screen-root marker. The options feature queries this to attach its widgets.
-#[derive(Component)]
+#[derive(Component, Reflect)]
+#[reflect(Component)]
 pub struct OptionsRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
