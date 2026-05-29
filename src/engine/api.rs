@@ -4,9 +4,10 @@ use crate::engine::game_over::{is_block_out, is_lock_out};
 use crate::engine::generator::PieceGenerator;
 use crate::engine::goals::GoalSystem;
 use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
+use crate::engine::lock_clear::lock_and_clear;
 use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
-use crate::engine::scoring::{EngineScoreAction, ScoreAward, ScoreState};
+use crate::engine::scoring::{score_action, EngineScoreAction, ScoreAward, ScoreState};
 use crate::engine::t_spin::{classify_t_spin, TSpinKind};
 use crate::engine::RotationDirection;
 
@@ -338,7 +339,7 @@ impl Engine {
             origin,
         });
         if direction == MoveDirection::Down {
-            self.score_manual_drop(EngineScoreAction::SoftDrop, 1, events);
+            self.score(EngineScoreAction::SoftDrop, events);
         }
     }
 
@@ -390,11 +391,10 @@ impl Engine {
             piece_type: active.piece_type(),
             cells_dropped,
         });
-        self.score_manual_drop(
+        self.score(
             EngineScoreAction::HardDrop {
                 cells: cells_dropped,
             },
-            cells_dropped,
             events,
         );
         self.lock_active_piece(active, events);
@@ -402,14 +402,14 @@ impl Engine {
 
     fn lock_active_piece(&mut self, active: ActivePiece, events: &mut Vec<EngineEvent>) {
         let piece_type = active.piece_type();
+        // Classify the t-spin and lock-out against the pre-lock board/piece
+        // state, before `lock_and_clear` mutates the board.
         let t_spin = classify_t_spin(&active, &self.board);
         let lock_out = is_lock_out(active.piece(), active.origin(), self.config.visible_height);
-        for cell in piece_snapshot_cells(active.piece(), active.origin()) {
-            self.board
-                .set(cell.x, cell.y, CellKind::Some(cell.piece_type));
-        }
 
-        let lines_cleared = self.board.clear_lines();
+        let outcome = lock_and_clear(&active, &mut self.board);
+        let lines_cleared = outcome.cleared_rows.len();
+
         events.push(EngineEvent::Locked {
             piece_type,
             lines_cleared,
@@ -433,21 +433,14 @@ impl Engine {
         lines_cleared: usize,
         events: &mut Vec<EngineEvent>,
     ) {
-        if let Some(score_award) =
-            self.score_state
-                .lock_result(self.config.goal_system, t_spin, lines_cleared)
-        {
-            push_score_award(events, score_award);
-        }
+        let action = EngineScoreAction::from_lock_result(t_spin, lines_cleared);
+        self.score(action, events);
     }
 
-    fn score_manual_drop(
-        &mut self,
-        action: EngineScoreAction,
-        cells: usize,
-        events: &mut Vec<EngineEvent>,
-    ) {
-        if let Some(score_award) = self.score_state.manual_drop(action, cells) {
+    fn score(&mut self, action: EngineScoreAction, events: &mut Vec<EngineEvent>) {
+        if let Some(score_award) =
+            score_action(&mut self.score_state, self.config.goal_system, action)
+        {
             push_score_award(events, score_award);
         }
     }
