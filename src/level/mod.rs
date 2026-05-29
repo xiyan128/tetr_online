@@ -1,20 +1,19 @@
-use bevy::ecs::system::SystemParam;
 use bevy::prelude::*;
 
-use crate::engine::*;
+use crate::engine::{Board, Cell, CellKind, Engine, EngineEvent, GameOverStatus};
 use common::*;
+use engine_bridge::*;
 
 use crate::assets::GameAssets;
-use crate::level::actions::ActionsPlugin;
-use crate::level::common::PlayingState::Falling;
 use crate::level::game_over::GameOverPlugin;
 use crate::level::score::ScorePlugin;
 use crate::level::sound_effects::SoundEffectsPlugin;
 use crate::level::ui::UIPlugin;
+use crate::player::{KeyboardController, KeyboardInput, PlayerController};
 use crate::GameState;
 
-mod actions;
 mod common;
+mod engine_bridge;
 mod game_over;
 mod score;
 mod sound_effects;
@@ -22,160 +21,96 @@ mod ui;
 
 pub struct LevelPlugin;
 
-type FallingBlockQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut Coords, &'static mut Transform),
-    (
-        With<FallingBlock>,
-        Without<StaticBlock>,
-        Without<PieceState>,
-    ),
->;
-
-type ActivePieceQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static Coords, &'static PieceState),
-    (
-        With<PieceController>,
-        Without<GhostPiece>,
-        Without<GhostBlock>,
-        Or<(Changed<Coords>, Changed<PieceState>)>,
-    ),
->;
-
-type GhostBlockQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static mut Coords, &'static mut Transform),
-    (
-        With<GhostBlock>,
-        Without<GhostPiece>,
-        Without<PieceController>,
-    ),
->;
-
 impl Plugin for LevelPlugin {
     fn build(&self, app: &mut App) {
         app
             // states
             .add_sub_state::<PlayingState>()
-            // events
-            .add_message::<ActionEvent>()
-            .add_message::<PlacingEvent>()
             // plugins
-            .add_plugins(ActionsPlugin)
             .add_plugins(GameOverPlugin)
             .add_plugins(SoundEffectsPlugin)
             .add_plugins(ScorePlugin)
             .add_plugins(UIPlugin)
             // resources
             .init_resource::<LevelConfig>()
-            .configure_sets(
-                Update,
-                (LevelSystems::PieceSetup, LevelSystems::PlayerInput).chain(),
-            )
+            .init_resource::<SimClock>()
+            .init_resource::<FrameEvents>()
             // setup
             .add_systems(OnEnter(GameState::InGame), level_setup)
-            // updates
+            // The driver runs first, then everything that reads its snapshot/events.
+            .configure_sets(
+                Update,
+                (LevelSystems::EngineDriver, LevelSystems::Reconcile)
+                    .chain()
+                    .run_if(in_state(GameState::InGame)),
+            )
+            .add_systems(
+                Update,
+                engine_driver.in_set(LevelSystems::EngineDriver),
+            )
             .add_systems(
                 Update,
                 (
-                    piece_setup.in_set(LevelSystems::PieceSetup),
-                    piece_fall,
-                    detect_placement,
-                    ghost_blocks,
+                    update_playing_state,
+                    reconcile_board_blocks,
+                    reconcile_active_piece,
+                    reconcile_ghost_piece,
+                    emit_audio_cues,
+                    handle_game_over,
                 )
-                    .run_if(in_state(GameState::InGame)),
-            )
-            .add_systems(Update, piece_lock.run_if(in_state(PlayingState::Locking)));
+                    .in_set(LevelSystems::Reconcile),
+            );
     }
 }
 
-#[derive(SystemParam)]
-struct LockQueries<'w, 's> {
-    piece: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static PieceState,
-            &'static Coords,
-            &'static mut PieceController,
-            &'static Children,
-        ),
-    >,
-    board: Query<'w, 's, (Entity, &'static mut BoardState)>,
-    falling_blocks: FallingBlockQuery<'w, 's>,
-    static_blocks: Query<'w, 's, Entity, With<StaticBlock>>,
-}
+// ---------------------------------------------------------------------------
+// Setup
+// ---------------------------------------------------------------------------
 
-#[derive(SystemParam)]
-struct LockStateTransitions<'w> {
-    game: ResMut<'w, NextState<GameState>>,
-    playing: ResMut<'w, NextState<PlayingState>>,
-}
-
-#[derive(SystemParam)]
-struct GhostQueries<'w, 's> {
-    active_piece: ActivePieceQuery<'w, 's>,
-    ghosts: Query<
-        'w,
-        's,
-        (
-            Entity,
-            &'static mut PieceState,
-            &'static mut Transform,
-            Option<&'static Children>,
-        ),
-        With<GhostPiece>,
-    >,
-    ghost_blocks: GhostBlockQuery<'w, 's>,
-    board: Query<'w, 's, &'static BoardState>,
-}
-
-type ChangedPieceQuery<'w, 's> = Query<
-    'w,
-    's,
-    (&'static Coords, &'static PieceState),
-    Or<(Changed<Coords>, Changed<PieceState>)>,
->;
-
-// setup board and camera
+/// Build the authoritative engine, the player controller, the background grid,
+/// and the camera. Runs on entering `InGame` (including restart from game over).
 fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets: Res<GameAssets>) {
     info!("level_setup");
 
-    // Play field is 10×40, where rows above 20 are hidden or obstructed by the field frame to trick
-    // the player into thinking it's 10×20.
-    let board = Board::with_top_margin(config.board_width, config.board_height, 20);
+    let engine_config = engine_config_from_level(&config);
+    let engine = Engine::new(engine_config, DEFAULT_SEED);
+    let snapshot = engine.snapshot();
 
+    // Seed the per-frame resources with a fresh engine + its initial snapshot so
+    // the very first reconcile sees a consistent (empty) world.
+    commands.insert_resource(EngineState(engine));
+    commands.insert_resource(LatestSnapshot(snapshot));
+    commands.insert_resource(FrameEvents::default());
+    commands.insert_resource(SimClock::default());
+    commands.insert_resource(PlayerInput(KeyboardController::new(das_config_from_level(
+        &config,
+    ))));
+
+    // Background grid: a 10×height static field of dark cells, drawn once. This
+    // is purely decorative scaffolding; gameplay minos are reconciled on top.
+    let board = Board::with_top_margin(config.board_width, config.board_height, 20);
+    let field = commands
+        .spawn((
+            GameField,
+            Transform::default(),
+            Visibility::default(),
+            DespawnOnExit(GameState::InGame),
+        ))
+        .id();
     let mut block_ids = Vec::new();
     for (x, y) in board.coords() {
         let cell = Cell::new(x, y, CellKind::None);
-
-        // spawn background block
-        let block_id = spawn_free_block(
+        block_ids.push(spawn_free_block(
             &mut commands,
             &config,
             &texture_assets,
             &cell,
             BlockKind::Background,
-        );
-        block_ids.push(block_id);
+        ));
     }
+    commands.entity(field).add_children(&block_ids);
 
-    let board_entity = commands
-        .spawn((BoardState(board), Transform::default()))
-        .insert(DespawnOnExit(GameState::InGame))
-        .insert(PieceHolder::default())
-        // TODO(P2.x): renderer should consume EngineSnapshot, dropping this entry point.
-        .insert(PieceGeneratorState(PieceGenerator::with_seed(0)))
-        .id();
-
-    commands.entity(board_entity).add_children(&block_ids);
-
-    // look at center of the board
+    // Camera centered on the visible board.
     commands.spawn((
         Camera2d,
         Transform::from_translation(Vec3::new(
@@ -187,313 +122,261 @@ fn level_setup(mut commands: Commands, config: Res<LevelConfig>, texture_assets:
     ));
 }
 
-fn spawn_static_block(
-    commands: &mut Commands,
-    config: &Res<LevelConfig>,
-    assets: &Res<GameAssets>,
-    cell: &Cell,
-) -> Entity {
-    spawn_free_block(commands, config, assets, cell, BlockKind::Static)
+// ---------------------------------------------------------------------------
+// Driver: input -> fixed-timestep engine steps -> snapshot + events
+// ---------------------------------------------------------------------------
+
+/// Accumulate real frame time and step the engine at a fixed sim rate.
+///
+/// Each fixed slice: poll the player controller against the *current* snapshot,
+/// step the engine with `dt_seconds = SIM_DT_SECONDS`, and collect the events.
+/// The controller is fed raw keyboard state once per frame (DAS still advances
+/// per fixed slice via the staged input's `dt`). The latest snapshot and the
+/// frame's events are published into resources for the reconcilers.
+fn engine_driver(
+    time: Res<Time>,
+    keyboard: Res<ButtonInput<KeyCode>>,
+    mut engine: ResMut<EngineState>,
+    mut snapshot: ResMut<LatestSnapshot>,
+    mut frame_events: ResMut<FrameEvents>,
+    mut clock: ResMut<SimClock>,
+    mut player: ResMut<PlayerInput>,
+) {
+    frame_events.0.clear();
+
+    clock.accumulator_seconds += time.delta_secs();
+    // Guard against spiral-of-death after a long stall (e.g. tab backgrounded).
+    let max_accumulated = SIM_DT_SECONDS * 8.0;
+    if clock.accumulator_seconds > max_accumulated {
+        clock.accumulator_seconds = max_accumulated;
+    }
+
+    let mut stepped = false;
+    while clock.accumulator_seconds >= SIM_DT_SECONDS {
+        clock.accumulator_seconds -= SIM_DT_SECONDS;
+
+        // Stage this fixed slice's input. Edge-triggered actions (rotate, hold,
+        // hard drop) are only honored on the first slice of the frame so one key
+        // press maps to one action even if several slices run this frame.
+        let input = KeyboardInput::from_keyboard(&keyboard, SIM_DT_SECONDS);
+        let input = if stepped { suppress_edges(input) } else { input };
+        player.0.set_input(input);
+
+        let frame = player.0.poll(&snapshot.0);
+        let events = engine.0.step(frame);
+        snapshot.0 = engine.0.snapshot();
+        frame_events.0.extend(events);
+        stepped = true;
+    }
+
+    // If no slice ran this frame the snapshot is unchanged; reconcilers reading
+    // it are idempotent, so nothing to do.
 }
 
-fn piece_setup(
+/// Clear edge-triggered (just-pressed) flags so repeated fixed slices in one
+/// frame don't replay a single key press. Held flags (`soft_drop`, the
+/// `*_pressed` used by DAS) are preserved.
+fn suppress_edges(mut input: KeyboardInput) -> KeyboardInput {
+    input.left_just_pressed = false;
+    input.right_just_pressed = false;
+    input.hard_drop_just_pressed = false;
+    input.rotate_cw_just_pressed = false;
+    input.rotate_ccw_just_pressed = false;
+    input.hold_just_pressed = false;
+    input.pause_just_pressed = false;
+    input
+}
+
+// ---------------------------------------------------------------------------
+// Reconcilers: render entities from the snapshot
+// ---------------------------------------------------------------------------
+
+/// Derive Falling vs. Locking from the snapshot's active piece. The lock-down
+/// timer bar's UI keys off this sub-state.
+fn update_playing_state(
+    snapshot: Res<LatestSnapshot>,
+    current: Res<State<PlayingState>>,
+    mut next: ResMut<NextState<PlayingState>>,
+) {
+    let landed = snapshot
+        .0
+        .active
+        .as_ref()
+        .map(|active| active.landed)
+        .unwrap_or(false);
+
+    let desired = if landed {
+        PlayingState::Locking
+    } else {
+        PlayingState::Falling
+    };
+    if current.get() != &desired {
+        next.set(desired);
+    }
+}
+
+/// Rebuild the locked-board minos whenever they change. Board state only
+/// changes on a lock/clear, so this is cheap: we cache the last board cells and
+/// despawn+respawn only on a diff.
+fn reconcile_board_blocks(
     mut commands: Commands,
+    snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
     texture_assets: Res<GameAssets>,
-    piece_query: Query<(Entity, &PieceState, &PieceController)>,
-    board_query: Query<&BoardState>,
+    existing: Query<Entity, With<StaticBlock>>,
+    mut last: Local<Option<Vec<crate::engine::SnapshotCell>>>,
+) {
+    let cells = &snapshot.0.board_cells;
+    if last.as_ref() == Some(cells) {
+        return;
+    }
+
+    for entity in existing.iter() {
+        commands.entity(entity).despawn();
+    }
+    for cell in cells {
+        spawn_snapshot_block(
+            &mut commands,
+            &config,
+            &texture_assets,
+            cell.x,
+            cell.y,
+            cell.piece_type,
+            BlockKind::Static,
+        );
+    }
+
+    *last = Some(cells.clone());
+}
+
+/// Rebuild the active-piece minos each frame from `snapshot.active`. Despawn all
+/// and respawn from the snapshot's absolute cell coords — cheap (4 sprites) and
+/// always in sync with the engine.
+fn reconcile_active_piece(
+    mut commands: Commands,
+    snapshot: Res<LatestSnapshot>,
+    config: Res<LevelConfig>,
+    texture_assets: Res<GameAssets>,
+    existing: Query<Entity, With<FallingBlock>>,
+) {
+    for entity in existing.iter() {
+        commands.entity(entity).despawn();
+    }
+    let Some(active) = snapshot.0.active.as_ref() else {
+        return;
+    };
+    for cell in &active.cells {
+        spawn_snapshot_block(
+            &mut commands,
+            &config,
+            &texture_assets,
+            cell.x,
+            cell.y,
+            cell.piece_type,
+            BlockKind::Falling,
+        );
+    }
+}
+
+/// Rebuild the ghost-piece minos each frame from `snapshot.ghost_cells`.
+/// Reconciled after the active piece so both read the same snapshot and the
+/// ghost can never lag the piece.
+fn reconcile_ghost_piece(
+    mut commands: Commands,
+    snapshot: Res<LatestSnapshot>,
+    config: Res<LevelConfig>,
+    texture_assets: Res<GameAssets>,
+    existing: Query<Entity, With<GhostBlock>>,
+) {
+    for entity in existing.iter() {
+        commands.entity(entity).despawn();
+    }
+    // Hide the ghost when it would coincide with the active piece (piece already
+    // resting on the stack), matching the old renderer's "no ghost when grounded".
+    let landed = snapshot
+        .0
+        .active
+        .as_ref()
+        .map(|active| active.landed)
+        .unwrap_or(true);
+    if landed {
+        return;
+    }
+    for cell in &snapshot.0.ghost_cells {
+        spawn_snapshot_block(
+            &mut commands,
+            &config,
+            &texture_assets,
+            cell.x,
+            cell.y,
+            cell.piece_type,
+            BlockKind::Ghost,
+        );
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Events: audio + game over
+// ---------------------------------------------------------------------------
+
+/// Map this frame's engine events onto [`AudioCue`]s, preserving the same SFX
+/// moments as the pre-migration renderer:
+///   * Rotated   -> Rotation
+///   * HardDropped -> HardDrop
+///   * Held      -> Hold
+///   * a piece grounding (Locking transition) -> Placed
+///   * Locked(n) -> Locked(n) (lock thunk / line-clear jingles)
+fn emit_audio_cues(
+    mut commands: Commands,
+    frame_events: Res<FrameEvents>,
+    mut prev_landed: Local<bool>,
+    snapshot: Res<LatestSnapshot>,
+) {
+    for event in &frame_events.0 {
+        match event {
+            EngineEvent::Rotated { .. } => commands.trigger(AudioCue::Rotation),
+            EngineEvent::HardDropped { .. } => commands.trigger(AudioCue::HardDrop),
+            EngineEvent::Held { .. } => commands.trigger(AudioCue::Hold),
+            EngineEvent::Locked { lines_cleared, .. } => {
+                commands.trigger(AudioCue::Locked(*lines_cleared))
+            }
+            _ => {}
+        }
+    }
+
+    // "Placed" plays on the rising edge of the active piece becoming grounded
+    // (the moment the lock-down timer starts), mirroring the old detect_placement.
+    let landed = snapshot
+        .0
+        .active
+        .as_ref()
+        .map(|active| active.landed)
+        .unwrap_or(false);
+    if landed && !*prev_landed {
+        commands.trigger(AudioCue::Placed);
+    }
+    *prev_landed = landed;
+}
+
+/// Transition to the game-over screen when the engine reports it. Reads the
+/// snapshot (authoritative) rather than racing the event list.
+fn handle_game_over(
+    snapshot: Res<LatestSnapshot>,
     mut next_game_state: ResMut<NextState<GameState>>,
-    mut generator_query: Query<&mut PieceGeneratorState>,
 ) {
-    // if there is already a piece, don't spawn a new one
-    if piece_query.single().is_ok() {
-        return;
-    }
-    let Ok(mut generator) = generator_query.single_mut() else {
-        return;
-    };
-
-    let next_piece_type = generator.next();
-    let piece = Piece::from(next_piece_type.unwrap());
-
-    let Ok(board) = board_query.single() else {
-        return;
-    };
-
-    let Some(spawn_coords) = spawn_coords_after_generation_rules(&config, board, &piece) else {
-        info!("game over");
+    if let Some(reason) = snapshot.0.game_over {
+        match reason {
+            GameOverStatus::BlockOut => info!("game over: block out"),
+            GameOverStatus::LockOut => info!("game over: lock out"),
+        }
         next_game_state.set(GameState::GameOver);
-        return;
-    };
-
-    spawn_falling_piece(
-        &mut commands,
-        &config,
-        &texture_assets,
-        piece,
-        spawn_coords,
-        false,
-    );
-}
-
-fn piece_fall(
-    mut query: Query<(
-        &PieceState,
-        &mut PieceController,
-        &mut Coords,
-        &mut Transform,
-    )>,
-    board_query: Query<&BoardState>,
-    config: Res<LevelConfig>,
-    time: Res<Time>,
-) {
-    let Ok((piece, mut piece_controller, mut coords, mut transform)) = query.single_mut() else {
-        return;
-    };
-    let Ok(board) = board_query.single() else {
-        return;
-    };
-
-    piece_controller.falling_timer.tick(time.delta());
-
-    if piece_controller.falling_timer.is_finished() {
-        if let Some(new_coords) = piece.try_move(board, (coords.x, coords.y), MoveDirection::Down) {
-            (coords.x, coords.y) = new_coords;
-            transform.update_coords(coords.as_ref(), &config);
-        }
-    }
-}
-
-fn piece_lock(
-    mut commands: Commands,
-    mut queries: LockQueries,
-    time: Res<Time>,
-    config: Res<LevelConfig>,
-    assets: Res<GameAssets>,
-    mut next_states: LockStateTransitions,
-    mut ev_placing: MessageWriter<PlacingEvent>,
-) {
-    let Ok((piece_entity, piece, coords, mut piece_controller, children)) =
-        queries.piece.single_mut()
-    else {
-        return;
-    };
-    let Ok((board_entity, mut board)) = queries.board.single_mut() else {
-        return;
-    };
-
-    piece_controller.locking_timer.tick(time.delta());
-
-    if piece_controller.locking_timer.is_finished() || piece_controller.hard_dropped
-    // after hard drop, place immediately
-    {
-        info!("piece_place");
-        piece_controller.hard_dropped = false; // reset hard drop flag
-        next_states.playing.set(PlayingState::Falling);
-        let lock_out = is_lock_out(piece, (coords.x, coords.y), config.board_height);
-
-        // hand over children to board
-        commands.entity(board_entity).add_children(children);
-
-        commands.entity(piece_entity).despawn();
-
-        for child in children.iter() {
-            // convert the coordinates of the child to board coordinates
-            let (mut child_coords, mut child_transform) =
-                queries.falling_blocks.get_mut(child).unwrap();
-            child_coords.x += coords.x;
-            child_coords.y += coords.y;
-
-            board.set(
-                child_coords.x,
-                child_coords.y,
-                CellKind::Some(piece.piece_type()),
-            );
-
-            commands
-                .entity(child)
-                .insert(StaticBlock {})
-                .remove::<FallingBlock>();
-            child_transform.update_coords(child_coords.as_ref(), &config);
-        }
-
-        if lock_out {
-            next_states.game.set(GameState::GameOver);
-            return;
-        }
-
-        // check for line clears
-        let lines_cleared = board.clear_lines();
-
-        if lines_cleared > 0 {
-            // remove all static blocks
-            for entity in queries.static_blocks.iter_mut() {
-                commands.entity(entity).despawn();
-            }
-
-            // remove the current piece's children (which are added to the board but yet to be updated)
-            for entity in children.iter() {
-                commands.entity(entity).despawn();
-            }
-
-            // redraw the board
-            for cell in board.cells() {
-                let block_entity = spawn_static_block(&mut commands, &config, &assets, cell);
-                commands.entity(board_entity).add_child(block_entity);
-            }
-
-            piece_controller.locking_timer.reset();
-        }
-
-        ev_placing.write(PlacingEvent::Locked(lines_cleared));
-        commands.trigger(AudioCue::Locked(lines_cleared));
-    }
-}
-
-fn ghost_blocks(
-    mut commands: Commands,
-    mut queries: GhostQueries,
-    config: Res<LevelConfig>,
-    texture_assets: Res<GameAssets>,
-) {
-    if queries.active_piece.is_empty() {
-        return;
-    }
-
-    let Ok((coords, piece)) = queries.active_piece.single_mut() else {
-        return;
-    };
-    let Ok(board) = queries.board.single() else {
-        return;
-    };
-
-    let mut ghost_coords = coords.clone();
-    let mut ghost_transform = Transform::default();
-    let ghost_piece = piece.clone();
-
-    let mut can_move = false;
-
-    while let Some(new_coords) =
-        ghost_piece.try_move(board, ghost_coords.into(), MoveDirection::Down)
-    {
-        ghost_coords = Coords::from(new_coords);
-
-        ghost_transform.update_coords(&ghost_coords, &config);
-        can_move = true;
-    }
-
-    if !can_move {
-        for (entity, _, _, _) in queries.ghosts.iter_mut() {
-            commands.entity(entity).despawn();
-        }
-        return;
-    }
-
-    let ghost_board = ghost_piece.board();
-    let ghost_cells = ghost_board.cells();
-
-    let Ok((piece_entity, mut existing_piece, mut transform, children)) =
-        queries.ghosts.single_mut()
-    else {
-        let block_entities = ghost_cells
-            .iter()
-            .map(|cell| {
-                spawn_free_block(
-                    &mut commands,
-                    &config,
-                    &texture_assets,
-                    cell,
-                    BlockKind::Ghost,
-                )
-            })
-            .collect::<Vec<_>>();
-
-        let piece_entity = commands
-            .spawn((
-                ghost_piece,
-                ghost_transform,
-                DespawnOnExit(GameState::InGame),
-            ))
-            .insert(GhostPiece)
-            .id();
-        commands.entity(piece_entity).add_children(&block_entities);
-        return;
-    };
-
-    *existing_piece = ghost_piece;
-    *transform = ghost_transform;
-
-    let Some(children) = children else {
-        return;
-    };
-
-    if children.len() != ghost_cells.len() {
-        commands.entity(piece_entity).despawn_related::<Children>();
-        let block_entities = ghost_cells
-            .iter()
-            .map(|cell| {
-                spawn_free_block(
-                    &mut commands,
-                    &config,
-                    &texture_assets,
-                    cell,
-                    BlockKind::Ghost,
-                )
-            })
-            .collect::<Vec<_>>();
-        commands.entity(piece_entity).add_children(&block_entities);
-        return;
-    }
-
-    for (child_entity, cell) in children.iter().zip(ghost_cells.iter()) {
-        let Ok((mut child_coords, mut child_transform)) =
-            queries.ghost_blocks.get_mut(child_entity)
-        else {
-            continue;
-        };
-        child_coords.set_if_neq(Coords::from(cell.coords()));
-        child_transform.update_coords(child_coords.as_ref(), &config);
-    }
-}
-
-fn detect_placement(
-    mut commands: Commands,
-    mut piece_query: ChangedPieceQuery, // either the piece or its coords changed
-    board_query: Query<&BoardState>,
-    mut next_state: ResMut<NextState<PlayingState>>,
-    current_state: Res<State<PlayingState>>,
-) {
-    if piece_query.is_empty() {
-        return;
-    }
-
-    let Ok((coords, piece)) = piece_query.single_mut() else {
-        return;
-    };
-    let Ok(board) = board_query.single() else {
-        return;
-    };
-
-    let current_state = current_state.get();
-
-    if piece
-        .try_move(board, (coords.x, coords.y), MoveDirection::Down)
-        .is_none()
-    {
-        if current_state == &Falling {
-            next_state.set(PlayingState::Locking);
-            info!("Transitioning to Placing state.");
-            commands.trigger(AudioCue::Placed);
-        }
-    } else if current_state == &PlayingState::Locking {
-        next_state.set(Falling);
-        info!("Transitioning to Falling state.");
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{EngineConfig, InputFrame};
 
     #[test]
     fn level_plugin_systems_initialize_without_query_conflicts() {
@@ -520,5 +403,175 @@ mod tests {
             .resource_mut::<NextState<GameState>>()
             .set(GameState::InGame);
         app.update();
+        // A second update applies the InGame state transition and runs setup.
+        app.update();
+
+        assert!(app.world().get_resource::<EngineState>().is_some());
+        assert!(app.world().get_resource::<LatestSnapshot>().is_some());
+
+        // Force the fixed-timestep driver to run a slice (independent of the test
+        // harness's wall clock) so the engine spawns its first piece, then verify
+        // the active-piece reconciler materialized it into FallingBlock entities.
+        app.world_mut()
+            .resource_mut::<SimClock>()
+            .accumulator_seconds = SIM_DT_SECONDS;
+        app.update();
+
+        let snapshot = &app.world().resource::<LatestSnapshot>().0;
+        assert!(
+            snapshot.active.is_some(),
+            "driver should have stepped the engine and spawned a piece"
+        );
+        let falling_blocks = app
+            .world_mut()
+            .query_filtered::<(), With<FallingBlock>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            falling_blocks, 4,
+            "reconcile_active_piece must render the active piece's 4 cells"
+        );
+    }
+
+    /// The driver accumulator must advance the engine deterministically: feeding
+    /// a fixed total of wall-clock dt produces the same engine state as stepping
+    /// the engine directly with the same fixed slices. This pins the
+    /// fixed-timestep contract (gravity/lock-down advance independent of frame
+    /// rate) without booting a render App.
+    #[test]
+    fn driver_accumulator_advances_engine_deterministically() {
+        // Reference engine: step exactly N fixed slices with no input.
+        let config = EngineConfig::default();
+        let mut reference = Engine::new(config.clone(), DEFAULT_SEED);
+        let slices = 10;
+        for _ in 0..slices {
+            reference.step(InputFrame {
+                dt_seconds: SIM_DT_SECONDS,
+                ..InputFrame::default()
+            });
+        }
+
+        // Driver-style: accumulate one frame whose dt equals N fixed slices, then
+        // drain the accumulator in fixed slices (the engine_driver loop).
+        let mut driven = Engine::new(config, DEFAULT_SEED);
+        let mut accumulator = SIM_DT_SECONDS * slices as f32;
+        let mut ran = 0;
+        while accumulator >= SIM_DT_SECONDS {
+            accumulator -= SIM_DT_SECONDS;
+            driven.step(InputFrame {
+                dt_seconds: SIM_DT_SECONDS,
+                ..InputFrame::default()
+            });
+            ran += 1;
+        }
+
+        assert_eq!(ran, slices, "accumulator must drain into exactly N slices");
+        assert_eq!(
+            driven.snapshot(),
+            reference.snapshot(),
+            "fixed-slice driving matches direct fixed stepping"
+        );
+    }
+
+    #[test]
+    fn suppress_edges_keeps_held_flags_but_drops_just_pressed() {
+        let input = KeyboardInput {
+            dt_seconds: SIM_DT_SECONDS,
+            left_pressed: true,
+            left_just_pressed: true,
+            soft_drop: true,
+            hard_drop_just_pressed: true,
+            rotate_cw_just_pressed: true,
+            hold_just_pressed: true,
+            ..KeyboardInput::default()
+        };
+        let suppressed = suppress_edges(input);
+
+        assert!(suppressed.left_pressed, "held flags survive");
+        assert!(suppressed.soft_drop, "soft drop is a held flag");
+        assert!(!suppressed.left_just_pressed);
+        assert!(!suppressed.hard_drop_just_pressed);
+        assert!(!suppressed.rotate_cw_just_pressed);
+        assert!(!suppressed.hold_just_pressed);
+    }
+
+    #[test]
+    fn engine_config_bridge_maps_level_dimensions() {
+        let level = LevelConfig::default();
+        let engine = engine_config_from_level(&level);
+
+        assert_eq!(engine.board_width, level.board_width);
+        assert_eq!(engine.visible_height, level.board_height);
+        assert_eq!(engine.preview_count, level.preview_count);
+        // The engine does not carry DAS; that lives in DasConfig.
+        let das = das_config_from_level(&level);
+        assert_eq!(das.delay_seconds, level.das_delay.as_secs_f32());
+        assert_eq!(das.repeat_seconds, level.das_repeat_duration.as_secs_f32());
+    }
+
+    fn headless_app() -> App {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<GameState>()
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(GameAssets {
+                block_texture: default(),
+                hard_drop_sound: default(),
+                placed_sound: default(),
+                line_clear_1: default(),
+                line_clear_2: default(),
+                line_clear_3: default(),
+                line_clear_4: default(),
+                locked_sound: default(),
+                hold_sound: default(),
+                rotation_sound: default(),
+                font: default(),
+            })
+            .add_plugins(LevelPlugin);
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(GameState::InGame);
+        app.update();
+        app.update();
+        app
+    }
+
+    /// Drive a hard drop through the full app and verify the board reconciler
+    /// mirrors the engine's locked board into StaticBlock entities. This exercises
+    /// the snapshot -> board reconciliation path end to end.
+    #[test]
+    fn hard_drop_reconciles_locked_board_into_static_blocks() {
+        let mut app = headless_app();
+
+        // Step once to spawn the first piece.
+        app.world_mut()
+            .resource_mut::<SimClock>()
+            .accumulator_seconds = SIM_DT_SECONDS;
+        app.update();
+
+        // Press Space (hard drop) and force another driver slice.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Space);
+        app.world_mut()
+            .resource_mut::<SimClock>()
+            .accumulator_seconds = SIM_DT_SECONDS;
+        app.update();
+
+        let snapshot = &app.world().resource::<LatestSnapshot>().0;
+        assert_eq!(
+            snapshot.board_cells.len(),
+            4,
+            "hard drop should lock the piece's 4 cells onto the board"
+        );
+        let static_blocks = app
+            .world_mut()
+            .query_filtered::<(), With<StaticBlock>>()
+            .iter(app.world())
+            .count();
+        assert_eq!(
+            static_blocks, 4,
+            "reconcile_board_blocks must mirror the locked board cells"
+        );
     }
 }

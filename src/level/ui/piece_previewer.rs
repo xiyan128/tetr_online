@@ -1,9 +1,8 @@
 use crate::assets::GameAssets;
 use crate::engine::{Piece, PieceType};
 use crate::level::common::spawn_free_block;
-use crate::level::common::{
-    to_translation, BlockKind, LevelConfig, PieceGeneratorState, PieceHolder,
-};
+use crate::level::common::{to_translation, BlockKind, LevelConfig};
+use crate::level::engine_bridge::LatestSnapshot;
 use crate::level::ui::calc_ui_offset;
 use crate::GameState;
 use bevy::prelude::*;
@@ -60,28 +59,25 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
     ));
 }
 
+/// Render the next-piece previews from `snapshot.next_queue`. Cached against the
+/// last-rendered queue so sprites are only rebuilt when the queue changes.
 pub fn update_piece_previewer(
     children_query: Query<&Children, With<PiecePreviewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
-    generator_query: Query<&PieceGeneratorState, Changed<PieceGeneratorState>>,
+    snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
+    mut last_queue: Local<Option<Vec<PieceType>>>,
 ) {
-    if generator_query.is_empty() {
+    let queue = &snapshot.0.next_queue;
+    if last_queue.as_ref() == Some(queue) {
         return;
     }
-    info!("updating piece previewer");
-
-    let Ok(generator) = generator_query.single() else {
-        return;
-    };
 
     let Ok(children) = children_query.single() else {
         return;
     };
-
-    let bag_preview = generator.preview();
 
     let mut holders_height = 0.;
     for child in children.iter() {
@@ -91,8 +87,9 @@ pub fn update_piece_previewer(
         let (preview_holder, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
 
         let idx = preview_holder.index;
-
-        let piece_type = bag_preview[idx];
+        let Some(&piece_type) = queue.get(idx) else {
+            continue;
+        };
 
         let (preview_board_size, piece_entity) =
             spawn_holder_piece(&config, &game_assets, &mut commands, piece_type);
@@ -103,23 +100,25 @@ pub fn update_piece_previewer(
         holders_height += preview_board_size.y + calc_ui_offset(&config);
         holder_transform.translation.y = -holders_height;
     }
+
+    *last_queue = Some(queue.clone());
 }
 
+/// Render the hold piece from `snapshot.hold`. Cached against the last-rendered
+/// hold so sprites are only rebuilt when it changes.
 pub fn update_hold_viewer(
     children_query: Query<&Children, With<HoldViewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
-    holder_query: Query<&PieceHolder, Changed<PieceHolder>>,
+    snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
+    mut last_hold: Local<Option<Option<PieceType>>>,
 ) {
-    if children_query.is_empty() || holder_query.is_empty() {
+    let hold = snapshot.0.hold;
+    if *last_hold == Some(hold) {
         return;
     }
-
-    let Ok(piece_holder) = holder_query.single() else {
-        return;
-    };
 
     let Ok(children) = children_query.single() else {
         return;
@@ -129,11 +128,11 @@ pub fn update_hold_viewer(
         // clear the preview holder
         commands.entity(child).despawn_related::<Children>();
 
-        if let Some(piece) = piece_holder.piece.as_ref() {
+        if let Some(piece_type) = hold {
             let (_, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
 
             let (preview_board_size, piece_entity) =
-                spawn_holder_piece(&config, &game_assets, &mut commands, piece.piece_type());
+                spawn_holder_piece(&config, &game_assets, &mut commands, piece_type);
 
             commands.entity(child).add_child(piece_entity);
 
@@ -141,6 +140,8 @@ pub fn update_hold_viewer(
             holder_transform.translation = -preview_board_size.extend(0.);
         }
     }
+
+    *last_hold = Some(hold);
 }
 
 fn spawn_holder_piece(

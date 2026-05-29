@@ -1,13 +1,9 @@
 use crate::assets::GameAssets;
-use crate::engine::{
-    fall_duration, is_block_out, soft_drop_duration, Board, Cell, LockDownMode, MoveDirection,
-    Piece, PieceGenerator, PieceType, LOCK_DOWN_SECONDS, MIN_LEVEL,
-};
+use crate::engine::{Cell, LockDownMode, PieceType};
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
-    Color, Commands, Component, Deref, DerefMut, Entity, Event, Message, Res, Resource, Sprite,
-    SubStates, SystemSet, Timer, TimerMode, Transform,
+    Color, Commands, Component, Entity, Res, Resource, Sprite, SubStates, SystemSet, Transform,
 };
 use bevy::sprite::Anchor;
 use bevy::state::state::StateSet;
@@ -15,20 +11,12 @@ use std::time::Duration;
 
 use crate::{DespawnOnExit, GameState};
 
-#[derive(Message, Clone, Debug)]
-pub enum ActionEvent {
-    Rotation(PieceType, usize, u8), // piece type, occupied cells (only for T-Spin), SRS kick number
-    Movement(MoveDirection),
-    HardDrop(usize),
-    Hold,
-}
-
-#[derive(Message, Clone)]
-pub enum PlacingEvent {
-    Locked(usize), // lines cleared
-}
-
-#[derive(Event, Clone, Debug)]
+/// Audio cue, decoupled from the engine. The engine-bridge maps [`EngineEvent`]s
+/// (Rotated/HardDropped/Held/Locked) onto these so the existing
+/// `SoundEffectsPlugin` observer keeps working unchanged.
+///
+/// [`EngineEvent`]: crate::engine::EngineEvent
+#[derive(bevy::prelude::Event, Clone, Debug)]
 pub enum AudioCue {
     Rotation,
     HardDrop,
@@ -37,6 +25,8 @@ pub enum AudioCue {
     Locked(usize),
 }
 
+/// Falling vs. Locking, derived each frame from `snapshot.active.landed`. Drives
+/// the lock-down timer bar's visibility (it only shows while Locking).
 #[derive(SubStates, PartialEq, Eq, Debug, Clone, Hash, Default)]
 #[source(GameState = GameState::InGame)]
 pub enum PlayingState {
@@ -45,10 +35,14 @@ pub enum PlayingState {
     Locking,
 }
 
-#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone)]
+/// System ordering label: the engine driver runs before everything that reads
+/// the snapshot/events it produces.
+#[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum LevelSystems {
-    PieceSetup,
-    PlayerInput,
+    /// Collects input, steps the engine, publishes snapshot + events.
+    EngineDriver,
+    /// Reconciles render entities / UI / audio from the snapshot + events.
+    Reconcile,
 }
 
 #[derive(Resource, Debug)]
@@ -59,10 +53,10 @@ pub struct LevelConfig {
     pub(crate) preview_count: usize,
 
     pub(crate) board_height: usize,
+    // DAS timings stay player-side (consumed by KeyboardController via the
+    // engine-bridge's das_config_from_level; never read by the engine).
     pub(crate) das_delay: Duration,
     pub(crate) das_repeat_duration: Duration,
-    pub(crate) soft_drop_duration: Duration,
-    pub(crate) fall_duration: Duration,
     pub(crate) locking_duration: Duration,
     pub(crate) lock_down_mode: LockDownMode,
 }
@@ -77,35 +71,9 @@ impl Default for LevelConfig {
             preview_count: 6,
             das_delay: Duration::from_millis(300),
             das_repeat_duration: Duration::from_millis(50),
-            soft_drop_duration: soft_drop_duration(MIN_LEVEL),
-            fall_duration: fall_duration(MIN_LEVEL),
-            locking_duration: Duration::from_secs_f32(LOCK_DOWN_SECONDS),
+            locking_duration: Duration::from_secs_f32(crate::engine::LOCK_DOWN_SECONDS),
             lock_down_mode: LockDownMode::default(),
         }
-    }
-}
-
-impl LevelConfig {
-    pub(crate) fn spawn_coords(&self, piece: &Piece) -> (isize, isize) {
-        piece.spawn_coords(self.board_width, self.board_height)
-    }
-}
-
-#[derive(Component, PartialEq, Eq, Debug, Clone, Hash)]
-pub(crate) struct Coords {
-    pub(crate) x: isize,
-    pub(crate) y: isize,
-}
-
-impl From<(isize, isize)> for Coords {
-    fn from((x, y): (isize, isize)) -> Self {
-        Self { x, y }
-    }
-}
-
-impl From<Coords> for (isize, isize) {
-    fn from(coords: Coords) -> Self {
-        (coords.x, coords.y)
     }
 }
 
@@ -118,18 +86,26 @@ pub enum BlockKind {
     Preview,
 }
 
+/// Anchor entity at the board origin. The lock-down timer bar parents to it so
+/// the bar's local transform maps cleanly into board space.
+#[derive(Component)]
+pub struct GameField;
+
 #[derive(Component, Clone)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct BackgroundBlock;
 
+/// A cell of the active (falling) piece. Reconciled from `snapshot.active`.
 #[derive(Component, Clone)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct FallingBlock;
 
+/// A locked board mino. Reconciled from `snapshot.board_cells`.
 #[derive(Component, Clone)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct StaticBlock;
 
+/// A ghost-piece cell. Reconciled from `snapshot.ghost_cells`.
 #[derive(Component, Clone)]
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct GhostBlock;
@@ -138,131 +114,13 @@ pub struct GhostBlock;
 #[require(Sprite, Transform, Anchor = Anchor::BOTTOM_LEFT)]
 pub struct PreviewBlock;
 
-#[derive(Component)]
-pub struct GhostPiece;
-
-#[derive(Component)]
-pub struct PieceController {
-    pub(crate) falling_timer: Timer,
-    pub(crate) locking_timer: Timer,
-    pub(crate) hard_dropped: bool,
-    pub(crate) used_hold: bool,
-    pub(crate) soft_drop_timer: Timer,
-}
-
-impl Default for PieceController {
-    fn default() -> Self {
-        let config = LevelConfig::default();
-        Self::new(&config)
-    }
-}
-
-impl PieceController {
-    pub(crate) fn new(config: &LevelConfig) -> Self {
-        Self {
-            falling_timer: Timer::new(config.fall_duration, TimerMode::Repeating),
-            locking_timer: Timer::new(config.locking_duration, TimerMode::Once),
-            soft_drop_timer: Timer::new(config.soft_drop_duration, TimerMode::Repeating),
-            hard_dropped: false,
-            used_hold: false,
-        }
-    }
-}
-
-#[derive(Resource, Debug, Default)]
-pub(crate) struct DasState {
-    active_direction: Option<MoveDirection>,
-    held_duration: Duration,
-    repeat_elapsed: Duration,
-}
-
-impl DasState {
-    pub(crate) fn active_direction(&self) -> Option<MoveDirection> {
-        self.active_direction
-    }
-
-    pub(crate) fn next_action(
-        &mut self,
-        held_direction: Option<MoveDirection>,
-        just_pressed: bool,
-        delta: Duration,
-        config: &LevelConfig,
-    ) -> Option<MoveDirection> {
-        let Some(direction) = held_direction else {
-            self.active_direction = None;
-            self.held_duration = Duration::ZERO;
-            self.repeat_elapsed = Duration::ZERO;
-            return None;
-        };
-
-        if self.active_direction != Some(direction) {
-            self.active_direction = Some(direction);
-            self.held_duration = Duration::ZERO;
-            self.repeat_elapsed = Duration::ZERO;
-            return just_pressed.then_some(direction);
-        }
-
-        if just_pressed {
-            self.repeat_elapsed = Duration::ZERO;
-            return Some(direction);
-        }
-
-        let was_waiting_for_delay = self.held_duration < config.das_delay;
-        self.held_duration += delta;
-
-        if was_waiting_for_delay {
-            if self.held_duration >= config.das_delay {
-                self.repeat_elapsed = Duration::ZERO;
-                return Some(direction);
-            }
-            return None;
-        }
-
-        self.repeat_elapsed += delta;
-        if self.repeat_elapsed >= config.das_repeat_duration {
-            self.repeat_elapsed = self
-                .repeat_elapsed
-                .saturating_sub(config.das_repeat_duration);
-            Some(direction)
-        } else {
-            None
-        }
-    }
-}
-
-pub(crate) trait MatchCoords {
-    fn from_coords(coords: &Coords, config: &LevelConfig) -> Self;
-    fn update_coords(&mut self, coords: &Coords, config: &LevelConfig);
-}
-
 pub fn to_translation(x: isize, y: isize, block_size: f32) -> Vec3 {
     IVec2::new(x as i32, y as i32).as_vec2().extend(0.0) * block_size
 }
 
-impl MatchCoords for Transform {
-    fn from_coords(coords: &Coords, config: &LevelConfig) -> Self {
-        Transform::from_translation(to_translation(coords.x, coords.y, config.block_size))
-    }
-    fn update_coords(&mut self, coords: &Coords, config: &LevelConfig) {
-        self.translation = to_translation(coords.x, coords.y, config.block_size);
-    }
-}
-
-#[derive(Component, Default)]
-pub struct PieceHolder {
-    pub(crate) piece: Option<Piece>,
-}
-
-#[derive(Component, Deref, DerefMut)]
-pub struct BoardState(pub(crate) Board);
-
-#[derive(Component, Clone, Debug, Deref, DerefMut)]
-pub struct PieceState(pub(crate) Piece);
-
-#[derive(Component, Deref, DerefMut)]
-pub struct PieceGeneratorState(pub(crate) PieceGenerator);
-
-// spawn a block that is yet a part of a piece at the given cell
+/// Build a render block at a single board/ghost/preview cell. Reused verbatim
+/// from the pre-migration renderer; the only difference is callers now feed it
+/// cells derived from `SnapshotCell`s instead of from a parallel `Board`.
 pub fn spawn_free_block(
     commands: &mut Commands,
     config: &LevelConfig,
@@ -280,8 +138,7 @@ pub fn spawn_free_block(
         BlockKind::Background => Color::srgb(0.1, 0.1, 0.1),
     };
 
-    let coords = Coords::from((x, y));
-    let mut transform = Transform::from_coords(&coords, config);
+    let mut transform = Transform::from_translation(to_translation(x, y, config.block_size));
 
     let sprite = match block_kind {
         BlockKind::Background => {
@@ -301,9 +158,7 @@ pub fn spawn_free_block(
         _ => 0.,
     };
 
-    let entity = commands
-        .spawn((sprite, transform, Anchor::BOTTOM_LEFT, coords))
-        .id();
+    let entity = commands.spawn((sprite, transform, Anchor::BOTTOM_LEFT)).id();
 
     match block_kind {
         BlockKind::Background => {
@@ -326,68 +181,23 @@ pub fn spawn_free_block(
     entity
 }
 
-pub fn spawn_piece_blocks(
+/// Spawn a render block for a snapshot mino at absolute board coords with a
+/// despawn-on-exit guard. Used by the per-frame reconcilers.
+pub fn spawn_snapshot_block(
     commands: &mut Commands,
     config: &LevelConfig,
     texture_assets: &Res<GameAssets>,
-    piece: &Piece,
+    x: isize,
+    y: isize,
+    piece_type: PieceType,
     block_kind: BlockKind,
-) -> Vec<Entity> {
-    let board = piece.board();
-
-    board
-        .cells()
-        .into_iter()
-        .map(|cell| spawn_free_block(commands, config, texture_assets, cell, block_kind))
-        .collect()
-}
-
-pub(crate) fn spawn_coords_after_generation_rules(
-    config: &LevelConfig,
-    board: &Board,
-    piece: &Piece,
-) -> Option<(isize, isize)> {
-    let spawn_coords = config.spawn_coords(piece);
-    if is_block_out(piece, board, spawn_coords) {
-        return None;
-    }
-
-    Some(
-        piece
-            .try_move(board, spawn_coords, MoveDirection::Down)
-            .unwrap_or(spawn_coords),
-    )
-}
-
-pub(crate) fn spawn_falling_piece(
-    commands: &mut Commands,
-    config: &LevelConfig,
-    texture_assets: &Res<GameAssets>,
-    piece: Piece,
-    spawn_coords: (isize, isize),
-    used_hold: bool,
 ) -> Entity {
-    let block_ids =
-        spawn_piece_blocks(commands, config, texture_assets, &piece, BlockKind::Falling);
-    let piece_entity = commands
-        .spawn((PieceState(piece), DespawnOnExit(GameState::InGame)))
-        .id();
-
+    let cell = Cell::new(x, y, crate::engine::CellKind::Some(piece_type));
+    let entity = spawn_free_block(commands, config, texture_assets, &cell, block_kind);
     commands
-        .entity(piece_entity)
-        .insert(Coords::from(spawn_coords))
-        .insert(PieceController {
-            used_hold,
-            ..PieceController::new(config)
-        })
-        .insert(Transform::from_translation(to_translation(
-            spawn_coords.0,
-            spawn_coords.1,
-            config.block_size,
-        )));
-    commands.entity(piece_entity).add_children(&block_ids);
-
-    piece_entity
+        .entity(entity)
+        .insert(DespawnOnExit(GameState::InGame));
+    entity
 }
 
 pub fn piece_color(piece_type: PieceType) -> Color {
@@ -399,316 +209,5 @@ pub fn piece_color(piece_type: PieceType) -> Color {
         PieceType::S => Color::srgb_u8(100, 180, 82),  // green
         PieceType::T => Color::srgb_u8(161, 83, 152),  // purple
         PieceType::Z => Color::srgb_u8(216, 57, 52),   // red
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::engine::CellKind;
-
-    #[test]
-    fn das_tap_moves_once_immediately() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-
-        assert_eq!(
-            das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config),
-            Some(MoveDirection::Left)
-        );
-    }
-
-    #[test]
-    fn das_waits_for_initial_delay_before_repeating() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                Duration::from_millis(299),
-                &config
-            ),
-            None
-        );
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                Duration::from_millis(1),
-                &config
-            ),
-            Some(MoveDirection::Left)
-        );
-    }
-
-    #[test]
-    fn das_repeats_at_repeat_interval_after_delay() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config);
-        das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config);
-
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(49),
-                &config
-            ),
-            None
-        );
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(1),
-                &config
-            ),
-            Some(MoveDirection::Right)
-        );
-    }
-
-    #[test]
-    fn das_opposite_direction_press_restarts_delay_after_tap() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
-
-        assert_eq!(
-            das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config),
-            Some(MoveDirection::Right)
-        );
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(299),
-                &config
-            ),
-            None
-        );
-    }
-
-    #[test]
-    fn das_releasing_one_of_two_directions_reapplies_delay() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-
-        assert_eq!(
-            das.next_action(Some(MoveDirection::Right), false, Duration::ZERO, &config),
-            None
-        );
-        assert_eq!(
-            das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config),
-            Some(MoveDirection::Right)
-        );
-    }
-
-    // --- E0.13 DAS acceptance (reference §6.2 / §25.3) ---
-
-    // 1. Initial 0.3s delay before the first auto-shift.
-    #[test]
-    fn das_e0_13_initial_delay_is_300ms() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        // Tap consumes the initial press; the hold begins charging from here.
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-
-        // One frame short of 300ms must not auto-shift yet.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                Duration::from_millis(299),
-                &config
-            ),
-            None,
-        );
-        // Crossing the 300ms threshold yields the first auto-shift.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                Duration::from_millis(1),
-                &config
-            ),
-            Some(MoveDirection::Left),
-        );
-    }
-
-    // 2. ~50ms repeat interval after the initial delay elapses.
-    #[test]
-    fn das_e0_13_repeat_interval_is_50ms() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config);
-        // Charge through the initial delay so we are in the repeat phase.
-        das.next_action(Some(MoveDirection::Right), false, config.das_delay, &config);
-
-        // Just under the repeat interval: no shift.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(49),
-                &config
-            ),
-            None,
-        );
-        // Reaching 50ms fires one repeat.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(1),
-                &config
-            ),
-            Some(MoveDirection::Right),
-        );
-        // Cadence continues: the next 50ms window fires again.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                config.das_repeat_duration,
-                &config
-            ),
-            Some(MoveDirection::Right),
-        );
-    }
-
-    // 3. Pressing the opposite direction restarts the full 0.3s delay.
-    #[test]
-    fn das_e0_13_opposite_direction_restarts_delay() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-        // Fully charge Left into the repeat phase.
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
-
-        // Opposite press: immediate one-cell tap, charge resets.
-        assert_eq!(
-            das.next_action(Some(MoveDirection::Right), true, Duration::ZERO, &config),
-            Some(MoveDirection::Right),
-        );
-        // The accumulated Left charge must NOT carry into Right: a full delay
-        // shy of 300ms produces no auto-shift.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(299),
-                &config
-            ),
-            None,
-        );
-        // Crossing 300ms from the restart yields the first Right auto-shift.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Right),
-                false,
-                Duration::from_millis(1),
-                &config
-            ),
-            Some(MoveDirection::Right),
-        );
-    }
-
-    // 4. CARRY-OVER across pieces: DasState is a persistent Bevy Resource, and
-    // neither piece_setup nor piece_lock (src/level/mod.rs) reset it. So while a
-    // direction stays held through Lock Down + the next spawn, the charge is
-    // preserved. This drives DasState exactly as the per-frame system would: the
-    // held direction never releases (held_direction stays Some, just_pressed
-    // stays false) as the old piece locks and a new one spawns. The new piece
-    // must continue on the 50ms repeat cadence, NOT a fresh 300ms delay.
-    #[test]
-    fn das_e0_13_charge_carries_over_into_next_piece() {
-        let config = LevelConfig::default();
-        let mut das = DasState::default();
-
-        // --- Piece A: hold Left and charge fully into the repeat phase. ---
-        das.next_action(Some(MoveDirection::Left), true, Duration::ZERO, &config);
-        das.next_action(Some(MoveDirection::Left), false, config.das_delay, &config);
-        // Confirm we are actually repeating before the lock event.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                config.das_repeat_duration,
-                &config
-            ),
-            Some(MoveDirection::Left),
-        );
-
-        // --- Piece A locks; Piece B spawns. The system does NOT touch DasState,
-        // and the player is still holding Left (no release, no new press). The
-        // very first frame of Piece B must auto-shift on the 50ms cadence... ---
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                config.das_repeat_duration,
-                &config
-            ),
-            Some(MoveDirection::Left),
-            "carried-over DAS must keep repeating on the new piece",
-        );
-
-        // ...and crucially it must NOT behave like a fresh hold: a sub-300ms
-        // frame still fires on the repeat cadence rather than waiting out a new
-        // initial delay.
-        assert_eq!(
-            das.next_action(
-                Some(MoveDirection::Left),
-                false,
-                config.das_repeat_duration,
-                &config
-            ),
-            Some(MoveDirection::Left),
-            "carry-over must not re-arm the 300ms initial delay",
-        );
-    }
-
-    #[test]
-    fn generation_rules_apply_immediate_drop_when_free() {
-        let config = LevelConfig::default();
-        let board = Board::with_top_margin(10, 20, 20);
-        let piece = Piece::from(PieceType::T);
-
-        assert_eq!(
-            spawn_coords_after_generation_rules(&config, &board, &piece),
-            Some((3, 18))
-        );
-    }
-
-    #[test]
-    fn generation_rules_keep_spawn_position_when_blocked_below() {
-        let config = LevelConfig::default();
-        let mut board = Board::with_top_margin(10, 20, 20);
-        let piece = Piece::from(PieceType::T);
-        assert!(board.set(4, 19, CellKind::Some(PieceType::O)));
-
-        assert_eq!(
-            spawn_coords_after_generation_rules(&config, &board, &piece),
-            Some((3, 19))
-        );
-    }
-
-    #[test]
-    fn generation_rules_return_none_on_block_out() {
-        let config = LevelConfig::default();
-        let mut board = Board::with_top_margin(10, 20, 20);
-        let piece = Piece::from(PieceType::T);
-        assert!(board.set(4, 20, CellKind::Some(PieceType::O)));
-
-        assert_eq!(
-            spawn_coords_after_generation_rules(&config, &board, &piece),
-            None
-        );
     }
 }

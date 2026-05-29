@@ -1,4 +1,5 @@
-use crate::level::common::{BoardState, LevelConfig, PieceController};
+use crate::level::common::{GameField, LevelConfig};
+use crate::level::engine_bridge::LatestSnapshot;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -8,9 +9,9 @@ pub struct LockingTimerBar;
 pub fn spawn_locking_timer_bar(
     mut commands: Commands,
     config: Res<LevelConfig>,
-    board_entity_query: Query<Entity, With<BoardState>>,
+    field_query: Query<Entity, With<GameField>>,
 ) {
-    let Ok(board_entity) = board_entity_query.single() else {
+    let Ok(field) = field_query.single() else {
         return;
     };
 
@@ -33,24 +34,29 @@ pub fn spawn_locking_timer_bar(
         .insert(LockingTimerBar)
         .id();
 
-    commands.entity(board_entity).add_child(timer_bar_entity);
+    commands.entity(field).add_child(timer_bar_entity);
 }
 
+/// Width of the lock-down bar tracks lock-down *progress*. The engine's
+/// `lock_timer_fraction` is the fraction of lock-down time *remaining*
+/// (1.0 at landing → 0.0 at lock), so progress (the bar that grows toward lock,
+/// matching the pre-migration visual) is `1.0 - lock_timer_fraction`.
 pub fn update_locking_timer_bar(
-    piece_controller_query: Query<&PieceController>,
+    snapshot: Res<LatestSnapshot>,
     mut bar_query: Query<&mut Sprite, With<LockingTimerBar>>,
     config: Res<LevelConfig>,
 ) {
-    let Ok(piece_controller) = piece_controller_query.single() else {
-        return;
-    };
-
-    let timer = &piece_controller.locking_timer;
     let Ok(mut bar) = bar_query.single_mut() else {
         return;
     };
 
-    let progress = timer.fraction();
+    let remaining = snapshot
+        .0
+        .active
+        .as_ref()
+        .map(|active| active.lock_timer_fraction)
+        .unwrap_or(1.0);
+    let progress = 1.0 - remaining;
     let width = config.block_size * config.board_width as f32 * progress;
 
     bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
