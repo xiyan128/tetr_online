@@ -236,6 +236,49 @@ impl Engine {
         }
     }
 
+    /// Test-only seam: paint a single board cell, bypassing the per-frame loop.
+    ///
+    /// Returns `true` if `(x, y)` is inside the board. Exists so the acceptance
+    /// suite (`tests/acceptance_*.rs`) can construct board preconditions that are
+    /// not reachable deterministically through [`Engine::step`] alone — the same
+    /// thing the in-crate unit tests do via the private `board` field. It only
+    /// forwards to [`Board::set`]; it adds no rule behavior of its own.
+    #[doc(hidden)]
+    pub fn set_cell(&mut self, x: isize, y: isize, cell: CellKind) -> bool {
+        self.board.set(x, y, cell)
+    }
+
+    /// Test-only seam: install `active` as the current active piece, bypassing
+    /// spawn (and its immediate gravity drop). Lets the acceptance suite isolate
+    /// behavior for a hand-placed piece. Adds no rule behavior of its own.
+    #[doc(hidden)]
+    pub fn set_active(&mut self, active: ActivePiece) {
+        self.active = Some(active);
+    }
+
+    /// Test-only seam: lock a hand-placed `active` through the real
+    /// lock/clear/score path ([`Engine::lock_active_piece`]) and return the
+    /// emitted events. This is the exact path the per-frame loop uses on
+    /// hard-drop/lock-down; it merely takes the piece explicitly instead of
+    /// reading `self.active`. Adds no rule behavior of its own.
+    #[doc(hidden)]
+    pub fn lock_active_for_test(&mut self, active: ActivePiece) -> Vec<EngineEvent> {
+        let mut events = Vec::new();
+        self.lock_active_piece(active, &mut events);
+        events
+    }
+
+    /// Test-only seam: rewind the goal/level progression to the starting level,
+    /// preserving accumulated score, lines, and the Back-to-Back chain. The
+    /// acceptance suite uses this to reproduce the §13.3 scoring example's
+    /// explicit "At Level 1" precondition across the full canonical chain, which
+    /// clears more than one level's worth of lines (a real Fixed-goal game would
+    /// level up after 10 clears per §14.2). Adds no rule behavior of its own.
+    #[doc(hidden)]
+    pub fn reset_level_for_test(&mut self) {
+        self.score_state.reset_level_for_test();
+    }
+
     fn fill_next_queue(&mut self) {
         let target_len = self.config.preview_count.max(1);
         while self.next_queue.len() < target_len {

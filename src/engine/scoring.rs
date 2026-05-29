@@ -159,6 +159,15 @@ impl ScoreState {
         self.back_to_back_active
     }
 
+    /// Test-only: rewind the goal/level progression to the starting level while
+    /// preserving accumulated `score`, `lines`, and the Back-to-Back chain. Used
+    /// by the acceptance suite to reproduce the §13.3 example's explicit
+    /// "At Level 1" precondition across a chain longer than one level's goal.
+    /// Adds no scoring behavior of its own.
+    pub(crate) fn reset_level_for_test(&mut self) {
+        self.goal_progress.reset_to_start();
+    }
+
     pub(crate) fn lock_result(
         &mut self,
         goal_system: GoalSystem,

@@ -30,6 +30,17 @@ impl GoalProgress {
         self.level
     }
 
+    /// Test-only: rewind to the starting level and its goal, discarding any
+    /// progress. Lets the acceptance suite reproduce the §13.3 example's explicit
+    /// "At Level 1" precondition across a chain longer than one level's goal
+    /// (§14.2 would otherwise level up after 10 line clears). No production code
+    /// path calls this; it adds no goal/level behavior of its own.
+    #[doc(hidden)]
+    pub fn reset_to_start(&mut self) {
+        self.level = self.start_level;
+        self.remaining = goal_for_level(self.system, self.start_level, self.start_level);
+    }
+
     pub fn remaining(&self) -> usize {
         self.remaining
     }

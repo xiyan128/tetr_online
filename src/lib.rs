@@ -5,7 +5,7 @@ use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 
 mod assets;
-mod engine;
+pub mod engine;
 mod level;
 
 pub use crate::engine::{
