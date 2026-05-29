@@ -33,7 +33,7 @@ use crate::level::common::{BackgroundBlock, FallingBlock, GhostBlock, PreviewBlo
 use crate::settings::{GameAction, GameSettings};
 use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, Focusable, NavAction};
 use crate::ui::widgets::{label_text, menu_button, screen_root, title_text};
-use crate::GameState;
+use crate::{GameState, InGameplay};
 
 /// Pause overlay + `Playing <-> Paused` toggle.
 pub struct PausePlugin;
@@ -46,13 +46,16 @@ impl Plugin for PausePlugin {
                 Update,
                 toggle_to_paused.run_if(in_state(GameState::Playing)),
             )
-            // Build the overlay and conceal the playfield while paused.
+            // Build the overlay on pause; DespawnOnExit(Paused) tears it down.
+            .add_systems(OnEnter(GameState::Paused), setup_pause_overlay)
+            // Conceal the playfield iff paused, re-evaluated EVERY frame. Doing
+            // this idempotently (instead of a one-shot OnEnter-hide / OnExit-show
+            // pair) means rapid Esc toggling can never leave the board stuck
+            // hidden or stuck shown — visibility always matches the live state.
             .add_systems(
-                OnEnter(GameState::Paused),
-                (setup_pause_overlay, hide_gameplay_content),
+                Update,
+                sync_gameplay_visibility.run_if(in_state(InGameplay)),
             )
-            // Reveal the playfield again on resume / quit (any exit from Paused).
-            .add_systems(OnExit(GameState::Paused), show_gameplay_content)
             // Drive the overlay's focus + selection while paused.
             .add_systems(
                 Update,
@@ -139,7 +142,10 @@ fn activate(
         return;
     }
 
-    let Ok(list) = lists.single() else {
+    // `iter().next()` rather than `single()`: during fast toggling there can be a
+    // transient frame with zero or more-than-one overlay root, and we must not
+    // get stuck unable to resume in that frame.
+    let Some(list) = lists.iter().next() else {
         return;
     };
     match read_nav_action(&keys, list) {
@@ -170,24 +176,28 @@ type GameplayContent = Or<(
     With<PreviewBlock>,
 )>;
 
-/// Conceal the Matrix / Next / Hold contents behind the pause overlay.
+/// Conceal the Matrix / Next / Hold contents iff the game is paused.
 ///
-/// The entities survive the `Playing -> Paused` transition (session-scoped, not
-/// `Playing`-scoped — see the module docs), so we hide rather than despawn; the
-/// engine snapshot they were drawn from is preserved for a clean resume.
-fn hide_gameplay_content(mut content: Query<&mut Visibility, GameplayContent>) {
+/// Runs EVERY frame while a gameplay session is alive (Playing or Paused) and
+/// derives visibility from the current state. This is deliberately idempotent: a
+/// one-shot OnEnter-hide / OnExit-show pair desyncs under rapid Esc toggling — a
+/// missed or coalesced transition leaves the static grid stuck `Hidden`, i.e. an
+/// "empty board" that never recovers. Re-deriving visibility from the live state
+/// each frame is self-correcting. Entities survive the transition (session-
+/// scoped), so we hide rather than despawn; the engine snapshot is preserved for
+/// a clean resume, and the reconcilers repaint pieces on the next Playing frame.
+fn sync_gameplay_visibility(
+    state: Res<State<GameState>>,
+    mut content: Query<&mut Visibility, GameplayContent>,
+) {
+    let desired = if *state.get() == GameState::Paused {
+        Visibility::Hidden
+    } else {
+        Visibility::Inherited
+    };
     for mut visibility in &mut content {
-        *visibility = Visibility::Hidden;
-    }
-}
-
-/// Reveal the Matrix / Next / Hold contents again when leaving `Paused`.
-///
-/// On resume the reconcilers immediately repaint the board/active/ghost from the
-/// surviving snapshot; restoring visibility here covers the entities they do not
-/// rebuild every frame (the static grid and cached preview/hold minos).
-fn show_gameplay_content(mut content: Query<&mut Visibility, GameplayContent>) {
-    for mut visibility in &mut content {
-        *visibility = Visibility::Inherited;
+        if *visibility != desired {
+            *visibility = desired;
+        }
     }
 }
