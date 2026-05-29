@@ -1,3 +1,9 @@
+//! Garbage-line injection (stub).
+//!
+//! Reserves the surface that incoming-attack / garbage handling will use so call
+//! sites can compile against the eventual signature. The implementation lands
+//! with roadmap N3.6; [`apply_attack`] currently panics.
+
 use crate::engine::board::Board;
 
 /// Result of injecting garbage rows into a board.
@@ -36,7 +42,7 @@ mod tests {
             apply_attack(&mut board, 1, 0);
         }));
 
-        let payload = result.err().expect("stub must panic until N3.6 lands");
+        let payload = result.expect_err("stub must panic until N3.6 lands");
         let message = payload
             .downcast_ref::<String>()
             .map(String::as_str)

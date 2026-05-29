@@ -744,8 +744,10 @@ mod tests {
     fn partial_and_garbage_blob_falls_back_to_defaults() {
         // Only one field set; unknown lines ignored; result is defaults + override.
         let decoded = decode_settings("ghost_enabled=false\nnonsense\nbogus=key\n").unwrap();
-        let mut expected = GameSettings::default();
-        expected.ghost_enabled = false;
+        let expected = GameSettings {
+            ghost_enabled: false,
+            ..GameSettings::default()
+        };
         assert_eq!(decoded, expected);
     }
 

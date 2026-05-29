@@ -2,16 +2,19 @@
 //! (Extended / Infinite / Classic), anchored to the normative rules in §8.1-8.4.
 //!
 //! These exercise the public engine boundary only: deterministic `Engine::new`
-//! + `InputFrame`/`step`/`snapshot`, plus the pure `apply_grounded_move_or_rotation`
-//! helper and `ActivePiece` builders. No private engine internals are touched.
+//! with `InputFrame`/`step`/`snapshot`, plus the pure
+//! `apply_grounded_move_or_rotation` helper and `ActivePiece` builders. No
+//! private engine internals are touched.
 //!
 //! Spec anchors:
-//!   §8.1 / §25.6  "Natural fall or Soft Drop onto a Surface starts a 0.5s timer."
-//!   §8.2 / §25.6  Extended: timer resets on grounded move/rotate, budget = 15
-//!                 successful grounded actions since the lowest row reached;
-//!                 falling below that row reopens the budget.
-//!   §8.3 / §25.6  Infinite: any successful move/rotate resets the timer; no budget.
-//!   §8.4 / §25.6  Classic: only falling lower resets the timer.
+//! ```text
+//! §8.1 / §25.6  "Natural fall or Soft Drop onto a Surface starts a 0.5s timer."
+//! §8.2 / §25.6  Extended: timer resets on grounded move/rotate, budget = 15
+//!               successful grounded actions since the lowest row reached;
+//!               falling below that row reopens the budget.
+//! §8.3 / §25.6  Infinite: any successful move/rotate resets the timer; no budget.
+//! §8.4 / §25.6  Classic: only falling lower resets the timer.
+//! ```
 //!
 //! All symbols are imported from the flat `tetr_online::` re-export surface
 //! (lib.rs:11-20), which exposes every name these tests need.

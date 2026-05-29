@@ -84,14 +84,6 @@ pub enum NotificationEmphasis {
 }
 
 impl Notification {
-    /// A normal-weight toast.
-    pub fn new(text: impl Into<String>) -> Self {
-        Self {
-            text: text.into(),
-            emphasis: NotificationEmphasis::Normal,
-        }
-    }
-
     /// An accent-weight toast (brighter + larger).
     pub fn accent(text: impl Into<String>) -> Self {
         Self {

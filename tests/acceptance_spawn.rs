@@ -8,8 +8,10 @@
 //!
 //! Spec mapping (guideline rows are 1-based; the engine is 0-based with y
 //! growing UP and the skyline at y >= visible_height):
-//!   * guideline column `c` (1-based) == engine x `c - 1`
-//!   * guideline row    `r` (1-based) == engine y `r - 1`
+//!
+//! * guideline column `c` (1-based) == engine x `c - 1`
+//! * guideline row    `r` (1-based) == engine y `r - 1`
+//!
 //! With the default config (visible_height = 20) the first buffer row 21
 //! is engine y = 20 (the skyline row).
 //!

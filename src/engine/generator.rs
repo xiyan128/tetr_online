@@ -1,9 +1,14 @@
+//! Seven-bag piece generator.
+//!
+//! Yields each of the seven tetrominoes once per "bag" before reshuffling, the
+//! guideline-standard randomizer. Implemented as an [`Iterator`] so callers can
+//! pull pieces lazily; the bag is refilled transparently and kept topped up so a
+//! short preview window is always available.
+
 use crate::engine::pieces::PieceType;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
 use rand::SeedableRng;
-
-use std::iter::Iterator;
 
 pub struct PieceGenerator {
     bag: Vec<PieceType>,
@@ -27,7 +32,11 @@ impl PieceGenerator {
         self.bag = next_bag;
     }
 
-    pub(crate) fn preview(&self) -> Vec<PieceType> {
+    /// The next `PieceType::LEN` pieces, in deal order, without consuming the
+    /// bag. Used to assert preview invariants; production preview is served by
+    /// the engine's own look-ahead queue, so this is test-only.
+    #[cfg(test)]
+    fn preview(&self) -> Vec<PieceType> {
         self.bag[self.bag.len() - PieceType::LEN..]
             .iter()
             .rev()
