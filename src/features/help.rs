@@ -58,12 +58,10 @@ fn spawn_help_content(
     mut commands: Commands,
     assets: Res<GameAssets>,
     settings: Res<GameSettings>,
-    roots: Query<Entity, With<HelpRoot>>,
+    // No shell root this frame ⇒ `Single` skips the system; nothing to attach to.
+    root: Single<Entity, With<HelpRoot>>,
 ) {
-    let Ok(root) = roots.single() else {
-        // No shell root this frame; nothing to attach to.
-        return;
-    };
+    let root = *root;
     let font = assets.font.clone();
 
     // The scrolling viewport: a fixed-height, clipped column that scrolls on Y.
@@ -110,11 +108,10 @@ fn spawn_help_content(
 
 /// Keyboard-driven vertical scrolling of the help viewport. The layout system
 /// clamps the offset to valid bounds, so we only push it in the right direction.
-fn scroll_help(keys: Res<ButtonInput<KeyCode>>, mut viewports: Query<&mut ScrollPosition, With<HelpScroll>>) {
-    let Ok(mut scroll) = viewports.single_mut() else {
-        return;
-    };
-
+fn scroll_help(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut scroll: Single<&mut ScrollPosition, With<HelpScroll>>,
+) {
     let mut delta = 0.0;
     if keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS) {
         delta += SCROLL_LINE_STEP;
@@ -207,7 +204,13 @@ fn spawn_keybind_row(
 }
 
 /// One "Term: explanation" row, with the term accented.
-fn spawn_term_row(commands: &mut Commands, parent: Entity, font: &Handle<Font>, term: &str, blurb: &str) {
+fn spawn_term_row(
+    commands: &mut Commands,
+    parent: Entity,
+    font: &Handle<Font>,
+    term: &str,
+    blurb: &str,
+) {
     let child = commands
         .spawn((
             Node {

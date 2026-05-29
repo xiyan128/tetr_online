@@ -99,7 +99,9 @@ fn record_run(
             candidate.score,
             format_time(candidate.time_seconds),
         );
-        storage.0.save(keys::HIGH_SCORES, &codec::serialize(&scores));
+        storage
+            .0
+            .save(keys::HIGH_SCORES, &codec::serialize(&scores));
     }
 }
 
@@ -133,12 +135,12 @@ fn populate_tables(
     mut commands: Commands,
     assets: Res<GameAssets>,
     scores: Res<HighScores>,
-    roots: Query<Entity, Added<HighScoresRoot>>,
+    // `Single` skips the system on frames where the root was not just added — the
+    // same no-op the early `single()` return used to express.
+    root: Single<Entity, Added<HighScoresRoot>>,
     existing: Query<(), With<HighScoresTables>>,
 ) {
-    let Ok(root) = roots.single() else {
-        return;
-    };
+    let root = *root;
     if !existing.is_empty() {
         return;
     }
@@ -195,7 +197,9 @@ fn spawn_variant_column(
     commands.entity(column).add_child(header);
 
     if table.is_empty() {
-        let empty = commands.spawn(label_text("--- no scores yet ---", font)).id();
+        let empty = commands
+            .spawn(label_text("--- no scores yet ---", font))
+            .id();
         commands.entity(column).add_child(empty);
         return column;
     }

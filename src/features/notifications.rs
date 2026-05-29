@@ -342,12 +342,16 @@ fn spawn_toasts(
     mut commands: Commands,
     mut incoming: MessageReader<Notification>,
     assets: Res<crate::assets::GameAssets>,
-    stack: Query<Entity, With<NotificationStack>>,
+    // `Option<Single>` rather than `Single`: when the stack hasn't spawned yet the
+    // system must still run to drain `incoming` (dropping the early toasts), so it
+    // can't be skipped by the scheduler.
+    stack: Option<Single<Entity, With<NotificationStack>>>,
 ) {
-    let Ok(stack) = stack.single() else {
+    let Some(stack) = stack else {
         incoming.clear();
         return;
     };
+    let stack = *stack;
 
     for notification in incoming.read() {
         let toast = commands

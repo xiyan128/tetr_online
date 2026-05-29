@@ -73,14 +73,11 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 /// the focus helper's normal restyle on the next frame.
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
-    lists: Query<&FocusList, With<MainMenuRoot>>,
+    list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    let Ok(list) = lists.single() else {
-        return;
-    };
-    let Some(NavAction::Select(index)) = read_nav_action(&keys, list) else {
+    let Some(NavAction::Select(index)) = read_nav_action(&keys, *list) else {
         return;
     };
 

@@ -24,9 +24,7 @@ use bevy::prelude::*;
 
 use crate::assets::GameAssets;
 use crate::screens::OptionsRoot;
-use crate::settings::{
-    GameAction, GameSettings, Keybinds, MAX_NEXT_COUNT, MIN_NEXT_COUNT,
-};
+use crate::settings::{GameAction, GameSettings, Keybinds, MAX_NEXT_COUNT, MIN_NEXT_COUNT};
 use crate::storage::{keys, StorageResource};
 use crate::ui::focus::{focus_navigation, FocusList, Focusable};
 use crate::ui::theme;
@@ -46,7 +44,10 @@ impl Plugin for OptionsPlugin {
             // on `OnEnter(Playing)`, well after this.
             .add_systems(Startup, load_settings)
             // Persist again when leaving the screen.
-            .add_systems(OnExit(GameState::Options), (clear_rebind_state, save_settings))
+            .add_systems(
+                OnExit(GameState::Options),
+                (clear_rebind_state, save_settings),
+            )
             .add_systems(
                 Update,
                 (
@@ -134,7 +135,11 @@ impl OptionRow {
 }
 
 fn on_off(value: bool) -> String {
-    if value { "On".into() } else { "Off".into() }
+    if value {
+        "On".into()
+    } else {
+        "Off".into()
+    }
 }
 
 fn volume_label(value: f32) -> String {
@@ -178,12 +183,12 @@ fn build_options_ui(
     settings: Res<GameSettings>,
     rebind: Res<RebindState>,
     assets: Res<GameAssets>,
-    root: Query<Entity, Added<OptionsRoot>>,
+    // `Single` skips the system on frames where the root was not just added — the
+    // same no-op the early `single()` return used to express.
+    root: Single<Entity, Added<OptionsRoot>>,
     existing: Query<(), With<OptionValueText>>,
 ) {
-    let Ok(root) = root.single() else {
-        return;
-    };
+    let root = *root;
     // Defensive idempotency: never build the rows twice for one screen visit.
     if !existing.is_empty() {
         return;
@@ -266,6 +271,8 @@ fn edit_options(
     keys: Res<ButtonInput<KeyCode>>,
     mut settings: ResMut<GameSettings>,
     mut rebind: ResMut<RebindState>,
+    // Stays a plain `Query` (not `Single`): the rebind-capture branch below must
+    // run even on a frame with no/zero focus list, so the system can't be skipped.
     lists: Query<&FocusList, With<OptionsRoot>>,
     rows: Query<(&Focusable, &OptionRow)>,
     storage: Res<StorageResource>,
@@ -442,7 +449,10 @@ fn encode_settings(s: &GameSettings) -> String {
     out.push_str(&format!("next_count={}\n", s.next_count));
     out.push_str(&format!("hold_enabled={}\n", s.hold_enabled));
     out.push_str(&format!("ghost_enabled={}\n", s.ghost_enabled));
-    out.push_str(&format!("lock_down_mode={}\n", lock_down_token(s.lock_down_mode)));
+    out.push_str(&format!(
+        "lock_down_mode={}\n",
+        lock_down_token(s.lock_down_mode)
+    ));
     out.push_str(&format!("music_volume={}\n", s.music_volume));
     out.push_str(&format!("sfx_volume={}\n", s.sfx_volume));
     for action in GameAction::ALL {
@@ -559,7 +569,9 @@ fn action_token(action: GameAction) -> &'static str {
 }
 
 fn action_from_token(token: &str) -> Option<GameAction> {
-    GameAction::ALL.into_iter().find(|a| action_token(*a) == token)
+    GameAction::ALL
+        .into_iter()
+        .find(|a| action_token(*a) == token)
 }
 
 /// Write a full `(primary, secondary)` binding for `action`. `Keybinds` only
@@ -711,8 +723,12 @@ mod tests {
             sfx_volume: 0.9,
             ..GameSettings::default()
         };
-        settings.keybinds.set_primary(GameAction::HardDrop, KeyCode::KeyK);
-        settings.keybinds.set_primary(GameAction::MoveLeft, KeyCode::KeyA);
+        settings
+            .keybinds
+            .set_primary(GameAction::HardDrop, KeyCode::KeyK);
+        settings
+            .keybinds
+            .set_primary(GameAction::MoveLeft, KeyCode::KeyA);
 
         let decoded = decode_settings(&encode_settings(&settings)).unwrap();
         assert_eq!(decoded, settings);
@@ -752,9 +768,18 @@ mod tests {
 
     #[test]
     fn lock_down_cycles_forward_and_back() {
-        assert_eq!(cycle_lock_down(LockDownMode::Extended, 1), LockDownMode::Infinite);
-        assert_eq!(cycle_lock_down(LockDownMode::Classic, 1), LockDownMode::Extended);
-        assert_eq!(cycle_lock_down(LockDownMode::Extended, -1), LockDownMode::Classic);
+        assert_eq!(
+            cycle_lock_down(LockDownMode::Extended, 1),
+            LockDownMode::Infinite
+        );
+        assert_eq!(
+            cycle_lock_down(LockDownMode::Classic, 1),
+            LockDownMode::Extended
+        );
+        assert_eq!(
+            cycle_lock_down(LockDownMode::Extended, -1),
+            LockDownMode::Classic
+        );
     }
 
     #[test]
@@ -773,9 +798,15 @@ mod tests {
         let binds = Keybinds::default();
         for action in GameAction::ALL {
             let (primary, secondary) = binds.get(action);
-            assert!(key_code_token(primary).is_some(), "{action:?} primary not in table");
+            assert!(
+                key_code_token(primary).is_some(),
+                "{action:?} primary not in table"
+            );
             if let Some(sec) = secondary {
-                assert!(key_code_token(sec).is_some(), "{action:?} secondary not in table");
+                assert!(
+                    key_code_token(sec).is_some(),
+                    "{action:?} secondary not in table"
+                );
             }
         }
     }
@@ -792,8 +823,14 @@ mod tests {
         keyboard.press(KeyCode::ArrowLeft); // move-left primary
 
         let input = keyboard_input_from_keybinds(&keyboard, &binds, 0.016);
-        assert!(input.rotate_cw_just_pressed, "secondary alias should trigger rotate CW");
-        assert!(input.hard_drop_just_pressed, "remapped key should trigger hard drop");
+        assert!(
+            input.rotate_cw_just_pressed,
+            "secondary alias should trigger rotate CW"
+        );
+        assert!(
+            input.hard_drop_just_pressed,
+            "remapped key should trigger hard drop"
+        );
         assert!(input.left_pressed && input.left_just_pressed);
         assert!(!input.soft_drop, "unpressed action stays false");
         assert_eq!(input.dt_seconds, 0.016);

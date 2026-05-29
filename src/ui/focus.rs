@@ -68,15 +68,15 @@ pub enum NavAction {
 ///
 /// `M` is the screen-root marker component; the [`FocusList`] is expected on the
 /// same entity. Call `app.add_systems(Update, focus_navigation::<MyScreen>.run_if(in_state(...)))`.
+///
+/// `Single` makes the scheduler skip this entirely unless exactly one `FocusList`
+/// with marker `M` exists — which is also the only state in which the focusable
+/// rows (and thus the restyle below) are meaningful, so skipping is correct.
 pub fn focus_navigation<M: Component>(
     keys: Res<ButtonInput<KeyCode>>,
-    mut lists: Query<&mut FocusList, With<M>>,
+    mut list: Single<&mut FocusList, With<M>>,
     mut buttons: Query<(&Focusable, &mut BackgroundColor)>,
 ) {
-    let Ok(mut list) = lists.single_mut() else {
-        return;
-    };
-
     if keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS) {
         list.move_by(1);
     }

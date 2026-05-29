@@ -60,14 +60,11 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
-    lists: Query<&FocusList, With<ModeSelectRoot>>,
+    list: Single<&FocusList, With<ModeSelectRoot>>,
     mut active: ResMut<ActiveVariant>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    let Ok(list) = lists.single() else {
-        return;
-    };
-    match read_nav_action(&keys, list) {
+    match read_nav_action(&keys, *list) {
         Some(NavAction::Select(index)) => {
             if let Some(&variant) = Variant::ALL.get(index) {
                 *active = ActiveVariant(variant);

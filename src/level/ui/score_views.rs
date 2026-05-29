@@ -107,30 +107,22 @@ pub fn spawn_score_type_text(
         .insert(DespawnOnExit(InGameplay));
 }
 
-pub fn update_score_text(mut text_query: Query<&mut Text2d, With<ScoreText>>, scorer: Res<Scorer>) {
-    let Ok(mut text) = text_query.single_mut() else {
-        return;
-    };
+pub fn update_score_text(mut text: Single<&mut Text2d, With<ScoreText>>, scorer: Res<Scorer>) {
     text.0 = make_score_text(&scorer);
 }
 
 pub fn update_line_count_text(
-    mut text_query: Query<&mut Text2d, With<LineCountText>>,
+    mut text: Single<&mut Text2d, With<LineCountText>>,
     scorer: Res<Scorer>,
 ) {
-    let Ok(mut text) = text_query.single_mut() else {
-        return;
-    };
     text.0 = make_line_count_text(&scorer);
 }
 
 pub fn update_score_type_text(
-    mut text_query: Query<(&mut Text2d, &mut TextColor), With<ScoreTypeText>>,
+    text: Single<(&mut Text2d, &mut TextColor), With<ScoreTypeText>>,
     mut ev_score_type: MessageReader<ScoreTypes>,
 ) {
-    let Ok((mut text, mut color)) = text_query.single_mut() else {
-        return;
-    };
+    let (mut text, mut color) = text.into_inner();
     for ev in ev_score_type.read() {
         text.0 =
             ev.0.iter()
@@ -142,12 +134,9 @@ pub fn update_score_type_text(
 }
 
 pub fn fade_out_score_type_text(
-    mut text_query: Query<&mut TextColor, With<ScoreTypeText>>,
+    mut color: Single<&mut TextColor, With<ScoreTypeText>>,
     time: Res<Time>,
 ) {
-    let Ok(mut color) = text_query.single_mut() else {
-        return;
-    };
     if color.0.alpha() <= 0.0 {
         return;
     }

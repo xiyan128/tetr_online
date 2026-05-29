@@ -1,5 +1,5 @@
 use crate::assets::GameAssets;
-use crate::engine::{Cell, LockDownMode, PieceType};
+use crate::engine::{Cell, CellKind, LockDownMode, PieceType};
 use bevy::color::Alpha;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
@@ -139,7 +139,15 @@ pub fn spawn_free_block(
 
     let color = match block_kind {
         BlockKind::Falling | BlockKind::Preview | BlockKind::Static => {
-            piece_color(cell.cell_kind().unwrap())
+            // Invariant: Falling/Preview/Static blocks are only ever spawned from
+            // cells carrying a piece type — `spawn_snapshot_block` builds them with
+            // `CellKind::Some(..)`, and the previewer feeds avatar-board minos
+            // (also always `Some`). Only `Background` uses `CellKind::None`, and it
+            // takes the arm below. So this match never sees a `None`/`Wall` cell.
+            let CellKind::Some(piece_type) = cell.cell_kind() else {
+                unreachable!("Falling/Preview/Static block spawned from a cell with no piece type");
+            };
+            piece_color(piece_type)
         }
         BlockKind::Ghost => Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
         BlockKind::Background => Color::srgb(0.1, 0.1, 0.1),

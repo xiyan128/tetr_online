@@ -1,5 +1,6 @@
 use crate::level::common::{GameField, LevelConfig};
 use crate::level::engine_bridge::LatestSnapshot;
+use bevy::ecs::error::Result;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -10,12 +11,10 @@ pub struct LockingTimerBar;
 pub fn spawn_locking_timer_bar(
     mut commands: Commands,
     config: Res<LevelConfig>,
-    field_query: Query<Entity, With<GameField>>,
+    // No field ⇒ `Single` skips the system; nothing to parent the bar to.
+    field: Single<Entity, With<GameField>>,
 ) {
-    let Ok(field) = field_query.single() else {
-        return;
-    };
-
+    let field = *field;
     let bar_height = config.block_size * 0.2;
 
     // spawn the timer bar
@@ -44,13 +43,9 @@ pub fn spawn_locking_timer_bar(
 /// matching the pre-migration visual) is `1.0 - lock_timer_fraction`.
 pub fn update_locking_timer_bar(
     snapshot: Res<LatestSnapshot>,
-    mut bar_query: Query<&mut Sprite, With<LockingTimerBar>>,
+    mut bar: Single<&mut Sprite, With<LockingTimerBar>>,
     config: Res<LevelConfig>,
-) {
-    let Ok(mut bar) = bar_query.single_mut() else {
-        return;
-    };
-
+) -> Result {
     let remaining = snapshot
         .0
         .active
@@ -60,15 +55,19 @@ pub fn update_locking_timer_bar(
     let progress = 1.0 - remaining;
     let width = config.block_size * config.board_width as f32 * progress;
 
-    bar.custom_size = Some(Vec2::new(width, bar.custom_size.unwrap().y));
+    // The bar is always spawned with an explicit `custom_size`; if it is somehow
+    // absent there's nothing to resize, so bail out cleanly rather than panic.
+    let Some(size) = bar.custom_size else {
+        return Ok(());
+    };
+    bar.custom_size = Some(Vec2::new(width, size.y));
+    Ok(())
 }
 
 pub fn despawn_locking_timer_bar(
-    bar_query: Query<Entity, With<LockingTimerBar>>,
+    // No bar ⇒ `Single` skips the system; nothing to despawn.
+    bar: Single<Entity, With<LockingTimerBar>>,
     mut commands: Commands,
 ) {
-    let Ok(bar) = bar_query.single() else {
-        return;
-    };
-    commands.entity(bar).despawn();
+    commands.entity(*bar).despawn();
 }

@@ -5,6 +5,7 @@ use crate::level::common::{to_translation, BlockKind, LevelConfig};
 use crate::level::engine_bridge::LatestSnapshot;
 use crate::level::ui::calc_ui_offset;
 use crate::InGameplay;
+use bevy::ecs::error::Result;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
@@ -65,29 +66,27 @@ pub fn spawn_hold_viewer(mut commands: Commands, config: Res<LevelConfig>) {
 /// Render the next-piece previews from `snapshot.next_queue`. Cached against the
 /// last-rendered queue so sprites are only rebuilt when the queue changes.
 pub fn update_piece_previewer(
-    children_query: Query<&Children, With<PiecePreviewer>>,
+    children: Single<&Children, With<PiecePreviewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
     snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
     mut last_queue: Local<Option<Vec<PieceType>>>,
-) {
+) -> Result {
     let queue = &snapshot.0.next_queue;
     if last_queue.as_ref() == Some(queue) {
-        return;
+        return Ok(());
     }
-
-    let Ok(children) = children_query.single() else {
-        return;
-    };
 
     let mut holders_height = 0.;
     for child in children.iter() {
         // clear the preview holder
         commands.entity(child).despawn_related::<Children>();
 
-        let (preview_holder, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
+        // Each child of the previewer is a `PreviewHolder`; propagate rather than
+        // panic if that invariant is ever violated.
+        let (preview_holder, mut holder_transform) = preview_holder_query.get_mut(child)?;
 
         let idx = preview_holder.index;
         let Some(&piece_type) = queue.get(idx) else {
@@ -105,34 +104,33 @@ pub fn update_piece_previewer(
     }
 
     *last_queue = Some(queue.clone());
+    Ok(())
 }
 
 /// Render the hold piece from `snapshot.hold`. Cached against the last-rendered
 /// hold so sprites are only rebuilt when it changes.
 pub fn update_hold_viewer(
-    children_query: Query<&Children, With<HoldViewer>>,
+    children: Single<&Children, With<HoldViewer>>,
     mut preview_holder_query: Query<(&mut PreviewHolder, &mut Transform)>,
     snapshot: Res<LatestSnapshot>,
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
     mut commands: Commands,
     mut last_hold: Local<Option<Option<PieceType>>>,
-) {
+) -> Result {
     let hold = snapshot.0.hold;
     if *last_hold == Some(hold) {
-        return;
+        return Ok(());
     }
-
-    let Ok(children) = children_query.single() else {
-        return;
-    };
 
     for child in children.iter() {
         // clear the preview holder
         commands.entity(child).despawn_related::<Children>();
 
         if let Some(piece_type) = hold {
-            let (_, mut holder_transform) = preview_holder_query.get_mut(child).unwrap();
+            // The hold viewer's child is a `PreviewHolder`; propagate rather than
+            // panic if that invariant is ever violated.
+            let (_, mut holder_transform) = preview_holder_query.get_mut(child)?;
 
             let (preview_board_size, piece_entity) =
                 spawn_holder_piece(&config, &game_assets, &mut commands, piece_type);
@@ -145,6 +143,7 @@ pub fn update_hold_viewer(
     }
 
     *last_hold = Some(hold);
+    Ok(())
 }
 
 fn spawn_holder_piece(
