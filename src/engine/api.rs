@@ -21,8 +21,6 @@ pub struct EngineConfig {
     pub lock_down_seconds: f32,
     pub starting_level: u8,
     pub goal_system: GoalSystem,
-    pub das_delay_seconds: f32,
-    pub das_repeat_seconds: f32,
 }
 
 impl Default for EngineConfig {
@@ -36,8 +34,6 @@ impl Default for EngineConfig {
             lock_down_seconds: LOCK_DOWN_SECONDS,
             starting_level: MIN_LEVEL,
             goal_system: GoalSystem::Fixed,
-            das_delay_seconds: 0.167,
-            das_repeat_seconds: 0.033,
         }
     }
 }

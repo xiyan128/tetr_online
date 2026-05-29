@@ -7,6 +7,7 @@ use bevy_asset_loader::prelude::*;
 mod assets;
 pub mod engine;
 mod level;
+pub mod player;
 
 pub use crate::engine::{
     apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_duration,

@@ -1,22 +1,21 @@
 //! Acceptance tests for reference_guideline.md §25.3 "Movement and DAS".
 //!
-//! Spec items covered (§25.3):
-//!   * Tap left/right moves one cell.                              -> tap_left/right_moves_one_cell
-//!   * Rotation has no auto-repeat.                                -> rotation_has_no_auto_repeat
-//!   * Holding left/right waits about 0.3s.                        -> #[ignore] (not engine-backed)
-//!   * Auto-repeat moves side-to-side in about 0.5s after delay.   -> #[ignore] (not engine-backed)
-//!   * Auto-repeat persists across Lock Down into next piece.      -> #[ignore] (not engine-backed)
-//!   * Opposite direction press restarts delay.                    -> #[ignore] (not engine-backed)
+//! Engine-level spec items covered here (§25.3):
+//!   * Tap left/right moves one cell.        -> tap_left/right_moves_one_cell
+//!   * Rotation has no auto-repeat.          -> rotation_has_no_auto_repeat
 //!
-//! AUTHOR FLAG (§25.3 timing): the four DAS *timing* items above are NOT yet
-//! implemented in the engine. `Engine::step` moves the active piece exactly one
-//! cell per frame for `left`/`right`, and the `das_delay_seconds` /
-//! `das_repeat_seconds` fields on `EngineConfig` are accepted but never consumed
-//! by `step` (no per-frame DAS state machine; see src/engine/api.rs `step` and
-//! `advance_time`). The timing scenarios are therefore encoded as `#[ignore]`
-//! placeholders, and the *current* (tap-only) behaviour is asserted positively by
-//! `CAVEAT_engine_lacks_das_state_machine`. When the engine grows a DAS state
-//! machine, drop the `#[ignore]`s and fill in real timing assertions.
+//! DESIGN NOTE (§25.3 timing is PLAYER-SIDE, per roadmap ADR-4 / E0.13): the DAS
+//! *timing* items — the ~0.3s hold delay, the auto-repeat interval, carry-over of
+//! auto-repeat across Lock Down, and opposite-direction delay restart — are NOT
+//! engine responsibilities. `Engine::step` treats `left`/`right` as a per-frame
+//! one-cell pulse and owns no charge timer; the DAS state machine lives in the
+//! player layer (`src/player/das.rs`, `KeyboardController`). Those timing
+//! scenarios are therefore exercised by headless unit tests over `DasState` /
+//! `KeyboardController`, not against the engine. This file keeps only the two
+//! genuinely engine-level guarantees (tap = one cell, rotation has no
+//! auto-repeat) plus `caveat_engine_step_has_no_das_state_machine`, which pins
+//! the engine's intentional tap-only behaviour so a future regression can't
+//! silently fold DAS timing back into the engine.
 //!
 //! Reachability note: these integration tests reach the engine via
 //! `tetr_online::engine::*`, which requires `pub mod engine;` in src/lib.rs
@@ -191,25 +190,26 @@ fn rotation_has_no_auto_repeat() {
 }
 
 // -------------------------------------------------------------------------
-// §25.3 CAVEAT: the engine has no DAS state machine yet.
+// §25.3 CAVEAT: the engine intentionally has no DAS state machine.
 // -------------------------------------------------------------------------
 
-/// DOCUMENTED CURRENT BEHAVIOUR (negative assertion for the unimplemented DAS
-/// timing items): holding `left` for many frames while advancing `dt` well past
-/// `das_delay_seconds` produces ONLY the single initial one-cell move. There is
-/// no auto-shift: `step` ignores `das_delay_seconds` / `das_repeat_seconds`
-/// entirely and translates the piece by exactly one cell per frame regardless of
-/// elapsed time. This is the seam the four `#[ignore]` tests below are waiting on.
+/// DESIGN INVARIANT (not a placeholder): the engine must NOT grow DAS timing.
+/// DAS is player-side (ADR-4); the engine translates the piece by exactly one
+/// cell per held frame regardless of elapsed `dt`. Holding `left` across many
+/// frames therefore yields one move *per frame* — never an accelerating burst
+/// and never a delay before the first move. The player layer
+/// (`src/player/das.rs`) is what shapes a held key into the spec's tap →
+/// delay → auto-repeat cadence before these per-frame pulses reach the engine.
 #[test]
-fn caveat_engine_lacks_das_state_machine() {
+fn caveat_engine_step_has_no_das_state_machine() {
     let config = EngineConfig {
         // Wide well so horizontal room is never the limiting factor.
         board_width: 40,
         ..EngineConfig::default()
     };
-    // dt per frame chosen to exceed BOTH the DAS delay and the repeat interval,
-    // so a real auto-shift engine would have fired several repeats by frame ~3.
-    let dt = config.das_delay_seconds + config.das_repeat_seconds + 0.01;
+    // A large per-frame dt: a (wrong) auto-shift engine would fire several repeats
+    // by frame ~3. The engine must still move exactly one cell per frame.
+    let dt = 0.5;
     let mut engine = Engine::new(config, SEED_FIRST_PIECE_T);
     let before = spawn_first_piece(&mut engine);
 
@@ -237,10 +237,10 @@ fn caveat_engine_lacks_das_state_machine() {
     );
 
     // Frames 2..=8: button still held, plenty of elapsed time per frame. Because
-    // there is no DAS state machine, each frame still moves exactly one cell.
-    // (We assert one-per-frame rather than zero: the engine treats every held
-    // frame as a fresh tap, so the absence of auto-repeat means "one cell per
-    // frame", never an accelerating burst.)
+    // the engine has no DAS state machine, each frame still moves exactly one cell.
+    // (One-per-frame rather than zero: the engine treats every held frame as a
+    // fresh pulse, so the absence of auto-repeat means "one cell per frame", never
+    // an accelerating burst.)
     for frame in 2..=8 {
         let events = engine.step(InputFrame {
             left: true,
@@ -262,7 +262,7 @@ fn caveat_engine_lacks_das_state_machine() {
         assert_eq!(
             left_moves, 1,
             "frame {frame}: no auto-repeat means exactly one cell per held frame \
-             (das_delay_seconds / das_repeat_seconds are not consumed by step), \
+             (the engine owns no DAS timing — that lives player-side), \
              got events {events:?}",
         );
     }
@@ -281,50 +281,4 @@ fn caveat_engine_lacks_das_state_machine() {
         before.origin.0 - 8,
         "8 held frames shift exactly 8 cells in x (one per frame), with no auto-repeat burst",
     );
-}
-
-#[ignore = "DAS hold-delay timing is unimplemented in the engine: step() does not \
-            consume das_delay_seconds (no per-frame DAS state machine). See \
-            caveat_engine_lacks_das_state_machine for the current tap-only behaviour."]
-#[test]
-fn holding_left_waits_about_0_3s() {
-    // §25.3: "Holding left/right waits about 0.3s" before auto-repeat begins.
-    // TODO(engine DAS): once step() tracks a charge timer, assert that holding
-    // `left` produces the initial move on frame 1 and the FIRST auto-repeat only
-    // after ~das_delay_seconds (spec target ~0.3s) of accumulated dt.
-    unimplemented!("requires a DAS state machine in Engine::step");
-}
-
-#[ignore = "DAS auto-repeat timing is unimplemented in the engine: step() does not \
-            consume das_repeat_seconds. See caveat_engine_lacks_das_state_machine."]
-#[test]
-fn autorepeat_moves_in_about_0_5s() {
-    // §25.3: after the delay, auto-repeat moves a piece side-to-side in ~0.5s.
-    // TODO(engine DAS): from one wall, hold the opposite direction and assert the
-    // piece traverses the full board width within ~0.5s of accumulated dt after
-    // the initial delay elapses.
-    unimplemented!("requires a DAS state machine in Engine::step");
-}
-
-#[ignore = "DAS carry-over across Lock Down is unimplemented in the engine: there is \
-            no charge state to persist. See caveat_engine_lacks_das_state_machine."]
-#[test]
-fn autorepeat_persists_across_lock_down() {
-    // §25.3: auto-repeat carries into the next Tetrimino if the direction button
-    // remains held after Lock Down.
-    // TODO(engine DAS): lock a piece while `left` is held and assert the freshly
-    // spawned piece keeps auto-shifting without re-charging the initial delay.
-    unimplemented!("requires DAS charge state that survives lock/spawn in Engine");
-}
-
-#[ignore = "Opposite-direction DAS restart is unimplemented in the engine: there is no \
-            DAS delay to restart. See caveat_engine_lacks_das_state_machine."]
-#[test]
-fn opposite_direction_restarts_delay() {
-    // §25.3: pressing the opposite direction while one is held restarts the
-    // initial ~0.3s delay for the new direction.
-    // TODO(engine DAS): hold `left` past the delay, then switch to `right` and
-    // assert the first right move is immediate but the next right repeat waits a
-    // fresh das_delay_seconds.
-    unimplemented!("requires a DAS state machine in Engine::step");
 }
