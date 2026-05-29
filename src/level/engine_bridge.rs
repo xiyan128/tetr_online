@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 use crate::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot};
 use crate::level::common::LevelConfig;
-use crate::player::{DasConfig, KeyboardController, KeyboardInput};
+use crate::player::{DasConfig, KeyboardController, RawKeyboardFrame};
 use crate::settings::GameSettings;
 use crate::variant::Variant;
 
@@ -75,7 +75,7 @@ pub struct PendingEdges {
 
 impl PendingEdges {
     /// OR this frame's just-pressed edges into the latch.
-    pub fn latch(&mut self, input: &KeyboardInput) {
+    pub fn latch(&mut self, input: &RawKeyboardFrame) {
         self.left |= input.left_just_pressed;
         self.right |= input.right_just_pressed;
         self.hard_drop |= input.hard_drop_just_pressed;
@@ -89,7 +89,7 @@ impl PendingEdges {
     /// cleared, extra slices in the same frame don't replay a press. A latched
     /// horizontal tap also forces the held flag true so the one-cell move still
     /// fires even if the key was physically released before this slice ran.
-    pub fn drain_onto(&self, input: &mut KeyboardInput) {
+    pub fn drain_onto(&self, input: &mut RawKeyboardFrame) {
         input.left_just_pressed = self.left;
         input.right_just_pressed = self.right;
         input.hard_drop_just_pressed = self.hard_drop;
@@ -162,10 +162,10 @@ pub fn das_config_from_level(config: &LevelConfig) -> DasConfig {
 mod tests {
     use super::*;
 
-    fn left_tap() -> KeyboardInput {
-        KeyboardInput {
+    fn left_tap() -> RawKeyboardFrame {
+        RawKeyboardFrame {
             left_just_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         }
     }
 
@@ -178,14 +178,14 @@ mod tests {
 
         // The next slice drains it: a left move fires, with the held flag forced so
         // the tap still moves even if the key was already released.
-        let mut input = KeyboardInput::default();
+        let mut input = RawKeyboardFrame::default();
         pending.drain_onto(&mut input);
         assert!(input.left_just_pressed);
         assert!(input.left_pressed);
         pending.reset();
 
         // A second slice in the same frame must not replay the press.
-        let mut second = KeyboardInput::default();
+        let mut second = RawKeyboardFrame::default();
         pending.drain_onto(&mut second);
         assert!(!second.left_just_pressed);
     }
@@ -194,7 +194,7 @@ mod tests {
     fn latch_stays_set_across_empty_frames_until_reset() {
         let mut pending = PendingEdges::default();
         pending.latch(&left_tap());
-        pending.latch(&KeyboardInput::default()); // empty frame, edge persists
+        pending.latch(&RawKeyboardFrame::default()); // empty frame, edge persists
         assert!(pending.left);
         pending.reset();
         assert!(!pending.left);

@@ -20,7 +20,7 @@ mod das;
 mod keyboard;
 
 pub use das::{DasConfig, DasState};
-pub use keyboard::{KeyboardController, KeyboardInput};
+pub use keyboard::{KeyboardController, RawKeyboardFrame};
 
 /// Produces the next [`InputFrame`] for an `Engine`, given the latest snapshot.
 ///

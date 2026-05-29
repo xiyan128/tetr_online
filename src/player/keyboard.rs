@@ -2,7 +2,7 @@
 //!
 //! The Bevy driver feeds raw key state + frame `dt` in via
 //! [`KeyboardController::set_input`] (built from `ButtonInput<KeyCode>` with
-//! [`KeyboardInput::from_keyboard`]), then calls [`PlayerController::poll`].
+//! [`RawKeyboardFrame::from_keyboard`]), then calls [`PlayerController::poll`].
 //! `poll` resolves the held horizontal direction, advances the DAS machine, and
 //! emits an [`InputFrame`] whose `left`/`right` are per-frame one-cell pulses at
 //! the DAS cadence. The other action flags are edge-triggered (just-pressed) so
@@ -16,7 +16,7 @@ use crate::player::{resolve_horizontal, PlayerController};
 /// driven headlessly in tests. `pressed` = key currently down; `just_pressed` =
 /// key transitioned to down this frame.
 #[derive(Debug, Clone, Copy, Default, PartialEq)]
-pub struct KeyboardInput {
+pub struct RawKeyboardFrame {
     pub dt_seconds: f32,
     pub left_pressed: bool,
     pub right_pressed: bool,
@@ -37,7 +37,7 @@ pub struct KeyboardInput {
 pub struct KeyboardController {
     config: DasConfig,
     das: DasState,
-    input: KeyboardInput,
+    input: RawKeyboardFrame,
 }
 
 impl KeyboardController {
@@ -45,19 +45,19 @@ impl KeyboardController {
         Self {
             config,
             das: DasState::default(),
-            input: KeyboardInput::default(),
+            input: RawKeyboardFrame::default(),
         }
     }
 
     /// Stage the raw keyboard state for the next [`poll`](PlayerController::poll).
-    pub fn set_input(&mut self, input: KeyboardInput) {
+    pub fn set_input(&mut self, input: RawKeyboardFrame) {
         self.input = input;
     }
 
-    /// Build an [`InputFrame`] from a staged [`KeyboardInput`] without mutating
+    /// Build an [`InputFrame`] from a staged [`RawKeyboardFrame`] without mutating
     /// shared state — used internally by [`poll`] and directly by tests to drive
     /// the DAS machine deterministically.
-    fn resolve_frame(&mut self, input: &KeyboardInput) -> InputFrame {
+    fn resolve_frame(&mut self, input: &RawKeyboardFrame) -> InputFrame {
         let (held_direction, just_pressed) = resolve_horizontal(
             input.left_pressed,
             input.right_pressed,
@@ -91,7 +91,7 @@ impl PlayerController for KeyboardController {
     }
 }
 
-impl KeyboardInput {
+impl RawKeyboardFrame {
     /// Build raw input from Bevy's keyboard state for one frame.
     ///
     /// Bindings (per migration map): arrows for move/soft-drop, Space =
@@ -135,23 +135,23 @@ mod tests {
         Engine::new(EngineConfig::default(), 0).snapshot()
     }
 
-    fn hold_left(dt: f32) -> KeyboardInput {
-        KeyboardInput {
+    fn hold_left(dt: f32) -> RawKeyboardFrame {
+        RawKeyboardFrame {
             dt_seconds: dt,
             left_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         }
     }
 
-    fn tap_left() -> KeyboardInput {
-        KeyboardInput {
+    fn tap_left() -> RawKeyboardFrame {
+        RawKeyboardFrame {
             left_pressed: true,
             left_just_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         }
     }
 
-    fn poll(controller: &mut KeyboardController, input: KeyboardInput) -> InputFrame {
+    fn poll(controller: &mut KeyboardController, input: RawKeyboardFrame) -> InputFrame {
         controller.set_input(input);
         controller.poll(&snapshot())
     }
@@ -188,23 +188,23 @@ mod tests {
         poll(&mut controller, hold_left(0.3));
 
         // Switch to Right: immediate tap, then a fresh delay (no carry-over).
-        let switch = KeyboardInput {
+        let switch = RawKeyboardFrame {
             right_pressed: true,
             right_just_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         };
         assert!(poll(&mut controller, switch).right);
 
-        let hold_right_short = KeyboardInput {
+        let hold_right_short = RawKeyboardFrame {
             dt_seconds: 0.29,
             right_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         };
         assert!(!poll(&mut controller, hold_right_short).right);
-        let hold_right_cross = KeyboardInput {
+        let hold_right_cross = RawKeyboardFrame {
             dt_seconds: 0.02,
             right_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         };
         assert!(poll(&mut controller, hold_right_cross).right);
     }
@@ -232,7 +232,7 @@ mod tests {
     #[test]
     fn action_flags_pass_through_as_edge_triggers() {
         let mut controller = KeyboardController::new(CONFIG);
-        let input = KeyboardInput {
+        let input = RawKeyboardFrame {
             dt_seconds: 0.016,
             soft_drop: true,
             hard_drop_just_pressed: true,
@@ -240,7 +240,7 @@ mod tests {
             rotate_ccw_just_pressed: false,
             hold_just_pressed: true,
             pause_just_pressed: true,
-            ..KeyboardInput::default()
+            ..RawKeyboardFrame::default()
         };
         let frame = poll(&mut controller, input);
 

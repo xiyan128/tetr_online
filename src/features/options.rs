@@ -648,9 +648,9 @@ const KEY_TABLE: &[(KeyCode, &str)] = &[
 // Keybind read-path for the controller (migration helper)
 // ---------------------------------------------------------------------------
 
-/// Build raw per-frame [`KeyboardInput`](crate::player::KeyboardInput) from
+/// Build raw per-frame [`RawKeyboardFrame`](crate::player::RawKeyboardFrame) from
 /// Bevy's keyboard state using the player's [`Keybinds`], replacing the
-/// hard-coded mapping in `KeyboardInput::from_keyboard`.
+/// hard-coded mapping in `RawKeyboardFrame::from_keyboard`.
 ///
 /// This is the read-path the gameplay driver should call so remapped keys take
 /// effect. The integrator wires it at the single call site in
@@ -660,8 +660,8 @@ pub fn keyboard_input_from_keybinds(
     keyboard: &ButtonInput<KeyCode>,
     binds: &Keybinds,
     dt_seconds: f32,
-) -> crate::player::KeyboardInput {
-    use crate::player::KeyboardInput;
+) -> crate::player::RawKeyboardFrame {
+    use crate::player::RawKeyboardFrame;
 
     // `pressed`/`just_pressed` against either bound key for an action.
     let pressed = |action: GameAction| {
@@ -673,7 +673,7 @@ pub fn keyboard_input_from_keybinds(
         keyboard.just_pressed(primary) || secondary.is_some_and(|k| keyboard.just_pressed(k))
     };
 
-    KeyboardInput {
+    RawKeyboardFrame {
         dt_seconds,
         left_pressed: pressed(GameAction::MoveLeft),
         right_pressed: pressed(GameAction::MoveRight),
