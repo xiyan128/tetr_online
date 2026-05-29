@@ -40,7 +40,11 @@ pub enum PlayingState {
 /// the snapshot/events it produces.
 #[derive(SystemSet, Debug, Hash, PartialEq, Eq, Clone, Copy)]
 pub(crate) enum LevelSystems {
-    /// Collects input, steps the engine, publishes snapshot + events.
+    /// Collects + latches input each render frame (in `PreUpdate`). The engine
+    /// itself steps in `FixedUpdate`, between this set and `Reconcile`, so the
+    /// published snapshot/events are ready by the time `Reconcile` runs in
+    /// `Update`. External `.after(EngineDriver)` consumers therefore still see
+    /// the engine's output for the frame.
     EngineDriver,
     /// Reconciles render entities / UI / audio from the snapshot + events.
     Reconcile,

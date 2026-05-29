@@ -36,13 +36,18 @@ impl Plugin for LevelPlugin {
             .add_plugins(SoundEffectsPlugin)
             .add_plugins(ScorePlugin)
             .add_plugins(UIPlugin)
+            // Fixed simulation clock. The engine steps in `FixedUpdate` (see
+            // below), so Bevy's accumulator — not a hand-rolled one — decides how
+            // many slices run per render frame. Seeded from the same `SIM_HZ` the
+            // engine bridge exposes so the fixed `dt` equals `SIM_DT_SECONDS`.
+            .insert_resource(Time::<Fixed>::from_hz(SIM_HZ as f64))
             // resources
             .init_resource::<LevelConfig>()
-            .init_resource::<SimClock>()
+            .init_resource::<HeldInput>()
             .init_resource::<PendingEdges>()
             .init_resource::<FrameEvents>()
             // Reflection registration for inspector/scene support. Engine-wrapping
-            // resources (EngineState/LatestSnapshot/FrameEvents/SimClock/
+            // resources (EngineState/LatestSnapshot/FrameEvents/HeldInput/
             // PendingEdges) are deliberately NOT registered: reflecting them would
             // force Bevy `Reflect` onto the engine-agnostic crate.
             .register_type::<LevelConfig>()
@@ -65,14 +70,42 @@ impl Plugin for LevelPlugin {
                 OnEnter(InGameplay),
                 (level_setup, crate::variant::reset_variant_progress),
             )
-            // The driver runs first, then everything that reads its snapshot/events.
+            // Per-frame pipeline across three schedules (Bevy runs them
+            // First → PreUpdate → FixedMain → Update each frame):
+            //
+            //  * PreUpdate  — `LevelSystems::EngineDriver`: clear this frame's
+            //    event buffer and sample/latch keyboard input. Runs *before*
+            //    `FixedUpdate` so each slice sees fresh held flags + edges, and
+            //    after `InputSystems` so `just_pressed` is still valid (Bevy
+            //    clears it earlier in PreUpdate).
+            //  * FixedUpdate — `step_engine`: drain the latch, step the engine
+            //    once per accumulated slice, accumulate events.
+            //  * Update     — `LevelSystems::Reconcile`: render/UI/audio systems
+            //    read the published snapshot + the frame's accumulated events.
+            //
+            // The two `LevelSystems` sets keep `EngineDriver` "before" `Reconcile`
+            // for external `.after(EngineDriver)` consumers (e.g. info_panel); the
+            // schedule order already guarantees PreUpdate runs before Update.
             .configure_sets(
-                Update,
-                (LevelSystems::EngineDriver, LevelSystems::Reconcile)
-                    .chain()
+                PreUpdate,
+                LevelSystems::EngineDriver
+                    .after(bevy::input::InputSystems)
                     .run_if(in_state(GameState::Playing)),
             )
-            .add_systems(Update, engine_driver.in_set(LevelSystems::EngineDriver))
+            .configure_sets(
+                Update,
+                LevelSystems::Reconcile.run_if(in_state(GameState::Playing)),
+            )
+            .add_systems(
+                PreUpdate,
+                (clear_frame_events, latch_input)
+                    .chain()
+                    .in_set(LevelSystems::EngineDriver),
+            )
+            .add_systems(
+                FixedUpdate,
+                step_engine.run_if(in_state(GameState::Playing)),
+            )
             .add_systems(
                 Update,
                 (
@@ -117,7 +150,7 @@ fn level_setup(
     commands.insert_resource(EngineState(engine));
     commands.insert_resource(LatestSnapshot(snapshot));
     commands.insert_resource(FrameEvents::default());
-    commands.insert_resource(SimClock::default());
+    commands.insert_resource(HeldInput::default());
     commands.insert_resource(PendingEdges::default());
     commands.insert_resource(PlayerInput(KeyboardController::new(das_config_from_level(
         &config,
@@ -160,70 +193,82 @@ fn level_setup(
 }
 
 // ---------------------------------------------------------------------------
-// Driver: input -> fixed-timestep engine steps -> snapshot + events
+// Driver: input (PreUpdate) -> fixed engine step (FixedUpdate) -> snapshot/events
 // ---------------------------------------------------------------------------
 
-/// Accumulate real frame time and step the engine at a fixed sim rate.
+/// Clear the per-frame engine-event buffer once, *before* the fixed slices run.
 ///
-/// Each fixed slice: poll the player controller against the *current* snapshot,
-/// step the engine with `dt_seconds = SIM_DT_SECONDS`, and collect the events.
-/// The controller is fed raw keyboard state once per frame (DAS still advances
-/// per fixed slice via the staged input's `dt`). The latest snapshot and the
-/// frame's events are published into resources for the reconcilers.
-fn engine_driver(
-    time: Res<Time>,
+/// `FrameEvents` accumulates the events of every fixed slice that runs this
+/// render frame, so the `Update` reconcilers see the full batch. It must be
+/// cleared here in `PreUpdate` (before `FixedUpdate`) rather than inside the
+/// step — clearing per slice would drop the events of earlier slices in the same
+/// frame, and clearing in `Update` would wipe the batch before anything reads it.
+fn clear_frame_events(mut frame_events: ResMut<FrameEvents>) {
+    frame_events.0.clear();
+}
+
+/// Sample the keyboard once per render frame, latch its just-pressed edges, and
+/// stage the held flags for the fixed step.
+///
+/// Runs in `PreUpdate` after `InputSystems`, where `just_pressed` is still valid
+/// for this frame. Bevy clears `just_pressed` earlier in `PreUpdate` and the
+/// engine steps in `FixedUpdate` (which runs zero-or-more times per frame), so
+/// reading edges directly in the step would drop a press on a zero-slice frame
+/// and duplicate it on a multi-slice frame. Latching here and draining once in
+/// the step (then resetting) is the drop/dup-safe pattern.
+///
+/// Keybinds come from the player's settings so options-screen rebinds take effect
+/// (defaults reproduce the legacy hard-coded mapping).
+fn latch_input(
     keyboard: Res<ButtonInput<KeyCode>>,
     settings: Res<crate::settings::GameSettings>,
-    mut engine: ResMut<EngineState>,
-    mut snapshot: ResMut<LatestSnapshot>,
-    mut frame_events: ResMut<FrameEvents>,
-    mut clock: ResMut<SimClock>,
-    mut player: ResMut<PlayerInput>,
+    mut held: ResMut<HeldInput>,
     mut pending: ResMut<PendingEdges>,
 ) {
-    frame_events.0.clear();
-
-    // Sample raw keyboard ONCE per render frame and latch its just-pressed edges.
-    // Bevy clears `just_pressed` at frame end, so reading it only inside the
-    // fixed-step loop below would drop any press landing on a frame that runs zero
-    // slices (render fps > SIM_HZ). The latch carries edges to the next slice.
-    // Keybinds come from the player's settings so options-screen rebinds take
-    // effect (defaults reproduce the legacy hard-coded mapping).
     let raw = crate::features::options::keyboard_input_from_keybinds(
         &keyboard,
         &settings.keybinds,
         SIM_DT_SECONDS,
     );
     pending.latch(&raw);
+    // Stage this frame's held flags (DAS direction, soft drop) + per-slice dt for
+    // the fixed step. Edge fields are unused by the step (edges come from the
+    // latch) but ride along so dt + held travel as one value.
+    held.0 = raw;
+}
 
-    clock.accumulator_seconds += time.delta_secs();
-    // Guard against spiral-of-death after a long stall (e.g. tab backgrounded).
-    let max_accumulated = SIM_DT_SECONDS * 8.0;
-    if clock.accumulator_seconds > max_accumulated {
-        clock.accumulator_seconds = max_accumulated;
-    }
+/// Step the engine once per fixed slice. Bevy's `FixedUpdate` runs this zero or
+/// more times per render frame, draining `Time::<Fixed>`'s accumulator; the
+/// spiral-of-death guard (long stalls) is Bevy's `Time<Virtual>::max_delta`, so
+/// no hand-rolled accumulator is needed.
+///
+/// Each slice: build the [`RawKeyboardFrame`] from this frame's staged held flags
+/// plus the latched edges, poll the controller against the *current* snapshot,
+/// step the engine with `dt = time.delta_secs()` (equals [`SIM_DT_SECONDS`]),
+/// publish the snapshot, and append the events. The latch is drained onto the
+/// first slice and immediately [`reset`](PendingEdges::reset) so a press fires
+/// exactly once even when several slices run in one frame; held flags persist so
+/// DAS auto-repeat and soft drop keep advancing across slices.
+fn step_engine(
+    time: Res<Time<Fixed>>,
+    held: Res<HeldInput>,
+    mut engine: ResMut<EngineState>,
+    mut snapshot: ResMut<LatestSnapshot>,
+    mut frame_events: ResMut<FrameEvents>,
+    mut player: ResMut<PlayerInput>,
+    mut pending: ResMut<PendingEdges>,
+) {
+    let mut input = held.0;
+    input.dt_seconds = time.delta_secs();
+    pending.drain_onto(&mut input);
+    player.0.set_input(input);
 
-    while clock.accumulator_seconds >= SIM_DT_SECONDS {
-        clock.accumulator_seconds -= SIM_DT_SECONDS;
+    let frame = player.0.poll(&snapshot.0);
+    let events = engine.0.step(frame);
+    snapshot.0 = engine.0.snapshot();
+    frame_events.0.extend(events);
 
-        // Held flags (DAS direction, soft drop) come from this frame's raw sample;
-        // edge actions come from the latch, applied once then cleared so multiple
-        // slices in one frame can't replay a single press.
-        let mut input = raw;
-        pending.drain_onto(&mut input);
-        player.0.set_input(input);
-
-        let frame = player.0.poll(&snapshot.0);
-        let events = engine.0.step(frame);
-        snapshot.0 = engine.0.snapshot();
-        frame_events.0.extend(events);
-
-        pending.reset();
-    }
-
-    // If no slice ran this frame the snapshot is unchanged and the latch keeps
-    // any pending edges for the next frame; reconcilers reading the snapshot are
-    // idempotent, so nothing to do.
+    pending.reset();
 }
 
 // ---------------------------------------------------------------------------
@@ -420,12 +465,33 @@ fn handle_game_over(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{EngineConfig, InputFrame};
+    use crate::engine::InputFrame;
+    use bevy::time::TimeUpdateStrategy;
+    use core::time::Duration;
 
-    #[test]
-    fn level_plugin_systems_initialize_without_query_conflicts() {
+    /// Run exactly `n` `FixedUpdate` slices through the *real* schedule.
+    ///
+    /// `TimeUpdateStrategy::FixedTimesteps(n)` makes Bevy advance virtual time by
+    /// exactly `n` fixed periods per `App::update`, so the `RunFixedMainLoop`
+    /// runner iterates `FixedMain` `n` times with `Time::<Fixed>::delta()` equal
+    /// to the timestep each iteration — independent of the test harness's wall
+    /// clock. This drives the production pipeline (PreUpdate latch → FixedUpdate
+    /// step → Update reconcile) for `n` deterministic ticks.
+    fn tick_fixed(app: &mut App, n: u32) {
+        app.insert_resource(TimeUpdateStrategy::FixedTimesteps(n));
+        app.update();
+    }
+
+    /// A headless `LevelPlugin` app pinned to a deterministic clock: setup runs
+    /// with zero fixed slices (manual duration of zero) so the engine doesn't
+    /// step until a test asks for ticks via [`tick_fixed`].
+    fn headless_app() -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            // Freeze the clock during setup; tests advance it explicitly. Without
+            // this the default `Automatic` strategy would run wall-clock-dependent
+            // fixed slices during the setup `update()`s below.
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .init_state::<GameState>()
             .insert_resource(ButtonInput::<KeyCode>::default())
             .insert_resource(GameAssets {
@@ -442,29 +508,31 @@ mod tests {
                 font: default(),
             })
             .add_plugins(LevelPlugin);
-
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
             .set(GameState::Playing);
         app.update();
         // A second update applies the Playing state transition and runs setup.
         app.update();
+        app
+    }
+
+    #[test]
+    fn level_plugin_systems_initialize_without_query_conflicts() {
+        let mut app = headless_app();
 
         assert!(app.world().get_resource::<EngineState>().is_some());
         assert!(app.world().get_resource::<LatestSnapshot>().is_some());
 
-        // Force the fixed-timestep driver to run a slice (independent of the test
-        // harness's wall clock) so the engine spawns its first piece, then verify
-        // the active-piece reconciler materialized it into FallingBlock entities.
-        app.world_mut()
-            .resource_mut::<SimClock>()
-            .accumulator_seconds = SIM_DT_SECONDS;
-        app.update();
+        // Run one fixed slice through the real FixedUpdate schedule so the engine
+        // spawns its first piece, then verify the active-piece reconciler (Update)
+        // materialized it into FallingBlock entities.
+        tick_fixed(&mut app, 1);
 
         let snapshot = &app.world().resource::<LatestSnapshot>().0;
         assert!(
             snapshot.active.is_some(),
-            "driver should have stepped the engine and spawned a piece"
+            "the fixed step should have advanced the engine and spawned a piece"
         );
         let falling_blocks = app
             .world_mut()
@@ -477,17 +545,25 @@ mod tests {
         );
     }
 
-    /// The driver accumulator must advance the engine deterministically: feeding
-    /// a fixed total of wall-clock dt produces the same engine state as stepping
-    /// the engine directly with the same fixed slices. This pins the
-    /// fixed-timestep contract (gravity/lock-down advance independent of frame
-    /// rate) without booting a render App.
+    /// The `FixedUpdate` step must advance the engine deterministically: running N
+    /// fixed slices through the real schedule produces the same engine state as
+    /// stepping the engine directly with N fixed slices of `SIM_DT_SECONDS`. This
+    /// pins the fixed-timestep contract (gravity/lock-down advance independent of
+    /// render frame rate) now that Bevy's `Time<Fixed>` drives the slicing.
     #[test]
     fn driver_accumulator_advances_engine_deterministically() {
-        // Reference engine: step exactly N fixed slices with no input.
-        let config = EngineConfig::default();
-        let mut reference = Engine::new(config.clone(), DEFAULT_SEED);
-        let slices = 10;
+        let slices = 10u32;
+
+        // Reference engine: step exactly N fixed slices with no input. Build it
+        // through the same config path `level_setup` uses (default level +
+        // settings + the default Marathon variant) so this test isolates the
+        // *timestep* behavior, not config differences between the two engines.
+        let config = engine_config_for_game(
+            &LevelConfig::default(),
+            &crate::settings::GameSettings::default(),
+            crate::variant::ActiveVariant::default().0,
+        );
+        let mut reference = Engine::new(config, DEFAULT_SEED);
         for _ in 0..slices {
             reference.step(InputFrame {
                 dt_seconds: SIM_DT_SECONDS,
@@ -495,25 +571,70 @@ mod tests {
             });
         }
 
-        // Driver-style: accumulate one frame whose dt equals N fixed slices, then
-        // drain the accumulator in fixed slices (the engine_driver loop).
-        let mut driven = Engine::new(config, DEFAULT_SEED);
-        let mut accumulator = SIM_DT_SECONDS * slices as f32;
-        let mut ran = 0;
-        while accumulator >= SIM_DT_SECONDS {
-            accumulator -= SIM_DT_SECONDS;
-            driven.step(InputFrame {
-                dt_seconds: SIM_DT_SECONDS,
-                ..InputFrame::default()
-            });
-            ran += 1;
-        }
+        // Driven engine: same N slices, but through the real FixedUpdate schedule.
+        // `FixedTimesteps(slices)` runs the fixed loop exactly that many times in
+        // one `update()`, each with `Time::<Fixed>::delta() == SIM_DT_SECONDS`.
+        let mut app = headless_app();
+        tick_fixed(&mut app, slices);
 
-        assert_eq!(ran, slices, "accumulator must drain into exactly N slices");
+        let driven = &app.world().resource::<LatestSnapshot>().0;
         assert_eq!(
-            driven.snapshot(),
-            reference.snapshot(),
-            "fixed-slice driving matches direct fixed stepping"
+            driven,
+            &reference.snapshot(),
+            "fixed-schedule driving matches direct fixed stepping"
+        );
+    }
+
+    /// One press must produce exactly one engine action even when several fixed
+    /// slices run in the same render frame. This replaces the removed
+    /// `suppress_edges` system (the manual accumulator's per-slice edge guard):
+    /// the property is now provided by latching the edge once in `PreUpdate` and
+    /// draining + resetting [`PendingEdges`] on the first fixed slice. Held flags,
+    /// by contrast, persist across slices so DAS/soft-drop keep advancing.
+    #[test]
+    fn single_press_yields_one_action_across_multiple_slices_in_a_frame() {
+        let mut app = headless_app();
+        // Spawn the first piece.
+        tick_fixed(&mut app, 1);
+        assert!(
+            app.world().resource::<LatestSnapshot>().0.active.is_some(),
+            "precondition: a piece is active before the hold press"
+        );
+        let holds_before = app.world().resource::<EngineState>().0.snapshot().hold;
+        assert!(
+            holds_before.is_none(),
+            "precondition: hold slot starts empty"
+        );
+
+        // Press Hold (an edge action) and run THREE fixed slices in one frame.
+        // The press is latched once in PreUpdate; only the first slice consumes it.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft);
+        tick_fixed(&mut app, 3);
+
+        // A second hold in the same lifetime is illegal (the engine ignores it),
+        // so a duplicated edge would be invisible in `hold`. Instead assert via
+        // events: exactly one Held event was produced across the three slices.
+        let held_events = app
+            .world()
+            .resource::<FrameEvents>()
+            .0
+            .iter()
+            .filter(|e| matches!(e, EngineEvent::Held { .. }))
+            .count();
+        assert_eq!(
+            held_events, 1,
+            "one Hold press must yield exactly one Held action even across 3 slices"
+        );
+        assert!(
+            app.world()
+                .resource::<EngineState>()
+                .0
+                .snapshot()
+                .hold
+                .is_some(),
+            "the held piece should now occupy the hold slot"
         );
     }
 
@@ -531,33 +652,6 @@ mod tests {
         assert_eq!(das.repeat_seconds, level.das_repeat_duration.as_secs_f32());
     }
 
-    fn headless_app() -> App {
-        let mut app = App::new();
-        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
-            .init_state::<GameState>()
-            .insert_resource(ButtonInput::<KeyCode>::default())
-            .insert_resource(GameAssets {
-                block_texture: default(),
-                hard_drop_sound: default(),
-                placed_sound: default(),
-                line_clear_1: default(),
-                line_clear_2: default(),
-                line_clear_3: default(),
-                line_clear_4: default(),
-                locked_sound: default(),
-                hold_sound: default(),
-                rotation_sound: default(),
-                font: default(),
-            })
-            .add_plugins(LevelPlugin);
-        app.world_mut()
-            .resource_mut::<NextState<GameState>>()
-            .set(GameState::Playing);
-        app.update();
-        app.update();
-        app
-    }
-
     /// Drive a hard drop through the full app and verify the board reconciler
     /// mirrors the engine's locked board into StaticBlock entities. This exercises
     /// the snapshot -> board reconciliation path end to end.
@@ -565,20 +659,15 @@ mod tests {
     fn hard_drop_reconciles_locked_board_into_static_blocks() {
         let mut app = headless_app();
 
-        // Step once to spawn the first piece.
-        app.world_mut()
-            .resource_mut::<SimClock>()
-            .accumulator_seconds = SIM_DT_SECONDS;
-        app.update();
+        // One fixed slice to spawn the first piece.
+        tick_fixed(&mut app, 1);
 
-        // Press Space (hard drop) and force another driver slice.
+        // Press Space (hard drop) and run another fixed slice; the latch carries
+        // the edge from PreUpdate into the FixedUpdate step.
         app.world_mut()
             .resource_mut::<ButtonInput<KeyCode>>()
             .press(KeyCode::Space);
-        app.world_mut()
-            .resource_mut::<SimClock>()
-            .accumulator_seconds = SIM_DT_SECONDS;
-        app.update();
+        tick_fixed(&mut app, 1);
 
         let snapshot = &app.world().resource::<LatestSnapshot>().0;
         assert_eq!(

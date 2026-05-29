@@ -16,9 +16,12 @@ use crate::player::{DasConfig, KeyboardController, RawKeyboardFrame};
 use crate::settings::GameSettings;
 use crate::variant::Variant;
 
-/// Fixed simulation rate. Real frame `dt` is accumulated and the engine is
-/// stepped in fixed slices so gravity/lock-down advance deterministically
-/// regardless of render frame rate.
+/// Fixed simulation rate. The engine is stepped from Bevy's `FixedUpdate`
+/// schedule, which runs as many fixed slices per render frame as the accumulated
+/// virtual time allows, so gravity/lock-down advance deterministically
+/// regardless of render frame rate. `SIM_HZ` seeds `Time::<Fixed>` in
+/// `LevelPlugin::build`; `SIM_DT_SECONDS` mirrors the per-slice `dt` for tests
+/// and the few places that need the constant directly.
 pub const SIM_HZ: f32 = 60.0;
 pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
 
@@ -47,21 +50,32 @@ pub struct FrameEvents(pub Vec<EngineEvent>);
 #[derive(Resource)]
 pub struct PlayerInput(pub KeyboardController);
 
-/// Real-time accumulator for the fixed-timestep driver.
+/// This render frame's *held* keyboard state (continuous flags + per-slice `dt`),
+/// sampled once in `PreUpdate` and consumed by the `FixedUpdate` engine step.
+///
+/// Held flags (`left_pressed` / `right_pressed` / `soft_drop`) must be sampled
+/// fresh every render frame, but the fixed step runs in a *different* schedule
+/// (`FixedUpdate`, between `PreUpdate` and `Update`) zero-or-more times per frame.
+/// We therefore stage the held sample here and pair it with the edge latch
+/// ([`PendingEdges`]) when building each slice's [`RawKeyboardFrame`]. The edge
+/// fields of this sample are ignored by the step (edges come from the latch); we
+/// keep the full frame anyway so the staged `dt_seconds` and held flags travel
+/// together as one value.
 #[derive(Resource, Default)]
-pub struct SimClock {
-    pub accumulator_seconds: f32,
-}
+pub struct HeldInput(pub RawKeyboardFrame);
 
-/// Just-pressed input edges latched between fixed sim slices.
+/// Just-pressed input edges latched for the fixed sim slices that run this frame.
 ///
 /// The render loop can run faster than [`SIM_HZ`] (e.g. 120fps vs 60Hz sim), so
 /// some render frames accumulate less than one [`SIM_DT_SECONDS`] and run **zero**
-/// engine steps. Bevy clears `just_pressed` at the end of every frame, so an edge
-/// (tap, hard drop, rotate, hold, pause) landing on such a frame would be lost
-/// before any step consumed it — the cause of "I had to press left/space several
-/// times". The driver latches edges here each frame and drains them on the next
-/// slice that runs, so no press is dropped.
+/// engine steps. Bevy clears `just_pressed` in `PreUpdate` (before `FixedUpdate`
+/// runs), so an edge (tap, hard drop, rotate, hold, pause) read directly inside a
+/// fixed step would be lost on a frame that runs zero slices — and double-counted
+/// on a frame that runs several. This was the cause of "I had to press
+/// left/space several times". We latch edges here in `PreUpdate` (where
+/// `just_pressed` is still valid) and drain them on the first fixed slice, then
+/// [`reset`](Self::reset) so later slices in the same frame can't replay the
+/// press. No press is dropped or duplicated.
 #[derive(Resource, Default)]
 pub struct PendingEdges {
     pub left: bool,
