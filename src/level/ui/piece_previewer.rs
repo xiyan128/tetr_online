@@ -1,3 +1,10 @@
+//! Next-queue and hold-slot previews.
+//!
+//! Renders the upcoming pieces from `snapshot.next_queue` and the held piece
+//! from `snapshot.hold` as small avatar boards beside the playfield. Both views
+//! cache the last-rendered state and only rebuild their sprites when the queue
+//! or hold contents change.
+
 use crate::assets::GameAssets;
 use crate::engine::{Piece, PieceType};
 use crate::level::common::spawn_free_block;

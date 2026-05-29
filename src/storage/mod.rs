@@ -3,9 +3,9 @@
 //! A single [`Storage`] trait abstracts where small blobs (serialized
 //! [`GameSettings`], high-score tables) live. Two backends implement it:
 //!
-//! * **native** ([`native::FileStorage`]) — one file per key under the
+//! * **native** (`native::FileStorage`) — one file per key under the
 //!   platform config dir (via the `directories` crate).
-//! * **web** ([`web::LocalStorage`]) — the browser's `window.localStorage`.
+//! * **web** (`web::LocalStorage`) — the browser's `window.localStorage`.
 //!
 //! Callers go through [`default_storage`], which returns the right backend for
 //! the build target as a boxed trait object. Values are opaque `String`s;

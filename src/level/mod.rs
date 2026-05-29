@@ -1,3 +1,14 @@
+//! The in-game level: wires the engine into the Bevy world.
+//!
+//! [`LevelPlugin`] owns the per-frame pipeline that drives the
+//! [`Engine`](crate::engine::Engine): it samples and latches input in
+//! `PreUpdate`, steps the engine once per fixed slice in `FixedUpdate`, and
+//! reconciles the published snapshot into renderable/audio state in `Update`.
+//! Submodules cover the engine bridge, score/sound/game-over reconcilers, the
+//! in-game UI, and the shared [`common`] types. The plugin is written to run
+//! standalone (headless tests, fan-out) by initialising its shared resources
+//! idempotently rather than depending on `GamePlugin`.
+
 use bevy::prelude::*;
 
 use crate::engine::{Board, Cell, CellKind, Engine, EngineEvent, GameOverStatus};

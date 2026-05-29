@@ -1,3 +1,9 @@
+//! The lock-down progress bar drawn under the playfield.
+//!
+//! A sprite whose width tracks lock-down *progress* (`1.0 - lock_timer_fraction`,
+//! since the engine reports the fraction remaining). It only shows while the
+//! active piece is grounded and its lock timer is running.
+
 use crate::level::common::{GameField, LevelConfig};
 use crate::level::engine_bridge::LatestSnapshot;
 use bevy::ecs::error::Result;

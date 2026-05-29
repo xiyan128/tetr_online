@@ -1,3 +1,11 @@
+//! Shared types for the level layer: config, system sets, block markers, and
+//! the small enums that the engine bridge and UI both read.
+//!
+//! Kept in one module so the per-frame schedule ([`LevelSystems`]), the
+//! rendered-cell component markers, the renderer-side [`LevelConfig`], and the
+//! engine-decoupled [`AudioCue`] all live next to the colour/translation helpers
+//! that turn engine coordinates into world-space sprites.
+
 use crate::assets::GameAssets;
 use crate::engine::{Cell, CellKind, LockDownMode, PieceType};
 use bevy::color::Alpha;

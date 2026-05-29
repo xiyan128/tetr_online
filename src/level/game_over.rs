@@ -1,3 +1,11 @@
+//! The game-over screen: its own camera, UI, and restart/quit navigation.
+//!
+//! Spawned on entering [`GameState::GameOver`](crate::GameState::GameOver).
+//! Because the gameplay camera is torn down on leaving the session, this screen
+//! brings its own [`Camera2d`] so its UI renders. Both mouse buttons and a
+//! keyboard fallback (Enter/Space to restart, Esc to the main menu) drive the
+//! state transition.
+
 use crate::assets::GameAssets;
 use crate::GameState;
 use bevy::prelude::*;

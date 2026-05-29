@@ -1,3 +1,9 @@
+//! The game's loaded asset handles.
+//!
+//! [`GameAssets`] is a `bevy_asset_loader` collection populated during the
+//! loading state: the block texture, the UI font, and the sound-effect sources.
+//! Systems take it as a resource rather than loading assets ad hoc.
+
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 

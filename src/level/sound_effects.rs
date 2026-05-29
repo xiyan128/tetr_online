@@ -1,3 +1,10 @@
+//! Plays sound effects in response to [`AudioCue`] events.
+//!
+//! A thin observer layer: the engine bridge emits engine-decoupled [`AudioCue`]s
+//! and this plugin maps each one to the matching [`GameAssets`] audio source and
+//! spawns a one-shot player. Global SFX volume is applied separately by the
+//! [`sfx`](crate::features::sfx) feature.
+
 use crate::assets::GameAssets;
 use crate::level::common::AudioCue;
 use bevy::prelude::*;

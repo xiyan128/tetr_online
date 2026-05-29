@@ -1,3 +1,9 @@
+//! In-game HUD: piece previews, score readouts, and the lock-down bar.
+//!
+//! [`UIPlugin`] spawns these on entering the session and updates them from the
+//! published engine snapshot each frame. Layout offsets are shared via
+//! [`calc_ui_offset`] so the widgets stay aligned around the playfield.
+
 mod piece_previewer;
 mod placement_timer_bar;
 mod score_views;

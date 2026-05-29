@@ -1,3 +1,15 @@
+//! `tetr_online` — a guideline Tetris built on Bevy.
+//!
+//! The crate is split along the ADR-7 boundary: [`engine`] is the
+//! engine-agnostic rule core (no Bevy types), and everything else is the Bevy
+//! host that drives it. The `level` module owns the in-game loop (stepping the
+//! engine in `FixedUpdate` and reconciling snapshots into the ECS world);
+//! `screens` and `features` provide menus and presentation; [`player`]
+//! translates input into engine [`InputFrame`]s; [`storage`], [`settings`],
+//! [`high_scores`], and [`variant`] handle persistence and run configuration.
+//! The flat `tetr_online::` re-export surface below exposes the engine API the
+//! tests and host build against.
+
 use bevy::app::App;
 #[cfg(debug_assertions)]
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};

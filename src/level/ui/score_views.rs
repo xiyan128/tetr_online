@@ -1,3 +1,8 @@
+//! On-playfield score readouts: score, line count, and last clear type.
+//!
+//! Spawns the text labels and updates them from the [`Scorer`] resource each
+//! frame while in-game.
+
 use crate::assets::GameAssets;
 use crate::level::common::{to_translation, LevelConfig};
 use crate::level::score::{ScoreTypes, Scorer};
