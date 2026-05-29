@@ -12,7 +12,7 @@ use bevy::prelude::*;
 
 use crate::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot};
 use crate::level::common::LevelConfig;
-use crate::player::{DasConfig, KeyboardController};
+use crate::player::{DasConfig, KeyboardController, KeyboardInput};
 use crate::settings::GameSettings;
 use crate::variant::Variant;
 
@@ -51,6 +51,64 @@ pub struct PlayerInput(pub KeyboardController);
 #[derive(Resource, Default)]
 pub struct SimClock {
     pub accumulator_seconds: f32,
+}
+
+/// Just-pressed input edges latched between fixed sim slices.
+///
+/// The render loop can run faster than [`SIM_HZ`] (e.g. 120fps vs 60Hz sim), so
+/// some render frames accumulate less than one [`SIM_DT_SECONDS`] and run **zero**
+/// engine steps. Bevy clears `just_pressed` at the end of every frame, so an edge
+/// (tap, hard drop, rotate, hold, pause) landing on such a frame would be lost
+/// before any step consumed it — the cause of "I had to press left/space several
+/// times". The driver latches edges here each frame and drains them on the next
+/// slice that runs, so no press is dropped.
+#[derive(Resource, Default)]
+pub struct PendingEdges {
+    pub left: bool,
+    pub right: bool,
+    pub hard_drop: bool,
+    pub rotate_cw: bool,
+    pub rotate_ccw: bool,
+    pub hold: bool,
+    pub pause: bool,
+}
+
+impl PendingEdges {
+    /// OR this frame's just-pressed edges into the latch.
+    pub fn latch(&mut self, input: &KeyboardInput) {
+        self.left |= input.left_just_pressed;
+        self.right |= input.right_just_pressed;
+        self.hard_drop |= input.hard_drop_just_pressed;
+        self.rotate_cw |= input.rotate_cw_just_pressed;
+        self.rotate_ccw |= input.rotate_ccw_just_pressed;
+        self.hold |= input.hold_just_pressed;
+        self.pause |= input.pause_just_pressed;
+    }
+
+    /// Replace `input`'s edge flags with the latched edges, so that once they are
+    /// cleared, extra slices in the same frame don't replay a press. A latched
+    /// horizontal tap also forces the held flag true so the one-cell move still
+    /// fires even if the key was physically released before this slice ran.
+    pub fn drain_onto(&self, input: &mut KeyboardInput) {
+        input.left_just_pressed = self.left;
+        input.right_just_pressed = self.right;
+        input.hard_drop_just_pressed = self.hard_drop;
+        input.rotate_cw_just_pressed = self.rotate_cw;
+        input.rotate_ccw_just_pressed = self.rotate_ccw;
+        input.hold_just_pressed = self.hold;
+        input.pause_just_pressed = self.pause;
+        if self.left {
+            input.left_pressed = true;
+        }
+        if self.right {
+            input.right_pressed = true;
+        }
+    }
+
+    /// Clear all latched edges (after a slice consumes them).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
 }
 
 /// Build an [`EngineConfig`] from the renderer's [`LevelConfig`].
@@ -97,5 +155,48 @@ pub fn das_config_from_level(config: &LevelConfig) -> DasConfig {
     DasConfig {
         delay_seconds: config.das_delay.as_secs_f32(),
         repeat_seconds: config.das_repeat_duration.as_secs_f32(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn left_tap() -> KeyboardInput {
+        KeyboardInput {
+            left_just_pressed: true,
+            ..KeyboardInput::default()
+        }
+    }
+
+    #[test]
+    fn latched_tap_survives_zero_step_frame_then_drains_exactly_once() {
+        let mut pending = PendingEdges::default();
+        // A frame with a left tap but no sim slice (render fps > SIM_HZ): latched.
+        pending.latch(&left_tap());
+        assert!(pending.left);
+
+        // The next slice drains it: a left move fires, with the held flag forced so
+        // the tap still moves even if the key was already released.
+        let mut input = KeyboardInput::default();
+        pending.drain_onto(&mut input);
+        assert!(input.left_just_pressed);
+        assert!(input.left_pressed);
+        pending.reset();
+
+        // A second slice in the same frame must not replay the press.
+        let mut second = KeyboardInput::default();
+        pending.drain_onto(&mut second);
+        assert!(!second.left_just_pressed);
+    }
+
+    #[test]
+    fn latch_stays_set_across_empty_frames_until_reset() {
+        let mut pending = PendingEdges::default();
+        pending.latch(&left_tap());
+        pending.latch(&KeyboardInput::default()); // empty frame, edge persists
+        assert!(pending.left);
+        pending.reset();
+        assert!(!pending.left);
     }
 }

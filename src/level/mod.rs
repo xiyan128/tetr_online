@@ -9,7 +9,7 @@ use crate::level::game_over::GameOverPlugin;
 use crate::level::score::ScorePlugin;
 use crate::level::sound_effects::SoundEffectsPlugin;
 use crate::level::ui::UIPlugin;
-use crate::player::{KeyboardController, KeyboardInput, PlayerController};
+use crate::player::{KeyboardController, PlayerController};
 use crate::{GameState, InGameplay};
 
 pub(crate) mod common;
@@ -39,6 +39,7 @@ impl Plugin for LevelPlugin {
             // resources
             .init_resource::<LevelConfig>()
             .init_resource::<SimClock>()
+            .init_resource::<PendingEdges>()
             .init_resource::<FrameEvents>()
             // Shared M1 contracts the gameplay systems read. `init_resource` is
             // idempotent, so `GamePlugin` remains the canonical owner while
@@ -109,6 +110,7 @@ fn level_setup(
     commands.insert_resource(LatestSnapshot(snapshot));
     commands.insert_resource(FrameEvents::default());
     commands.insert_resource(SimClock::default());
+    commands.insert_resource(PendingEdges::default());
     commands.insert_resource(PlayerInput(KeyboardController::new(das_config_from_level(
         &config,
     ))));
@@ -169,8 +171,22 @@ fn engine_driver(
     mut frame_events: ResMut<FrameEvents>,
     mut clock: ResMut<SimClock>,
     mut player: ResMut<PlayerInput>,
+    mut pending: ResMut<PendingEdges>,
 ) {
     frame_events.0.clear();
+
+    // Sample raw keyboard ONCE per render frame and latch its just-pressed edges.
+    // Bevy clears `just_pressed` at frame end, so reading it only inside the
+    // fixed-step loop below would drop any press landing on a frame that runs zero
+    // slices (render fps > SIM_HZ). The latch carries edges to the next slice.
+    // Keybinds come from the player's settings so options-screen rebinds take
+    // effect (defaults reproduce the legacy hard-coded mapping).
+    let raw = crate::features::options::keyboard_input_from_keybinds(
+        &keyboard,
+        &settings.keybinds,
+        SIM_DT_SECONDS,
+    );
+    pending.latch(&raw);
 
     clock.accumulator_seconds += time.delta_secs();
     // Guard against spiral-of-death after a long stall (e.g. tab backgrounded).
@@ -179,46 +195,27 @@ fn engine_driver(
         clock.accumulator_seconds = max_accumulated;
     }
 
-    let mut stepped = false;
     while clock.accumulator_seconds >= SIM_DT_SECONDS {
         clock.accumulator_seconds -= SIM_DT_SECONDS;
 
-        // Stage this fixed slice's input. Edge-triggered actions (rotate, hold,
-        // hard drop) are only honored on the first slice of the frame so one key
-        // press maps to one action even if several slices run this frame. Input is
-        // read through the player's configurable keybinds so options-screen
-        // rebinds take effect (defaults reproduce the legacy hard-coded mapping).
-        let input = crate::features::options::keyboard_input_from_keybinds(
-            &keyboard,
-            &settings.keybinds,
-            SIM_DT_SECONDS,
-        );
-        let input = if stepped { suppress_edges(input) } else { input };
+        // Held flags (DAS direction, soft drop) come from this frame's raw sample;
+        // edge actions come from the latch, applied once then cleared so multiple
+        // slices in one frame can't replay a single press.
+        let mut input = raw;
+        pending.drain_onto(&mut input);
         player.0.set_input(input);
 
         let frame = player.0.poll(&snapshot.0);
         let events = engine.0.step(frame);
         snapshot.0 = engine.0.snapshot();
         frame_events.0.extend(events);
-        stepped = true;
+
+        pending.reset();
     }
 
-    // If no slice ran this frame the snapshot is unchanged; reconcilers reading
-    // it are idempotent, so nothing to do.
-}
-
-/// Clear edge-triggered (just-pressed) flags so repeated fixed slices in one
-/// frame don't replay a single key press. Held flags (`soft_drop`, the
-/// `*_pressed` used by DAS) are preserved.
-fn suppress_edges(mut input: KeyboardInput) -> KeyboardInput {
-    input.left_just_pressed = false;
-    input.right_just_pressed = false;
-    input.hard_drop_just_pressed = false;
-    input.rotate_cw_just_pressed = false;
-    input.rotate_ccw_just_pressed = false;
-    input.hold_just_pressed = false;
-    input.pause_just_pressed = false;
-    input
+    // If no slice ran this frame the snapshot is unchanged and the latch keeps
+    // any pending edges for the next frame; reconcilers reading the snapshot are
+    // idempotent, so nothing to do.
 }
 
 // ---------------------------------------------------------------------------
@@ -510,28 +507,6 @@ mod tests {
             reference.snapshot(),
             "fixed-slice driving matches direct fixed stepping"
         );
-    }
-
-    #[test]
-    fn suppress_edges_keeps_held_flags_but_drops_just_pressed() {
-        let input = KeyboardInput {
-            dt_seconds: SIM_DT_SECONDS,
-            left_pressed: true,
-            left_just_pressed: true,
-            soft_drop: true,
-            hard_drop_just_pressed: true,
-            rotate_cw_just_pressed: true,
-            hold_just_pressed: true,
-            ..KeyboardInput::default()
-        };
-        let suppressed = suppress_edges(input);
-
-        assert!(suppressed.left_pressed, "held flags survive");
-        assert!(suppressed.soft_drop, "soft drop is a held flag");
-        assert!(!suppressed.left_just_pressed);
-        assert!(!suppressed.hard_drop_just_pressed);
-        assert!(!suppressed.rotate_cw_just_pressed);
-        assert!(!suppressed.hold_just_pressed);
     }
 
     #[test]
