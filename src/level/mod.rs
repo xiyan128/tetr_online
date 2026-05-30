@@ -6,7 +6,7 @@
 //! reconciles the published snapshot into renderable/audio state in `Update`.
 //! Submodules cover the engine bridge, score/sound/game-over reconcilers, the
 //! in-game UI, and the shared [`common`] types. The plugin is written to run
-//! standalone (headless tests, fan-out) by initialising its shared resources
+//! standalone (e.g. in headless tests) by initialising its shared resources
 //! idempotently rather than depending on `GamePlugin`.
 
 use bevy::prelude::*;
@@ -77,7 +77,7 @@ impl Plugin for LevelPlugin {
             .register_type::<PreviewBlock>()
             // Shared M1 contracts the gameplay systems read. `init_resource` is
             // idempotent, so `GamePlugin` remains the canonical owner while
-            // `LevelPlugin` stays self-sufficient (headless tests, fan-out).
+            // `LevelPlugin` stays self-sufficient (e.g. in headless tests).
             // Contract: keep `init_resource` here — do NOT switch to
             // `insert_resource`, which would clobber the values `GamePlugin`
             // already inserted (e.g. the player's persisted `GameSettings`).
@@ -260,6 +260,7 @@ fn latch_input(
     let raw = crate::features::options::keyboard_input_from_keybinds(
         &keyboard,
         &settings.keybinds,
+        settings.hold_enabled,
         SIM_DT_SECONDS,
     );
     pending.latch(&raw);

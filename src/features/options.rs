@@ -12,13 +12,10 @@
 //! [`GameSettings`] resource: `level_setup` mirrors `next_count` into the
 //! previewer/engine, `reconcile_ghost_piece` honors `ghost_enabled`, the engine
 //! bridge feeds `lock_down_mode`, and the SFX feature reads the volumes. The
-//! keyboard controller reads [`Keybinds`] via [`keyboard_input_from_keybinds`]
-//! (see the integrator note in this file's PR report).
+//! keyboard controller reads [`Keybinds`] via [`keyboard_input_from_keybinds`].
 //!
 //! Encoding: a tiny hand-rolled `key=value` line format (one field per line) so
 //! we don't pull in a serializer; see [`encode_settings`]/[`decode_settings`].
-//!
-//! Touch only this file.
 
 use bevy::prelude::*;
 
@@ -665,13 +662,16 @@ const KEY_TABLE: &[(KeyCode, &str)] = &[
 /// Bevy's keyboard state using the player's [`Keybinds`], replacing the
 /// hard-coded mapping in `RawKeyboardFrame::from_keyboard`.
 ///
-/// This is the read-path the gameplay driver should call so remapped keys take
-/// effect. The integrator wires it at the single call site in
-/// `src/level/mod.rs` (see this PR's report) since that file is outside the
-/// options feature's ownership.
+/// This is the read-path the gameplay driver calls (from `src/level/mod.rs`) so
+/// remapped keys take effect. `hold_enabled` gates the Hold action: when the player
+/// has turned hold off in Options the Hold keybind produces nothing — this is the
+/// single place [`GameSettings::hold_enabled`](crate::settings::GameSettings) is
+/// enforced for keyboard play (the engine itself has no opinion on hold availability,
+/// keeping it player-side like DAS and the other keybinds).
 pub fn keyboard_input_from_keybinds(
     keyboard: &ButtonInput<KeyCode>,
     binds: &Keybinds,
+    hold_enabled: bool,
     dt_seconds: f32,
 ) -> crate::player::RawKeyboardFrame {
     use crate::player::RawKeyboardFrame;
@@ -696,7 +696,8 @@ pub fn keyboard_input_from_keybinds(
         hard_drop_just_pressed: just(GameAction::HardDrop),
         rotate_cw_just_pressed: just(GameAction::RotateCw),
         rotate_ccw_just_pressed: just(GameAction::RotateCcw),
-        hold_just_pressed: just(GameAction::Hold),
+        // Gated by the player's Hold toggle: hold disabled => the keybind is inert.
+        hold_just_pressed: hold_enabled && just(GameAction::Hold),
         pause_just_pressed: just(GameAction::Pause),
     }
 }
@@ -825,7 +826,7 @@ mod tests {
         keyboard.press(KeyCode::KeyJ); // remapped hard drop
         keyboard.press(KeyCode::ArrowLeft); // move-left primary
 
-        let input = keyboard_input_from_keybinds(&keyboard, &binds, 0.016);
+        let input = keyboard_input_from_keybinds(&keyboard, &binds, true, 0.016);
         assert!(
             input.rotate_cw_just_pressed,
             "secondary alias should trigger rotate CW"
@@ -837,5 +838,26 @@ mod tests {
         assert!(input.left_pressed && input.left_just_pressed);
         assert!(!input.soft_drop, "unpressed action stays false");
         assert_eq!(input.dt_seconds, 0.016);
+    }
+
+    #[test]
+    fn hold_disabled_suppresses_the_hold_action() {
+        // The `hold_enabled` setting must actually disable the hold mechanic: with it
+        // off, pressing the Hold keybind produces no hold edge, so the engine never
+        // swaps. With it on, the same press does. (Regression guard for the Options
+        // "Hold" toggle being cosmetic — it used to be read nowhere in gameplay.)
+        let binds = Keybinds::default();
+        let (hold_key, _) = binds.get(GameAction::Hold);
+        let mut keyboard = ButtonInput::<KeyCode>::default();
+        keyboard.press(hold_key);
+
+        let enabled = keyboard_input_from_keybinds(&keyboard, &binds, true, 0.016);
+        assert!(enabled.hold_just_pressed, "hold enabled: the keybind holds");
+
+        let disabled = keyboard_input_from_keybinds(&keyboard, &binds, false, 0.016);
+        assert!(
+            !disabled.hold_just_pressed,
+            "hold disabled: the keybind must be inert"
+        );
     }
 }
