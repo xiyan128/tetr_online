@@ -1,0 +1,9 @@
+# Pin the toolchain so a rebuild on any machine resolves the same compiler — the
+# size-optimized wasm bundles in particular are sensitive to rustc codegen, and a
+# reproducible build is what lets a consumer regenerate byte-stable artifacts.
+#
+# Pinned to the nightly this project is developed against. `wasm32-unknown-unknown`
+# is listed so `rustup` provisions the wasm target automatically on a fresh checkout.
+[toolchain]
+channel = "nightly-2026-04-24"
+targets = ["wasm32-unknown-unknown"]

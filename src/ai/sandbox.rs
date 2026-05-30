@@ -62,7 +62,7 @@ impl AiSandbox {
 /// [`AiSandbox`] is set; dropped when the session ends ([`GameState::Playing`] exits).
 ///
 /// Stored as a **non-send resource** (`NonSend`/`NonSendMut`): [`AiController`] is
-/// `Send` but not `Sync` (its [`ComputeRunner`](crate::ai::ComputeRunner) seam is
+/// `Send` but not `Sync` (its [`DecisionRunner`](crate::ai::DecisionRunner) seam is
 /// `Send`-only so a future off-thread runner can park a `!Sync` channel/`Task`
 /// behind it), and Bevy's ordinary `Resource` requires `Send + Sync`. A non-send
 /// resource is the right fit: it pins the bot to the main thread, where the

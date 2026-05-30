@@ -91,6 +91,11 @@ impl PlayerController for KeyboardController {
     }
 }
 
+// The one Bevy touch-point in `tetr-core`: an adapter from Bevy's keyboard state to
+// the engine-agnostic `RawKeyboardFrame`. Gated behind the `bevy` feature (off by
+// default) so the core — and the embed wasm built from it — never pulls Bevy. The
+// Bevy game enables the feature; the headless embed builds its own DOM-event adapter.
+#[cfg(feature = "bevy")]
 impl RawKeyboardFrame {
     /// Build raw input from Bevy's keyboard state for one frame.
     ///
@@ -98,10 +103,10 @@ impl RawKeyboardFrame {
     /// hard drop, Up / X = rotate CW, Z = rotate CCW, LeftShift = hold,
     /// Escape = pause.
     pub fn from_keyboard(
-        keyboard: &bevy::input::ButtonInput<bevy::prelude::KeyCode>,
+        keyboard: &bevy::input::ButtonInput<bevy::input::keyboard::KeyCode>,
         dt_seconds: f32,
     ) -> Self {
-        use bevy::prelude::KeyCode;
+        use bevy::input::keyboard::KeyCode;
         Self {
             dt_seconds,
             left_pressed: keyboard.pressed(KeyCode::ArrowLeft),

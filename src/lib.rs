@@ -20,17 +20,21 @@ use bevy_egui::{egui, EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEg
 #[cfg(feature = "dev")]
 use bevy_inspector_egui::{bevy_inspector, DefaultInspectorConfigPlugin};
 
+// Engine-agnostic core (ADR-7), now the `tetr-core` crate: re-export `engine` and
+// `player` so the host's existing `crate::engine::…` / `crate::player::…` paths keep
+// resolving unchanged.
+pub use tetr_core::{engine, player};
+
+/// Game-side AI: the engine-agnostic `tetr-core::ai` plus the Bevy `sandbox`.
 pub mod ai;
 /// Play-evaluation harness (feature `arena`). Dev/research tooling — off by
 /// default so it never compiles into the shipped game.
 #[cfg(feature = "arena")]
 pub mod arena;
 mod assets;
-pub mod engine;
 pub(crate) mod features;
 pub mod high_scores;
 pub(crate) mod level;
-pub mod player;
 pub(crate) mod postfx;
 mod screens;
 pub mod settings;

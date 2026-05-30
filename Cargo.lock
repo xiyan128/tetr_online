@@ -999,6 +999,7 @@ dependencies = [
  "bevy_gizmos_render",
  "bevy_image",
  "bevy_input",
+ "bevy_input_focus",
  "bevy_log",
  "bevy_math",
  "bevy_mesh",
@@ -5038,6 +5039,26 @@ dependencies = [
 ]
 
 [[package]]
+name = "tetr-core"
+version = "0.1.0"
+dependencies = [
+ "array2d",
+ "bevy",
+ "itertools 0.14.0",
+ "rand 0.10.1",
+]
+
+[[package]]
+name = "tetr-embed"
+version = "0.1.0"
+dependencies = [
+ "console_error_panic_hook",
+ "getrandom 0.4.2",
+ "tetr-core",
+ "wasm-bindgen",
+]
+
+[[package]]
 name = "tetr_online"
 version = "0.1.0"
 dependencies = [
@@ -5054,6 +5075,7 @@ dependencies = [
  "rand 0.10.1",
  "ron",
  "serde",
+ "tetr-core",
  "web-sys",
 ]
 

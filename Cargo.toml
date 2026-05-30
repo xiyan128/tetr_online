@@ -7,6 +7,11 @@ edition = "2021"
 # `benches/common/` fixture module is never mistaken for its own bench target.
 autobenches = false
 
+# Workspace root. The engine-agnostic core (engine + player + ai) lives in
+# `crates/tetr-core` (no Bevy); `crates/tetr-embed` adds the wasm embed component.
+[workspace]
+members = ["crates/tetr-core", "crates/tetr-embed"]
+
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 # The `benches/` criterion suites are the only benchmark targets. The lib and bin
@@ -20,6 +25,10 @@ name = "tetr_online"
 bench = false
 
 [dependencies]
+# Engine-agnostic core (engine + player + ai), extracted to its own crate. `bevy`
+# feature on so the host keeps its keyboard-input adapter
+# (`RawKeyboardFrame::from_keyboard`).
+tetr-core = { path = "crates/tetr-core", features = ["bevy"] }
 array2d = "0.3.2"
 bevy_asset_loader = "0.26.0"
 itertools = "0.14.0"

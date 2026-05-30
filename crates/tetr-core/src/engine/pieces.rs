@@ -37,6 +37,25 @@ impl PieceType {
     }
 
     pub const LEN: usize = 7;
+
+    /// A stable `0..7` index in **guideline colour order** (`I, O, T, S, Z, J, L`),
+    /// the canonical mapping every renderer/binding should use to index a 7-entry
+    /// palette or sprite sheet. Deliberately independent of this enum's *declaration*
+    /// order (`I, J, L, O, S, T, Z`), so a binding never has to hard-code an order
+    /// that could silently drift if the enum is reordered. The `match` is exhaustive,
+    /// so adding a piece type is a compile error here rather than a wrong colour
+    /// downstream.
+    pub const fn render_index(self) -> u8 {
+        match self {
+            PieceType::I => 0,
+            PieceType::O => 1,
+            PieceType::T => 2,
+            PieceType::S => 3,
+            PieceType::Z => 4,
+            PieceType::J => 5,
+            PieceType::L => 6,
+        }
+    }
 }
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -148,7 +167,11 @@ impl Piece {
         }
     }
 
-    pub(crate) fn avatar_board(&self) -> Board {
+    /// A margin-less board holding this piece in its canonical spawn rotation, used
+    /// by the host to render piece previews (hold / next). `pub` because its only
+    /// caller, the Bevy game's previewer, lives in a separate crate now that the core
+    /// is extracted — a `pub(crate)` would stop at this crate's boundary.
+    pub fn avatar_board(&self) -> Board {
         let shape = Self::get_avatar_shape(self.piece_type);
         // get width and height of the avatar board
         // those are the max x and y values of the shape
@@ -325,6 +348,29 @@ mod tests {
             .collect::<Vec<_>>();
         cells.sort();
         cells
+    }
+
+    #[test]
+    fn render_index_is_the_canonical_guideline_colour_order() {
+        // Pin the I,O,T,S,Z,J,L mapping every binding/renderer depends on. This is
+        // deliberately decoupled from the enum's declaration order, so reordering the
+        // enum must not change these — if it does, a downstream palette silently
+        // mis-colours, and this test is the guard against that.
+        assert_eq!(PieceType::I.render_index(), 0);
+        assert_eq!(PieceType::O.render_index(), 1);
+        assert_eq!(PieceType::T.render_index(), 2);
+        assert_eq!(PieceType::S.render_index(), 3);
+        assert_eq!(PieceType::Z.render_index(), 4);
+        assert_eq!(PieceType::J.render_index(), 5);
+        assert_eq!(PieceType::L.render_index(), 6);
+        // Bijective over 0..7: every piece has a distinct index in range.
+        let mut seen = [false; PieceType::LEN];
+        for p in PieceType::all() {
+            let i = p.render_index() as usize;
+            assert!(i < PieceType::LEN, "render_index out of range");
+            assert!(!seen[i], "render_index collision at {i}");
+            seen[i] = true;
+        }
     }
 
     #[test]
