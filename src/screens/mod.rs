@@ -1,11 +1,11 @@
 //! Menu screen shells (A1.1).
 //!
 //! One plugin per non-gameplay screen — Title, MainMenu, ModeSelect, Options,
-//! Help, HighScores. Each spawns a keyboard-navigable placeholder on enter and
-//! tears it down on exit (`DespawnOnExit`). Navigation actually works (Up/Down
-//! move focus, Enter selects, Esc backs out); the *content* of Options/Help/
-//! HighScores is intentionally a stub that the corresponding feature plugin in
-//! [`crate::features`] fleshes out into its own file.
+//! Help, HighScores. Each spawns a keyboard-navigable screen root on enter and
+//! tears it down on exit (`DespawnOnExit`). Navigation works (Up/Down move
+//! focus, Enter selects, Esc backs out); the *content* of Options/Help/
+//! HighScores is supplied by the corresponding feature plugin in
+//! [`crate::features`], which attaches under this shell's screen root.
 //!
 //! [`crate::features`]: crate::features
 

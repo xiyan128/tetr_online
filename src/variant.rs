@@ -3,9 +3,9 @@
 //! A [`Variant`] selects the *rules around* a single game: which
 //! [`EngineConfig`] overrides apply, the goal system, the end condition, the
 //! display name, and which high-score category the result is filed under. The
-//! three variants are implemented INLINE here (not deferred to fan-out) because
-//! they cross-cut the info-panel (which reads goal/time/score) and high-scores
-//! (which file per category).
+//! three variants are implemented inline here (rather than as separate plugins)
+//! because they cross-cut the info-panel (which reads goal/time/score) and
+//! high-scores (which file per category).
 //!
 //! Wiring:
 //! * [`ActiveVariant`] resource (default [`Variant::Marathon`]) holds the chosen

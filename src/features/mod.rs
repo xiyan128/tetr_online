@@ -1,9 +1,8 @@
-//! Feature plugin stubs (M1 fan-out seam).
+//! Feature plugins (M1): one self-contained plugin per gameplay/UI feature.
 //!
-//! Each feature lives in its OWN file with an empty-but-registered Bevy plugin
-//! that a fan-out agent fleshes out without touching the others. They are wired
-//! into the app now (via [`FeaturesPlugin`]) so adding behavior is purely
-//! additive — no central registration churn.
+//! Each feature lives in its OWN file with its own Bevy plugin, all wired into the
+//! app via [`FeaturesPlugin`]. Keeping them separate means adding or changing one
+//! feature stays local to its file — no central registration churn.
 //!
 //! | feature        | file                          | plugin                     | fills |
 //! |----------------|-------------------------------|----------------------------|-------|
@@ -25,7 +24,7 @@ pub(crate) mod options;
 mod pause;
 mod sfx;
 
-/// Registers every feature stub plugin.
+/// Registers every feature plugin.
 pub struct FeaturesPlugin;
 
 impl Plugin for FeaturesPlugin {

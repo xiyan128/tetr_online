@@ -13,8 +13,6 @@
 //! the window. It is keyboard-navigable: Up/Down (and W/S) scroll by a line,
 //! PageUp/PageDown by a page, Home/End jump to the extremes. Esc-to-back is
 //! owned by the screen shell.
-//!
-//! Touch only this file.
 
 use bevy::prelude::*;
 

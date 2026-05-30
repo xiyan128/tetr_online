@@ -21,8 +21,6 @@
 //! absolute positioning, so it sits beside the world-space matrix (which the
 //! level renderer centers on its own 2D camera). Reuses
 //! [`crate::ui::theme`] + [`crate::ui::widgets`] styling for a consistent look.
-//!
-//! Touch only this file.
 
 use bevy::prelude::*;
 

@@ -16,10 +16,7 @@
 //! 2. **Background music** — [`start_music`] spawns a single looping track on
 //!    entering [`GameState::Playing`], tagged [`MusicTrack`] and despawned on
 //!    exit. Because no music asset ships in `assets/` yet, the track only spawns
-//!    when [`MusicAsset`] holds a handle; otherwise it warns once. See the
-//!    integrator note in this feature's report.
-//!
-//! Touch only this file.
+//!    when [`MusicAsset`] holds a handle; otherwise it warns once.
 
 use bevy::audio::Volume;
 use bevy::prelude::*;
@@ -37,9 +34,9 @@ struct MusicTrack;
 /// Optional handle to a looping background-music asset.
 ///
 /// No music file ships in `assets/` yet, so this defaults to `None` and music
-/// playback stays dormant. Once an asset exists, the integrator can load it into
-/// [`GameAssets`](crate::assets::GameAssets) and populate this resource (see
-/// report) and the music path lights up with zero further changes here.
+/// playback stays dormant. Once an asset exists, loading it into
+/// [`GameAssets`](crate::assets::GameAssets) and populating this resource lights up
+/// the music path with zero further changes here.
 #[derive(Resource, Default, Reflect)]
 #[reflect(Resource)]
 struct MusicAsset(Option<Handle<AudioSource>>);

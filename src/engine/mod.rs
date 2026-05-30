@@ -11,7 +11,6 @@
 
 mod active_piece;
 mod api;
-mod attack;
 mod board;
 mod constants;
 mod game_over;
@@ -29,7 +28,6 @@ pub use api::{
     ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
     InputFrame, SnapshotCell,
 };
-pub use attack::{apply_attack, AttackOutcome};
 pub use board::{Board, Cell, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
 pub use generator::PieceGenerator;

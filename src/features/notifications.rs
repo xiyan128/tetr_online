@@ -20,8 +20,6 @@
 //! side (the engine snapshot carries no combo field) by counting consecutive
 //! line-clearing locks; it stays deterministic because it reads only the engine
 //! event stream. Nothing here mutates simulation state.
-//!
-//! Touch only this file.
 
 use std::collections::BTreeMap;
 
