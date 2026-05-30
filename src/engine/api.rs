@@ -19,7 +19,7 @@ use crate::engine::lock_clear::lock_and_clear;
 use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 use crate::engine::scoring::{score_action, EngineScoreAction, ScoreAward, ScoreState};
-use crate::engine::t_spin::{classify_t_spin, TSpinKind};
+use crate::engine::t_spin::{classify_t_spin, is_t_slot, TSpinKind};
 use crate::engine::RotationDirection;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -413,7 +413,25 @@ impl Engine {
             return;
         }
 
-        active.rotate_to(rotation, origin, direction, kick_number, false);
+        // §7.5 point-5 override: if SRS test 5 placed a T into a T-slot, set the
+        // sticky flag so the spin classifies Full and survives later non-rotation
+        // actions (§12.4). Evaluate the slot on the *post-rotation* pose against
+        // the current board (the piece is not yet locked), using a throwaway probe
+        // so we can compute the flag before committing the real rotation.
+        let entered_t_slot_with_kick_5 =
+            kick_number == 5 && active.piece_type() == PieceType::T && {
+                let mut probe = active.clone();
+                probe.rotate_to(rotation, origin, direction, kick_number, false);
+                is_t_slot(&probe, &self.board)
+            };
+
+        active.rotate_to(
+            rotation,
+            origin,
+            direction,
+            kick_number,
+            entered_t_slot_with_kick_5,
+        );
         update_landing_state(&self.board, &self.config, active, was_landed, true);
         events.push(EngineEvent::Rotated {
             piece_type: active.piece_type(),
@@ -927,6 +945,55 @@ mod tests {
         let active = engine.snapshot().active.expect("rotated active piece");
         assert_eq!(active.rotation, PieceRotation::R90);
         assert_eq!(active.origin, kicked_origin);
+    }
+
+    #[test]
+    fn engine_sets_point_5_override_when_kick_5_rotates_into_a_t_slot() {
+        // Regression for the §7.5 point-5 override: `rotate_active_piece` must
+        // *compute* whether SRS test 5 placed the T into a T-slot, not hardcode it
+        // false. Build a board where a T's clockwise rotation can only resolve via
+        // test 5 (tests 1-4 all collide) and lands in a 3-corner T-slot, then drive
+        // the rotation through the real `step` path.
+        //
+        // T at R0 origin (4,5); after the test-5 kick (-1,-2) it rests at R90
+        // origin (3,3), center (4,4). Blockers at (5,5)+(4,7) fail tests 1-4, and
+        // corners (3,5),(5,5),(3,3) make the landing a T-slot. The test-5 landing
+        // cells (4,5),(4,4),(5,4),(4,3) are left clear so the kick succeeds.
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        for (x, y) in [(5, 5), (4, 7), (3, 5), (3, 3)] {
+            engine.set_cell(x, y, CellKind::Some(PieceType::O));
+        }
+        engine.set_active(ActivePiece::new(PieceType::T, (4, 5)));
+
+        let events = engine.step(InputFrame {
+            rotate_clockwise: true,
+            ..InputFrame::default()
+        });
+
+        // The rotation resolved via SRS test 5 (kick number 5)...
+        assert!(
+            events.iter().any(|event| matches!(
+                event,
+                EngineEvent::Rotated {
+                    kick_number: 5,
+                    rotation: PieceRotation::R90,
+                    ..
+                }
+            )),
+            "expected a kick-5 R90 rotation, got {events:?}",
+        );
+        // ...and the engine recorded the kick-5-into-T-slot override, so the spin
+        // classifies Full and survives a later soft-drop / lateral tap (§12.4).
+        // Before the fix this flag was never set through `step` (only by tests
+        // hand-building an `ActivePiece`), so a real TST silently lost its scoring.
+        assert!(
+            engine
+                .active
+                .as_ref()
+                .expect("active piece after rotation")
+                .used_kick_5_into_t_slot(),
+            "kick-5 rotation into a T-slot must set the sticky point-5 override",
+        );
     }
 
     #[test]

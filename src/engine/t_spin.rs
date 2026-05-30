@@ -78,6 +78,17 @@ pub fn t_spin_corners(active_piece: &ActivePiece, board: &Board) -> Option<TSpin
     })
 }
 
+/// Whether `active_piece` (a T) currently sits in a T-slot: at least three of
+/// its four diagonal corners blocked.
+///
+/// This is the guideline §7.5 `isTSlot` predicate. The engine evaluates it at a
+/// kick-5 rotation's resting pose to decide whether to set the sticky
+/// `used_kick_5_into_t_slot` flag, which promotes the spin to Full and *survives*
+/// later non-rotation actions (§12.4). Returns `false` for a non-T piece.
+pub fn is_t_slot(active_piece: &ActivePiece, board: &Board) -> bool {
+    t_spin_corners(active_piece, board).is_some_and(|corners| corners.blocked_count() >= 3)
+}
+
 pub fn classify_t_spin(active_piece: &ActivePiece, board: &Board) -> Option<TSpinKind> {
     if active_piece.piece_type() != PieceType::T {
         return None;
@@ -182,6 +193,35 @@ mod tests {
         let board = board_with_blocked_corners(&[(-1, 1), (1, 1)]);
 
         assert_eq!(classify_t_spin(&active_piece, &board), None);
+    }
+
+    #[test]
+    fn is_t_slot_requires_three_blocked_corners() {
+        let active_piece = rotated_t(PieceRotation::R0, 1, false);
+        assert!(!is_t_slot(
+            &active_piece,
+            &board_with_blocked_corners(&[(-1, 1), (1, 1)])
+        ));
+        assert!(is_t_slot(
+            &active_piece,
+            &board_with_blocked_corners(&[(-1, 1), (1, 1), (-1, -1)])
+        ));
+    }
+
+    #[test]
+    fn non_t_piece_is_never_a_t_slot() {
+        let mut l_piece = ActivePiece::new(PieceType::L, ORIGIN);
+        l_piece.rotate_to(
+            PieceRotation::R90,
+            ORIGIN,
+            RotationDirection::Clockwise,
+            1,
+            false,
+        );
+        assert!(!is_t_slot(
+            &l_piece,
+            &board_with_blocked_corners(&[(-1, 1), (1, 1), (-1, -1), (1, -1)])
+        ));
     }
 
     #[test]
