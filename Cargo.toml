@@ -53,9 +53,20 @@ bevy_egui = { version = "0.39", optional = true }
 # `cargo run` and `cargo test` Just Work; the web build script passes
 # `--no-default-features --features webgpu` for the WebGPU bundle. On native
 # targets `bevy/webgl2` is inert (it only constrains the wasm wgpu backend).
-default = ["webgl2"]
+# `bloom` is in `default` so native `cargo run`/`cargo test` get the full neon
+# spectacle, but the web build is renderer-split: the WebGL2 bundle is built with
+# `--no-default-features --features webgl2` (see scripts/build.ts) so it DROPS
+# bloom, while the WebGPU bundle adds it back. WebGPU-first by design.
+default = ["webgl2", "bloom"]
 webgl2 = ["bevy/webgl2"]
-webgpu = ["bevy/webgpu"]
+webgpu = ["bevy/webgpu", "bloom"]
+# Neon bloom / HDR glow (Tetris-Effect look). Pulls Bevy's `bevy_post_process`.
+# Bevy 0.18's built-in bloom is NOT WebGL2-compatible, so this is deliberately
+# absent from the shipped WebGL2 bundle and present on native + the WebGPU bundle.
+# Gating the CODE on `feature = "bloom"` (camera HDR/bloom + over-bright glow
+# colors) keeps the WebGL2 wasm lean and never lights up a broken path. A
+# fine-grained feature, per the size policy — NOT the `2d`/`ui` collections.
+bloom = ["bevy/bevy_post_process"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
 # never touches release builds. Usage: `cargo run --features dev`.
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]

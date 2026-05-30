@@ -75,6 +75,7 @@ impl Plugin for LevelPlugin {
             .register_type::<StaticBlock>()
             .register_type::<GhostBlock>()
             .register_type::<PreviewBlock>()
+            .register_type::<GameplayCamera>()
             // Shared M1 contracts the gameplay systems read. `init_resource` is
             // idempotent, so `GamePlugin` remains the canonical owner while
             // `LevelPlugin` stays self-sufficient (e.g. in headless tests).
@@ -212,14 +213,12 @@ fn level_setup(
     }
     commands.entity(field).add_children(&block_ids);
 
-    // Camera centered on the visible board.
+    // Camera centered on the visible board. Tagged `GameplayCamera` so visual-FX
+    // systems (shake/bloom/CRT) can target it without disturbing menu cameras.
     commands.spawn((
         Camera2d,
-        Transform::from_translation(Vec3::new(
-            config.block_size * config.board_width as f32 / 2.,
-            config.block_size * config.board_height as f32 / 2.,
-            1.0,
-        )),
+        GameplayCamera,
+        Transform::from_translation(camera_center(&config)),
         DespawnOnExit(GameState::Playing),
     ));
 }

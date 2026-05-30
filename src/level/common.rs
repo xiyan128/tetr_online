@@ -9,6 +9,8 @@
 use crate::assets::GameAssets;
 use crate::engine::{Cell, CellKind, LockDownMode, PieceType};
 use bevy::color::Alpha;
+#[cfg(feature = "bloom")]
+use bevy::color::LinearRgba;
 use bevy::math::{IVec2, Vec2, Vec3};
 use bevy::prelude::{
     Color, Commands, Component, Entity, Reflect, ReflectComponent, ReflectResource, Res, Resource,
@@ -133,8 +135,27 @@ pub struct GhostBlock;
 #[reflect(Component)]
 pub struct PreviewBlock;
 
+/// Marker for the in-game camera spawned by `level_setup`. Visual-FX systems that
+/// target *gameplay* specifically — screen shake, neon bloom, the CRT pass — query
+/// this so they never disturb the separate menu cameras.
+#[derive(Component, Reflect)]
+#[reflect(Component)]
+pub struct GameplayCamera;
+
 pub fn to_translation(x: isize, y: isize, block_size: f32) -> Vec3 {
     IVec2::new(x as i32, y as i32).as_vec2().extend(0.0) * block_size
+}
+
+/// World-space rest position of the gameplay camera: centered on the visible
+/// board at `z = 1`. The single source of truth for where the camera sits, shared
+/// by `level_setup` (which spawns it there) and the screen-shake system (which
+/// offsets from it and restores it), so the centering formula lives in one place.
+pub fn camera_center(config: &LevelConfig) -> Vec3 {
+    Vec3::new(
+        config.block_size * config.board_width as f32 / 2.0,
+        config.block_size * config.board_height as f32 / 2.0,
+        1.0,
+    )
 }
 
 /// Build a render block at a single board/ghost/preview cell. Reused verbatim
@@ -159,7 +180,7 @@ pub fn spawn_free_block(
             let CellKind::Some(piece_type) = cell.cell_kind() else {
                 unreachable!("Falling/Preview/Static block spawned from a cell with no piece type");
             };
-            piece_color(piece_type)
+            mino_render_color(piece_type)
         }
         BlockKind::Ghost => Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
         BlockKind::Background => Color::srgb(0.1, 0.1, 0.1),
@@ -239,4 +260,30 @@ pub fn piece_color(piece_type: PieceType) -> Color {
         PieceType::T => Color::srgb_u8(161, 83, 152),  // purple
         PieceType::Z => Color::srgb_u8(216, 57, 52),   // red
     }
+}
+
+/// Multiplier that lifts mino colors past the bloom threshold so they glow under
+/// the neon pass. Only compiled with the `bloom` feature — on the WebGL2 bundle an
+/// over-bright color would merely clamp to a washed-out white, so the plain palette
+/// is used instead.
+#[cfg(feature = "bloom")]
+const MINO_GLOW: f32 = 1.6;
+
+/// On-screen color for a piece's minos: [`piece_color`] lifted into HDR for the
+/// bloom glow on capable builds, or the plain palette color otherwise. The hue is
+/// preserved (all channels scale together); the brightest channels clip to a
+/// neon-white core while bloom carries the color out into the halo.
+pub fn mino_render_color(piece_type: PieceType) -> Color {
+    let base = piece_color(piece_type);
+    #[cfg(feature = "bloom")]
+    {
+        let c = base.to_linear();
+        Color::LinearRgba(LinearRgba::rgb(
+            c.red * MINO_GLOW,
+            c.green * MINO_GLOW,
+            c.blue * MINO_GLOW,
+        ))
+    }
+    #[cfg(not(feature = "bloom"))]
+    base
 }

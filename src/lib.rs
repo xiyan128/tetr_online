@@ -31,11 +31,13 @@ pub(crate) mod features;
 pub mod high_scores;
 pub(crate) mod level;
 pub mod player;
+pub(crate) mod postfx;
 mod screens;
 pub mod settings;
 pub mod storage;
 pub(crate) mod ui;
 pub mod variant;
+pub(crate) mod vfx;
 
 pub use crate::engine::{
     apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_duration,
@@ -121,6 +123,9 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
+            // Runtime visual-FX toggles (all-on; the dev panel flips them live).
+            .init_resource::<crate::vfx::VfxToggles>()
+            .register_type::<crate::vfx::VfxToggles>()
             // Reflection registration for the shared M1 contracts (canonical
             // owner). Inner non-engine types embedded in these (Keybinds,
             // GameAction, Variant, HighScore) are registered so the inspector can
@@ -145,7 +150,9 @@ impl Plugin for GamePlugin {
             // keyboard vs. AI, so adding this is purely additive.
             .add_plugins(crate::ai::AiSandboxPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
-            .add_plugins(crate::features::FeaturesPlugin);
+            .add_plugins(crate::features::FeaturesPlugin)
+            // Render-pipeline visual effects (CRT pass; bloom on capable builds).
+            .add_plugins(crate::postfx::PostFxPlugin);
 
         #[cfg(debug_assertions)]
         {
@@ -167,7 +174,9 @@ impl Plugin for GamePlugin {
         {
             app.add_plugins(EguiPlugin::default())
                 .add_plugins(DefaultInspectorConfigPlugin)
-                .add_systems(EguiPrimaryContextPass, dev_inspector_ui);
+                .add_systems(EguiPrimaryContextPass, dev_inspector_ui)
+                // Live per-effect toggles for the visual-FX stack.
+                .add_systems(EguiPrimaryContextPass, crate::vfx::vfx_debug_panel);
         }
     }
 }
