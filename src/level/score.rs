@@ -9,7 +9,7 @@
 
 use crate::engine::{EngineScoreAction, TSpinKind};
 use crate::level::engine_bridge::{FrameEvents, LatestSnapshot};
-use crate::{GameState, InGameplay};
+use crate::{GameState, PauseState};
 use bevy::prelude::*;
 
 pub struct ScorePlugin;
@@ -19,11 +19,13 @@ impl Plugin for ScorePlugin {
         app.add_message::<ScoreTypes>()
             .insert_resource(Scorer::default())
             .register_type::<Scorer>()
-            // Reset once per session (not on resume from pause).
-            .add_systems(OnEnter(InGameplay), reset_score)
+            // Reset once per session (OnEnter Playing; pause is a sub-state, so
+            // resuming does not re-enter Playing and the score is preserved).
+            .add_systems(OnEnter(GameState::Playing), reset_score)
             .add_systems(
                 Update,
-                (mirror_snapshot_score, emit_score_types).run_if(in_state(GameState::Playing)),
+                // Frozen while paused: `PauseState::Running` implies `Playing`.
+                (mirror_snapshot_score, emit_score_types).run_if(in_state(PauseState::Running)),
             );
     }
 }

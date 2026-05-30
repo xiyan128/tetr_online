@@ -29,8 +29,8 @@ enum MenuActions {
 }
 
 pub fn setup_game_over_ui(mut commands: Commands, game_assets: Res<GameAssets>) {
-    // The gameplay camera is despawned on leaving `InGameplay`, so the game-over
-    // screen needs its own camera or its UI renders to nothing (a blank screen).
+    // The gameplay camera is despawned on leaving `GameState::Playing`, so the
+    // game-over screen needs its own camera or its UI renders to nothing.
     commands.spawn((Camera2d, DespawnOnExit(GameState::GameOver)));
 
     let font = TextFont {

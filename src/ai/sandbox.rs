@@ -14,7 +14,7 @@
 //! [`PlayerInput`](crate::level::PlayerInput). This plugin instead:
 //!
 //! 1. Owns an [`AiSandbox`] flag the menu arms ("Watch AI") or clears ("Play").
-//! 2. On entering a gameplay session ([`InGameplay`]), when the flag is set,
+//! 2. On entering a gameplay session ([`GameState::Playing`]), when the flag is set,
 //!    inserts an [`AiPlayer`] resource holding a fresh [`AiController`].
 //! 3. Adds [`step_engine_ai`] to `FixedUpdate`, gated on `Playing` **and** the
 //!    flag, which drives the engine through the engine-agnostic
@@ -39,7 +39,7 @@ use bevy::prelude::*;
 use crate::ai::AiController;
 use crate::level::{EngineState, FrameEvents, LatestSnapshot};
 use crate::player::drive_engine;
-use crate::{GameState, InGameplay};
+use crate::{GameState, PauseState};
 
 /// Whether the current (or next) gameplay session is the AI sandbox.
 ///
@@ -59,7 +59,7 @@ impl AiSandbox {
 }
 
 /// The bot driving the sandbox session. Inserted on entering gameplay while
-/// [`AiSandbox`] is set; dropped when the session ends ([`InGameplay`] exits).
+/// [`AiSandbox`] is set; dropped when the session ends ([`GameState::Playing`] exits).
 ///
 /// Stored as a **non-send resource** (`NonSend`/`NonSendMut`): [`AiController`] is
 /// `Send` but not `Sync` (its [`ComputeRunner`](crate::ai::ComputeRunner) seam is
@@ -79,20 +79,24 @@ impl Plugin for AiSandboxPlugin {
     fn build(&self, app: &mut App) {
         app.init_resource::<AiSandbox>()
             .register_type::<AiSandbox>()
-            // Build the controller when a sandbox session starts. Session-scoped
-            // (InGameplay) so a Playing -> Paused -> Playing round-trip keeps the
-            // same bot, mirroring how the keyboard controller persists.
-            .add_systems(OnEnter(InGameplay), setup_ai_player.run_if(sandbox_active))
+            // Build the controller when a sandbox session starts. Scoped to
+            // OnEnter(Playing); pause is a sub-state of Playing, so a pause/resume
+            // round-trip keeps the same bot, mirroring the keyboard controller.
+            .add_systems(
+                OnEnter(GameState::Playing),
+                setup_ai_player.run_if(sandbox_active),
+            )
             // Drop the bot when the session ends so it never lingers into a later
             // keyboard game and each sandbox run starts from a fresh controller.
-            .add_systems(OnExit(InGameplay), teardown_ai_player)
+            .add_systems(OnExit(GameState::Playing), teardown_ai_player)
             // Drive the engine with the AI once per fixed slice, only while a
-            // sandbox game is actually playing. Mutually exclusive with the
-            // keyboard `step_engine` (gated on `not sandbox_active`); their
-            // conflicting access to the engine resources keeps them ordered.
+            // sandbox game is actually running (frozen while paused — `Running`
+            // implies `Playing`). Mutually exclusive with the keyboard
+            // `step_engine` (gated on `not sandbox_active`); their conflicting
+            // access to the engine resources keeps them ordered.
             .add_systems(
                 FixedUpdate,
-                step_engine_ai.run_if(in_state(GameState::Playing).and(sandbox_active)),
+                step_engine_ai.run_if(in_state(PauseState::Running).and(sandbox_active)),
             );
     }
 }
@@ -202,7 +206,7 @@ mod tests {
             .add_plugins(LevelPlugin)
             .add_plugins(AiSandboxPlugin);
         // Arm (or clear) the sandbox before entering the session, exactly as the
-        // menu does, so `OnEnter(InGameplay)` sees the right flag.
+        // menu does, so `OnEnter(GameState::Playing)` sees the right flag.
         app.insert_resource(AiSandbox(arm));
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
@@ -276,7 +280,7 @@ mod tests {
         let mut app = headless_sandbox_app(true);
         assert!(app.world().get_non_send_resource::<AiPlayer>().is_some());
 
-        // Quit to the main menu: exits InGameplay, firing teardown.
+        // Quit to the main menu: exits Playing, firing teardown.
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
             .set(GameState::MainMenu);

@@ -15,7 +15,7 @@ use crate::level::score::Scorer;
 use crate::level::ui::piece_previewer::*;
 use crate::level::ui::placement_timer_bar::*;
 use crate::level::ui::score_views::*;
-use crate::{GameState, InGameplay};
+use crate::{GameState, PauseState};
 
 pub(crate) struct UIPlugin;
 
@@ -29,9 +29,10 @@ impl Plugin for UIPlugin {
             .register_type::<ScoreText>()
             .register_type::<LineCountText>()
             .register_type::<ScoreTypeText>();
-        // Spawned once per session so they survive a pause/resume round-trip.
+        // Spawned once per session (OnEnter Playing). Pause is a sub-state of
+        // Playing, so these survive a pause/resume round-trip.
         app.add_systems(
-            OnEnter(InGameplay),
+            OnEnter(GameState::Playing),
             (
                 spawn_piece_previewer,
                 spawn_hold_viewer,
@@ -44,12 +45,12 @@ impl Plugin for UIPlugin {
         .add_systems(
             Update,
             update_piece_previewer
-                .run_if(in_state(GameState::Playing).and(any_with_component::<PiecePreviewer>)),
+                .run_if(in_state(PauseState::Running).and(any_with_component::<PiecePreviewer>)),
         )
         .add_systems(
             Update,
             update_hold_viewer
-                .run_if(in_state(GameState::Playing).and(any_with_component::<HoldViewer>)),
+                .run_if(in_state(PauseState::Running).and(any_with_component::<HoldViewer>)),
         )
         .add_systems(
             Update,
@@ -74,7 +75,7 @@ impl Plugin for UIPlugin {
         .add_systems(
             Update,
             update_locking_timer_bar
-                .run_if(in_state(GameState::Playing).and(any_with_component::<LockingTimerBar>)),
+                .run_if(in_state(PauseState::Running).and(any_with_component::<LockingTimerBar>)),
         )
         .add_systems(OnExit(PlayingState::Locking), despawn_locking_timer_bar);
     }

@@ -18,7 +18,7 @@ use bevy::sprite::Anchor;
 use bevy::state::state::StateSet;
 use std::time::Duration;
 
-use crate::{DespawnOnExit, GameState, InGameplay};
+use crate::{DespawnOnExit, GameState};
 
 /// Audio cue, decoupled from the engine. The engine-bridge maps [`EngineEvent`]s
 /// (Rotated/HardDropped/Held/Locked) onto these so the existing
@@ -223,7 +223,9 @@ pub fn spawn_snapshot_block(
 ) -> Entity {
     let cell = Cell::new(x, y, crate::engine::CellKind::Some(piece_type));
     let entity = spawn_free_block(commands, config, texture_assets, &cell, block_kind);
-    commands.entity(entity).insert(DespawnOnExit(InGameplay));
+    commands
+        .entity(entity)
+        .insert(DespawnOnExit(GameState::Playing));
     entity
 }
 

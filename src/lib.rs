@@ -48,7 +48,8 @@ use crate::level::LevelPlugin;
 /// Top-level screen the app is on. Drives which plugins' systems run and which
 /// UI is spawned. Flow: `Loading` (asset load) -> `Title` -> `MainMenu`, with
 /// `ModeSelect`/`Options`/`Help`/`HighScores` reachable from the menu, `Playing`
-/// the active game, and `Paused`/`GameOver` layered over/after it.
+/// the active game, and `GameOver` after it. Pausing is a sub-state of `Playing`
+/// (see [`PauseState`]), not a sibling state, so it never exits the session.
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 pub enum GameState {
     /// Asset loading; advances to [`GameState::Title`] when assets are ready.
@@ -67,29 +68,38 @@ pub enum GameState {
     /// Leaderboards (filled by the high-scores feature).
     HighScores,
     /// Active gameplay (formerly `InGame`). The engine is authoritative here.
+    /// Pause is the [`PauseState`] sub-state of this, so the session persists
+    /// across pause/resume.
     Playing,
-    /// Gameplay paused; overlay shown by the pause feature, engine frozen.
-    Paused,
     /// Post-game results; offers restart / back to menu.
     GameOver,
 }
 
-/// Computed state that is active whenever a gameplay session is alive — i.e.
-/// [`GameState::Playing`] **or** [`GameState::Paused`]. Gameplay entities and the
-/// level `OnEnter` setup are scoped to this (via `OnEnter(InGameplay)` /
-/// `DespawnOnExit(InGameplay)`) so the board survives a `Playing -> Paused ->
-/// Playing` round-trip instead of being despawned and rebuilt (which would reset
-/// the run). Per-frame run conditions stay on `GameState::Playing`, so the
-/// simulation still freezes while paused.
-#[derive(Clone, PartialEq, Eq, Hash, Debug)]
-pub struct InGameplay;
-
-impl ComputedStates for InGameplay {
-    type SourceStates = GameState;
-
-    fn compute(sources: GameState) -> Option<Self> {
-        matches!(sources, GameState::Playing | GameState::Paused).then_some(InGameplay)
-    }
+/// Pause sub-state of [`GameState::Playing`].
+///
+/// Pause is modeled as a **sub-state of the active game**, not a sibling
+/// `GameState`, so toggling it never exits `Playing`. The engine, board, camera,
+/// and HUD are all scoped to `OnEnter(GameState::Playing)` /
+/// `DespawnOnExit(GameState::Playing)`, so they survive a pause/resume round-trip
+/// with no rebuild.
+///
+/// (A previous design used a `Playing | Paused` **computed** state for this scope,
+/// but a `ComputedStates` re-runs its `OnEnter`/`OnExit` on *every* source change —
+/// including identity transitions where the computed value is unchanged — so
+/// pausing despawned and rebuilt the whole session, restarting the game on every
+/// resume. A sub-state's transitions fire only when the sub-state itself changes.)
+///
+/// Per-frame gameplay systems (the engine driver, reconcilers, score/UI updates)
+/// run on `in_state(PauseState::Running)`, so the simulation freezes while paused
+/// while every gameplay entity stays alive.
+#[derive(SubStates, Clone, PartialEq, Eq, Hash, Debug, Default)]
+#[source(GameState = GameState::Playing)]
+pub enum PauseState {
+    /// The game is live; the simulation advances.
+    #[default]
+    Running,
+    /// Paused: the overlay is shown and the simulation is frozen.
+    Paused,
 }
 
 pub struct GamePlugin;
@@ -97,7 +107,6 @@ pub struct GamePlugin;
 impl Plugin for GamePlugin {
     fn build(&self, app: &mut App) {
         app.init_state::<GameState>()
-            .add_computed_state::<InGameplay>()
             .add_loading_state(
                 LoadingState::new(GameState::Loading)
                     .load_collection::<crate::assets::GameAssets>()

@@ -13,18 +13,17 @@
 //!   restores them on resume, and
 //! * draws a keyboard-navigable "PAUSE" overlay offering **Resume** / **Quit**.
 //!
-//! ## Cross-cutting contract this relies on
-//! Gameplay entities and the level `OnEnter` setup must be scoped to the *whole
-//! session* (Playing **or** Paused), not to `Playing` alone. Otherwise the
-//! `Playing -> Paused` transition would fire `DespawnOnExit(GameState::Playing)`
-//! (despawning the board) and `Paused -> Playing` would re-run `level_setup`
-//! (rebuilding a fresh `Engine`), resetting the game. The integrator wires a
-//! `InGameplay` computed state for that scoping; see this module's report. The
-//! per-frame driver/reconciler/UI-update run conditions stay on `Playing` so the
-//! sim still freezes while paused. This file does not depend on the computed
-//! state by name — it only hides/restores visibility and toggles `GameState`.
-//!
-//! Touch only this file.
+//! ## How pause is modeled
+//! Pause is the [`PauseState`](crate::PauseState) **sub-state of
+//! [`GameState::Playing`]** (Running/Paused), not a sibling `GameState`. Toggling
+//! it never exits `Playing`, so the session — engine, board, camera, and HUD, all
+//! scoped to `OnEnter(GameState::Playing)` / `DespawnOnExit(GameState::Playing)` —
+//! survives a pause/resume round-trip with no rebuild. The level's per-frame
+//! driver/reconciler/UI systems gate on `PauseState::Running`, so the simulation
+//! freezes while paused without anything being despawned. (An earlier design used
+//! a `Playing | Paused` *computed* state for the session scope, but a
+//! `ComputedStates` re-runs OnEnter/OnExit on every source change — restarting the
+//! game on each pause; the sub-state avoids that.)
 
 use bevy::prelude::*;
 
@@ -33,7 +32,7 @@ use crate::level::common::{BackgroundBlock, FallingBlock, GhostBlock, PreviewBlo
 use crate::settings::{GameAction, GameSettings};
 use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, Focusable, NavAction};
 use crate::ui::widgets::{label_text, menu_button, screen_root, title_text};
-use crate::{GameState, InGameplay};
+use crate::{GameState, PauseState};
 
 /// Pause overlay + `Playing <-> Paused` toggle.
 pub struct PausePlugin;
@@ -44,27 +43,28 @@ impl Plugin for PausePlugin {
             // Inspector/scene registration for this feature's markers.
             .register_type::<PauseRoot>()
             .register_type::<PauseAction>()
-            // Enter pause from gameplay on the Pause keybind.
+            // Pause from gameplay on the Pause keybind (only while running).
             .add_systems(
                 Update,
-                toggle_to_paused.run_if(in_state(GameState::Playing)),
+                toggle_to_paused.run_if(in_state(PauseState::Running)),
             )
-            // Build the overlay on pause; DespawnOnExit(Paused) tears it down.
-            .add_systems(OnEnter(GameState::Paused), setup_pause_overlay)
-            // Conceal the playfield iff paused, re-evaluated EVERY frame. Doing
-            // this idempotently (instead of a one-shot OnEnter-hide / OnExit-show
-            // pair) means rapid Esc toggling can never leave the board stuck
-            // hidden or stuck shown — visibility always matches the live state.
+            // Build the overlay on pause; DespawnOnExit(PauseState::Paused) tears it
+            // down on resume — and also when the parent `Playing` exits (Quit).
+            .add_systems(OnEnter(PauseState::Paused), setup_pause_overlay)
+            // Conceal the playfield iff paused, re-evaluated EVERY frame in a
+            // session. Idempotent (not a one-shot OnEnter-hide / OnExit-show pair),
+            // so rapid toggling can never leave the board stuck hidden or shown —
+            // visibility always matches the live sub-state.
             .add_systems(
                 Update,
-                sync_gameplay_visibility.run_if(in_state(InGameplay)),
+                sync_gameplay_visibility.run_if(in_state(GameState::Playing)),
             )
             // Drive the overlay's focus + selection while paused.
             .add_systems(
                 Update,
                 (focus_navigation::<PauseRoot>, activate)
                     .chain()
-                    .run_if(in_state(GameState::Paused)),
+                    .run_if(in_state(PauseState::Paused)),
             );
     }
 }
@@ -93,14 +93,14 @@ fn pause_just_pressed(keys: &ButtonInput<KeyCode>, settings: &GameSettings) -> b
     keys.just_pressed(primary) || secondary.is_some_and(|key| keys.just_pressed(key))
 }
 
-/// While playing, the Pause keybind transitions to [`GameState::Paused`].
+/// While running, the Pause keybind enters the [`PauseState::Paused`] sub-state.
 fn toggle_to_paused(
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<GameSettings>,
-    mut next: ResMut<NextState<GameState>>,
+    mut pause: ResMut<NextState<PauseState>>,
 ) {
     if pause_just_pressed(&keys, &settings) {
-        next.set(GameState::Paused);
+        pause.set(PauseState::Paused);
     }
 }
 
@@ -114,7 +114,7 @@ fn setup_pause_overlay(mut commands: Commands, assets: Res<GameAssets>) {
             screen_root(),
             // Dim the (hidden) board behind the overlay for contrast.
             BackgroundColor(Color::srgba(0.0, 0.0, 0.0, 0.7)),
-            DespawnOnExit(GameState::Paused),
+            DespawnOnExit(PauseState::Paused),
             children![
                 title_text("PAUSE", assets.font.clone()),
                 label_text("Enter to select  -  Esc to resume", assets.font.clone()),
@@ -137,13 +137,14 @@ fn activate(
     settings: Res<GameSettings>,
     lists: Query<&FocusList, With<PauseRoot>>,
     actions: Query<(&Focusable, &PauseAction)>,
-    mut next: ResMut<NextState<GameState>>,
+    mut pause: ResMut<NextState<PauseState>>,
+    mut game: ResMut<NextState<GameState>>,
 ) {
     // The Pause keybind (when it isn't Escape) also resumes, mirroring the
-    // Playing-side toggle so the same key pauses and unpauses.
+    // Running-side toggle so the same key pauses and unpauses.
     let (primary, _) = settings.keybinds.get(GameAction::Pause);
     if primary != KeyCode::Escape && pause_just_pressed(&keys, &settings) {
-        next.set(GameState::Playing);
+        pause.set(PauseState::Running);
         return;
     }
 
@@ -154,15 +155,17 @@ fn activate(
         return;
     };
     match read_nav_action(&keys, list) {
-        Some(NavAction::Back) => next.set(GameState::Playing),
+        // Resume = re-enter the Running sub-state (stays in Playing). Quit = leave
+        // Playing entirely, which despawns the session and the overlay.
+        Some(NavAction::Back) => pause.set(PauseState::Running),
         Some(NavAction::Select(index)) => {
             for (focusable, action) in &actions {
                 if focusable.index != index {
                     continue;
                 }
                 match action {
-                    PauseAction::Resume => next.set(GameState::Playing),
-                    PauseAction::Quit => next.set(GameState::MainMenu),
+                    PauseAction::Resume => pause.set(PauseState::Running),
+                    PauseAction::Quit => game.set(GameState::MainMenu),
                 }
             }
         }
@@ -192,10 +195,10 @@ type GameplayContent = Or<(
 /// scoped), so we hide rather than despawn; the engine snapshot is preserved for
 /// a clean resume, and the reconcilers repaint pieces on the next Playing frame.
 fn sync_gameplay_visibility(
-    state: Res<State<GameState>>,
+    pause: Res<State<PauseState>>,
     mut content: Query<&mut Visibility, GameplayContent>,
 ) {
-    let desired = if *state.get() == GameState::Paused {
+    let desired = if *pause.get() == PauseState::Paused {
         Visibility::Hidden
     } else {
         Visibility::Inherited
@@ -204,5 +207,116 @@ fn sync_gameplay_visibility(
         if *visibility != desired {
             *visibility = desired;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::assets::GameAssets;
+    use crate::engine::InputFrame;
+    use crate::level::{EngineState, LevelPlugin};
+
+    fn test_assets() -> GameAssets {
+        GameAssets {
+            block_texture: default(),
+            hard_drop_sound: default(),
+            placed_sound: default(),
+            line_clear_1: default(),
+            line_clear_2: default(),
+            line_clear_3: default(),
+            line_clear_4: default(),
+            locked_sound: default(),
+            hold_sound: default(),
+            rotation_sound: default(),
+            font: default(),
+        }
+    }
+
+    fn count_cameras(app: &mut App) -> usize {
+        app.world_mut()
+            .query_filtered::<(), With<Camera2d>>()
+            .iter(app.world())
+            .count()
+    }
+
+    fn set_state(app: &mut App, state: GameState) {
+        app.world_mut()
+            .resource_mut::<NextState<GameState>>()
+            .set(state);
+        app.update(); // queue the transition
+        app.update(); // apply it + run OnEnter/OnExit
+    }
+
+    fn set_pause(app: &mut App, pause: PauseState) {
+        app.world_mut()
+            .resource_mut::<NextState<PauseState>>()
+            .set(pause);
+        app.update();
+        app.update();
+    }
+
+    /// Pausing and resuming must NOT restart the game or leak gameplay entities.
+    /// Pause is a `PauseState` sub-state of `Playing`, so toggling it must not exit
+    /// `Playing` — which would re-run `level_setup` and start a fresh game. This is
+    /// the regression guard for that (it caught the old computed-state design).
+    #[test]
+    fn pause_resume_preserves_the_engine_session() {
+        let mut app = App::new();
+        app.add_plugins((MinimalPlugins, bevy::state::app::StatesPlugin))
+            .init_state::<GameState>()
+            // LevelPlugin registers the PauseState sub-state of GameState::Playing.
+            .insert_resource(ButtonInput::<KeyCode>::default())
+            .insert_resource(test_assets())
+            .add_plugins(LevelPlugin);
+
+        // Enter a gameplay session.
+        set_state(&mut app, GameState::Playing);
+        assert!(
+            app.world().get_resource::<EngineState>().is_some(),
+            "entering Playing should run level_setup"
+        );
+        assert_eq!(count_cameras(&mut app), 1, "exactly one gameplay camera");
+
+        // Lock a piece so the board is non-empty — our "did the engine reset" probe.
+        {
+            let mut engine = app.world_mut().resource_mut::<EngineState>();
+            engine.0.step(InputFrame::default()); // spawn the first piece
+            engine.0.step(InputFrame {
+                hard_drop: true,
+                ..default()
+            }); // drop + lock it
+        }
+        let cells_before = app
+            .world()
+            .resource::<EngineState>()
+            .0
+            .snapshot()
+            .board_cells
+            .len();
+        assert!(cells_before > 0, "setup: a piece should be locked");
+
+        // Pause, then resume — via the PauseState SUB-state, not a GameState
+        // transition. The whole point of the fix: `Playing` never exits.
+        set_pause(&mut app, PauseState::Paused);
+        set_pause(&mut app, PauseState::Running);
+
+        // The session must survive: same board (no new game), one camera (no leak).
+        let cells_after = app
+            .world()
+            .resource::<EngineState>()
+            .0
+            .snapshot()
+            .board_cells
+            .len();
+        assert_eq!(
+            cells_after, cells_before,
+            "pause/resume reset the engine — the new-game bug"
+        );
+        assert_eq!(
+            count_cameras(&mut app),
+            1,
+            "pause/resume duplicated the gameplay camera — the lag bug"
+        );
     }
 }

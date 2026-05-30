@@ -21,7 +21,7 @@ use crate::level::score::ScorePlugin;
 use crate::level::sound_effects::SoundEffectsPlugin;
 use crate::level::ui::UIPlugin;
 use crate::player::{KeyboardController, PlayerController};
-use crate::{GameState, InGameplay};
+use crate::{GameState, PauseState};
 
 pub(crate) mod common;
 pub(crate) mod engine_bridge;
@@ -42,11 +42,13 @@ impl Plugin for LevelPlugin {
         app
             // states
             .add_sub_state::<PlayingState>()
-            // Session scope (Playing or Paused). Idempotent: `add_computed_state`
-            // guards on the transition-event resource, so `GamePlugin` registering
-            // it too just warns. Keeps `LevelPlugin` self-sufficient for headless
-            // tests that add it without `GamePlugin`.
-            .add_computed_state::<InGameplay>()
+            // Pause sub-state of `Playing` (Running/Paused). Modeled as a sub-state
+            // rather than a sibling `GameState` so toggling pause never exits
+            // `Playing` — the session (engine, board, camera, HUD; all scoped to
+            // `OnEnter(GameState::Playing)`) survives a pause/resume round-trip
+            // instead of being despawned and rebuilt (a `ComputedStates` re-runs
+            // OnEnter/OnExit on every source change, which restarted the game).
+            .add_sub_state::<PauseState>()
             // plugins
             .add_plugins(GameOverPlugin)
             .add_plugins(SoundEffectsPlugin)
@@ -82,11 +84,12 @@ impl Plugin for LevelPlugin {
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
-            // setup — scoped to the whole session so a pause/resume round-trip
-            // doesn't rebuild the engine. The per-frame driver/reconcilers below
-            // stay gated on `Playing`, so the sim still freezes while paused.
+            // setup — scoped to the gameplay session (`GameState::Playing`). Pause
+            // is a sub-state of `Playing`, so a pause/resume round-trip does NOT
+            // re-enter `Playing`: this runs exactly once per game and the engine is
+            // never rebuilt mid-session.
             .add_systems(
-                OnEnter(InGameplay),
+                OnEnter(GameState::Playing),
                 (level_setup, crate::variant::reset_variant_progress),
             )
             // Per-frame pipeline across three schedules (Bevy runs them
@@ -104,16 +107,18 @@ impl Plugin for LevelPlugin {
             //
             // The two `LevelSystems` sets keep `EngineDriver` "before" `Reconcile`
             // for external `.after(EngineDriver)` consumers (e.g. info_panel); the
-            // schedule order already guarantees PreUpdate runs before Update.
+            // schedule order already guarantees PreUpdate runs before Update. Both
+            // gate on `PauseState::Running` (which implies `Playing`), so the whole
+            // per-frame pipeline freezes while paused without despawning anything.
             .configure_sets(
                 PreUpdate,
                 LevelSystems::EngineDriver
                     .after(bevy::input::InputSystems)
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(in_state(PauseState::Running)),
             )
             .configure_sets(
                 Update,
-                LevelSystems::Reconcile.run_if(in_state(GameState::Playing)),
+                LevelSystems::Reconcile.run_if(in_state(PauseState::Running)),
             )
             .add_systems(
                 PreUpdate,
@@ -130,7 +135,7 @@ impl Plugin for LevelPlugin {
             .add_systems(
                 FixedUpdate,
                 step_engine.run_if(
-                    in_state(GameState::Playing).and(not(crate::ai::sandbox::sandbox_active)),
+                    in_state(PauseState::Running).and(not(crate::ai::sandbox::sandbox_active)),
                 ),
             )
             .add_systems(
@@ -191,7 +196,7 @@ fn level_setup(
             GameField,
             Transform::default(),
             Visibility::default(),
-            DespawnOnExit(InGameplay),
+            DespawnOnExit(GameState::Playing),
         ))
         .id();
     let mut block_ids = Vec::new();
@@ -215,7 +220,7 @@ fn level_setup(
             config.block_size * config.board_height as f32 / 2.,
             1.0,
         )),
-        DespawnOnExit(InGameplay),
+        DespawnOnExit(GameState::Playing),
     ));
 }
 

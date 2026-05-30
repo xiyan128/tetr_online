@@ -36,7 +36,7 @@ use crate::variant::{
     ActiveVariant, EndCondition, ScoreKind, Variant, VariantDef, VariantProgress,
     MARATHON_END_LEVEL,
 };
-use crate::GameState;
+use crate::{GameState, PauseState};
 
 /// In-game variant info panel.
 pub struct InfoPanelPlugin;
@@ -60,7 +60,10 @@ impl Plugin for InfoPanelPlugin {
                 (accumulate_run_stats, update_info_panel)
                     .chain()
                     .after(LevelSystems::EngineDriver)
-                    .run_if(in_state(GameState::Playing))
+                    // Frozen while paused (Running implies Playing): the driver
+                    // doesn't clear FrameEvents during pause, so counting stats
+                    // here would re-tally stale lock events every paused frame.
+                    .run_if(in_state(PauseState::Running))
                     .run_if(resource_exists::<LatestSnapshot>)
                     .run_if(any_with_component::<InfoPanelRoot>),
             );
