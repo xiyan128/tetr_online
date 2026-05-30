@@ -2,8 +2,22 @@
 name = "tetr_online"
 version = "0.1.0"
 edition = "2021"
+# Benchmark targets are declared explicitly under `[[bench]]` below (each uses the
+# criterion harness). Disable cargo's auto-discovery so the shared
+# `benches/common/` fixture module is never mistaken for its own bench target.
+autobenches = false
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+# The `benches/` criterion suites are the only benchmark targets. The lib and bin
+# carry no `#[bench]` fns, so opt them out of `cargo bench` — keeps its build and
+# output limited to the real suites.
+[lib]
+bench = false
+
+[[bin]]
+name = "tetr_online"
+bench = false
 
 [dependencies]
 array2d = "0.3.2"
@@ -66,3 +80,22 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 # optimize for size
 opt-level = 'z'
 lto = "thin"
+
+[dev-dependencies]
+# Statistics-driven micro-benchmark harness for `benches/`. Dev-only: never
+# compiled into `cargo build` or the size-optimized wasm/release binary, so it
+# costs nothing against the shipping size budget. `html_reports` writes the
+# criterion report (plots + history) under `target/criterion/`.
+criterion = { version = "0.8", features = ["html_reports"] }
+
+# Engine-core benchmarks: `Engine::step`, snapshotting, and the pure rule
+# primitives the AI reuses (`lock_and_clear`, `classify_t_spin`).
+[[bench]]
+name = "engine"
+harness = false
+
+# AI benchmarks: placement movegen, the evaluator, the greedy planner, and
+# end-to-end "bot plays N pieces" throughput.
+[[bench]]
+name = "ai"
+harness = false
