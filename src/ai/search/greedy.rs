@@ -33,7 +33,7 @@ use crate::ai::state::SearchState;
 
 /// The greedy one-piece planner. Stateless; holds no search state between calls
 /// because it finishes every plan in a single call.
-#[derive(Clone, Copy, Debug, Default)]
+#[derive(Clone, Copy, Debug)]
 pub struct GreedyPlanner {
     /// Whether to consider the hold swap (search the held/next piece too). On by
     /// default; exposed mainly so tests can isolate the no-hold placement set.
@@ -70,6 +70,14 @@ impl GreedyPlanner {
         } else {
             movegen::generate(&state.board, &state.active)
         }
+    }
+}
+
+impl Default for GreedyPlanner {
+    /// Matches [`GreedyPlanner::new`] (hold considered) — *not* the derived
+    /// all-`false` default, which would silently disable hold.
+    fn default() -> Self {
+        Self::new()
     }
 }
 
