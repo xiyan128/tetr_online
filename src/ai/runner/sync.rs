@@ -1,112 +1,74 @@
-//! The synchronous compute runner (shipped Tier-1 back-end).
+//! The synchronous decision runner (shipped Tier-1 back-end).
 //!
-//! [`SyncRunner`] runs the search inline: [`submit`](super::ComputeRunner::submit)
-//! plans to completion right then and buffers the result, and the next
-//! [`poll`](super::ComputeRunner::poll) returns it. The Tier-1 greedy planner is
-//! microseconds per call, so there is nothing to gain from threads or time-slicing
-//! yet — and a synchronous runner keeps the whole AI path trivially deterministic
-//! and unit-testable. The off-thread (`native.rs`) and cooperative-WASM (`web.rs`)
-//! runners drop in behind the same [`ComputeRunner`](super::ComputeRunner) trait
-//! when a Tier-2 beam makes the search frame-expensive.
+//! [`SyncRunner`] runs the policy inline: [`submit`](super::DecisionRunner::submit)
+//! decides right then and buffers the [`Decision`], and the next
+//! [`poll`](super::DecisionRunner::poll) returns it. The Tier-1 greedy policy is
+//! microseconds per decision, so there is nothing to gain from threads or
+//! time-slicing yet — and a synchronous runner keeps the whole AI path trivially
+//! deterministic and unit-testable. The off-thread (`native.rs`) and
+//! cooperative-WASM (`web.rs`) runners drop in behind the same
+//! [`DecisionRunner`](super::DecisionRunner) trait when a Tier-2 beam (or a heavy
+//! neural forward) makes the decision frame-expensive.
 //!
-//! The runner **owns** the planner and evaluator: the [`Planner`] trait takes
-//! `&mut self` (an incremental search carries state between calls), so it cannot
-//! be shared by reference across a poll boundary; the runner is its home.
+//! The runner **owns** the policy: [`Policy::decide`] takes `&mut self` (the policy
+//! carries its seeded RNG, and an incremental search would carry state between
+//! calls), so it cannot be shared by reference across a poll boundary — the runner
+//! is its home.
 
-use crate::ai::eval::Evaluator;
-use crate::ai::runner::ComputeRunner;
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
-use crate::ai::state::SearchState;
+use crate::ai::policy::{Decision, Observation, Policy};
+use crate::ai::runner::DecisionRunner;
 
-/// A [`ComputeRunner`] that searches inline and buffers the result for the next
-/// poll. Owns the planner + evaluator it drives.
+/// A [`DecisionRunner`] that decides inline and buffers the result for the next
+/// poll. Owns the [`Policy`] it drives.
 pub struct SyncRunner {
-    planner: Box<dyn Planner>,
-    evaluator: Box<dyn Evaluator>,
-    /// The buffered result of the last [`submit`](ComputeRunner::submit), taken by
-    /// the next [`poll`](ComputeRunner::poll). `Some(opt)` is a finished search
-    /// (`opt == None` ⇒ no legal placement); the outer `None` is "nothing pending".
-    pending: Option<Option<PlacementPlan>>,
+    policy: Box<dyn Policy>,
+    /// The buffered decision from the last [`submit`](DecisionRunner::submit), taken
+    /// by the next [`poll`](DecisionRunner::poll).
+    pending: Option<Decision>,
 }
 
 impl SyncRunner {
-    /// Build a runner around a planner and evaluator.
-    pub fn new(planner: Box<dyn Planner>, evaluator: Box<dyn Evaluator>) -> Self {
+    /// Build a runner around a policy.
+    pub fn new(policy: Box<dyn Policy>) -> Self {
         Self {
-            planner,
-            evaluator,
+            policy,
             pending: None,
         }
     }
-
-    /// Drive the planner to a final plan under `budget`.
-    ///
-    /// Loops while the planner asks for more budget so this works unchanged for a
-    /// future incremental planner; the greedy Tier-1 planner returns
-    /// [`PlannerStep::Done`] on the first call. The `NeedMoreBudget` loop is
-    /// bounded by the node budget plus a hard cap, so a misbehaving incremental
-    /// planner can never spin forever here.
-    fn run_to_completion(
-        &mut self,
-        state: &SearchState,
-        budget: SearchBudget,
-    ) -> Option<PlacementPlan> {
-        // A generous safety cap: even an incremental planner that yields one node
-        // at a time terminates. Greedy never iterates more than once.
-        const MAX_STEPS: u32 = 100_000;
-        for _ in 0..MAX_STEPS {
-            match self.planner.plan(state, self.evaluator.as_ref(), budget) {
-                PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => continue,
-            }
-        }
-        // Defensive: an incremental planner that never converged. Treat as "no
-        // plan" rather than looping forever (it would surface as the bot idling).
-        None
-    }
 }
 
-impl ComputeRunner for SyncRunner {
-    fn submit(&mut self, state: SearchState, budget: SearchBudget) {
-        // Synchronous: compute now, hand back on the next poll. This models the
-        // async contract (submit then poll) without the async machinery.
-        self.pending = Some(self.run_to_completion(&state, budget));
+impl DecisionRunner for SyncRunner {
+    fn submit(&mut self, obs: Observation) {
+        // Synchronous: decide now, hand back on the next poll. This models the async
+        // contract (submit then poll) without the async machinery.
+        self.pending = Some(self.policy.decide(&obs));
     }
 
-    fn poll(&mut self) -> Option<Option<PlacementPlan>> {
+    fn poll(&mut self) -> Option<Decision> {
         self.pending.take()
     }
 
     fn cancel(&mut self) {
         self.pending = None;
     }
-
-    fn evaluator(&self) -> Option<&dyn Evaluator> {
-        // The synchronous runner always owns its evaluator (the search runs inline,
-        // never moving it elsewhere), so it is always available.
-        Some(self.evaluator.as_ref())
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::eval::LinearEvaluator;
     use crate::ai::movegen;
-    use crate::ai::search::GreedyPlanner;
+    use crate::ai::policy::SearchPolicy;
+    use crate::ai::state::SearchState;
     use crate::engine::{Board, CellKind, PieceType};
     use std::collections::VecDeque;
 
     fn runner() -> SyncRunner {
-        SyncRunner::new(
-            Box::new(GreedyPlanner::new()),
-            Box::new(LinearEvaluator::default()),
-        )
+        SyncRunner::new(Box::new(SearchPolicy::greedy(0.0, 1)))
     }
 
     /// A search state with a vertical-I-clears-Tetris board (cols 0-2 filled, well
-    /// at col 3) so there is an unambiguous best placement to plan.
-    fn tetris_state() -> SearchState {
+    /// at col 3) so there is an unambiguous best placement to decide.
+    fn tetris_state() -> Observation {
         let mut board = Board::new(4, 10);
         for y in 0..4 {
             for x in 0..3 {
@@ -118,11 +80,14 @@ mod tests {
     }
 
     #[test]
-    fn submit_then_poll_returns_a_plan() {
+    fn submit_then_poll_returns_a_decision() {
         let mut runner = runner();
-        runner.submit(tetris_state(), SearchBudget::greedy());
-        let result = runner.poll().expect("a completed search is pending");
-        assert!(result.is_some(), "the tetris state has a legal placement");
+        runner.submit(tetris_state());
+        let decision = runner.poll().expect("a decision is pending");
+        assert!(
+            matches!(decision, Decision::Place(_)),
+            "the tetris state has a legal placement"
+        );
     }
 
     #[test]
@@ -132,10 +97,10 @@ mod tests {
     }
 
     #[test]
-    fn result_is_consumed_by_the_first_poll() {
+    fn decision_is_consumed_by_the_first_poll() {
         let mut runner = runner();
-        runner.submit(tetris_state(), SearchBudget::greedy());
-        assert!(runner.poll().is_some(), "first poll takes the result");
+        runner.submit(tetris_state());
+        assert!(runner.poll().is_some(), "first poll takes the decision");
         assert!(
             runner.poll().is_none(),
             "second poll without a re-submit is empty"
@@ -143,82 +108,30 @@ mod tests {
     }
 
     #[test]
-    fn cancel_drops_a_buffered_result() {
+    fn cancel_drops_a_buffered_decision() {
         let mut runner = runner();
-        runner.submit(tetris_state(), SearchBudget::greedy());
+        runner.submit(tetris_state());
         runner.cancel();
-        assert!(runner.poll().is_none(), "cancel discarded the pending plan");
-    }
-
-    #[test]
-    fn evaluator_accessor_returns_the_runners_own_evaluator() {
-        // Regression for the error-injection scoring gap: the controller scores
-        // candidates with `runner.evaluator()`, so the accessor must hand back the
-        // evaluator the runner was built with — not a fresh default. Build a runner
-        // with a custom weight set and confirm its score, distinct from the default.
-        use crate::ai::eval::{BoardWeights, Evaluator, RewardWeights, Value, Weights};
-        use crate::engine::LockOutcome;
-
-        // The composite board + lock pinned in `eval::tests`: with the weights
-        // below it scores Value(-15).
-        let lock = LockOutcome {
-            cells_locked: vec![(0, 0, CellKind::Some(PieceType::O))],
-            cleared_rows: Vec::new(),
-            top_y_after_lock: Some(0),
-        };
-        let mut board = Board::new(3, 4);
-        for y in 0..3 {
-            board.set(0, y, CellKind::Some(PieceType::O));
-        }
-        board.set(2, 0, CellKind::Some(PieceType::O));
-
-        let custom = Weights {
-            board: BoardWeights {
-                landing_height: 0.0,
-                eroded_piece_cells: 0.0,
-                row_transitions: -1.0,
-                column_transitions: -2.0,
-                holes: 0.0,
-                board_wells: -3.0,
-                hole_depth: 0.0,
-                rows_with_holes: 0.0,
-            },
-            reward: RewardWeights::COLD_CLEAR,
-        };
-        let runner = SyncRunner::new(
-            Box::new(GreedyPlanner::new()),
-            Box::new(LinearEvaluator::new(custom)),
-        );
-
-        let eval = runner
-            .evaluator()
-            .expect("the synchronous runner always lends its evaluator");
-        let (value, _reward) = eval.evaluate(&lock, &board, None);
-        assert_eq!(
-            value,
-            Value(-15),
-            "accessor returns the runner's custom eval"
-        );
-
-        let (default_value, _) = LinearEvaluator::default().evaluate(&lock, &board, None);
-        assert_ne!(
-            value, default_value,
-            "must be the runner's evaluator, not a hardcoded default",
+        assert!(
+            runner.poll().is_none(),
+            "cancel discarded the pending decision"
         );
     }
 
     #[test]
     fn synchronous_runner_is_deterministic() {
-        // The same state submitted to two runners yields identical plans (score +
-        // path), proving the sync path carries no hidden RNG/clock.
+        // The same state submitted to two runners yields identical decisions,
+        // proving the sync path carries no hidden RNG/clock.
         let mut a = runner();
         let mut b = runner();
-        a.submit(tetris_state(), SearchBudget::greedy());
-        b.submit(tetris_state(), SearchBudget::greedy());
-        let pa = a.poll().unwrap().unwrap();
-        let pb = b.poll().unwrap().unwrap();
-        assert_eq!(pa.score, pb.score);
-        assert_eq!(pa.placement.path, pb.placement.path);
-        assert_eq!(pa.placement.origin(), pb.placement.origin());
+        a.submit(tetris_state());
+        b.submit(tetris_state());
+        match (a.poll().unwrap(), b.poll().unwrap()) {
+            (Decision::Place(pa), Decision::Place(pb)) => {
+                assert_eq!(pa.path, pb.path);
+                assert_eq!(pa.origin(), pb.origin());
+            }
+            _ => panic!("expected placements"),
+        }
     }
 }

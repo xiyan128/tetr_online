@@ -91,7 +91,7 @@ pub(crate) fn resolve_horizontal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::{AiController, DifficultyConfig, DEFAULT_AI_SEED};
+    use crate::ai::{AiController, Handicap, DEFAULT_AI_SEED};
     use crate::engine::{Engine, EngineConfig};
 
     /// The integration seam: an engine can be driven entirely through a
@@ -101,7 +101,7 @@ mod tests {
     #[test]
     fn drive_engine_runs_a_boxed_controller_to_place_pieces() {
         let mut controller: Box<dyn PlayerController> = Box::new(AiController::new(
-            DifficultyConfig::perfect(),
+            Handicap::perfect(),
             DEFAULT_AI_SEED,
         ));
         let mut engine = Engine::new(EngineConfig::default(), 7);

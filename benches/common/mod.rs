@@ -29,7 +29,7 @@
 // any given target would otherwise warn.
 #![allow(dead_code)]
 
-use tetr_online::ai::{movegen, AiController, DifficultyConfig, SearchState};
+use tetr_online::ai::{movegen, AiController, Handicap, SearchState};
 use tetr_online::engine::{
     classify_t_spin, lock_and_clear, ActivePiece, Board, CellKind, Engine, EngineConfig,
     EngineEvent, InputFrame, LockOutcome, PieceType, TSpinKind,
@@ -152,7 +152,7 @@ pub fn first_locked(scenario: Scenario) -> (LockOutcome, Board, Option<TSpinKind
 /// depth.
 pub fn play_pieces(target: usize) -> usize {
     let mut engine = Engine::new(EngineConfig::default(), ENGINE_SEED);
-    let mut bot = AiController::new(DifficultyConfig::perfect(), AI_SEED);
+    let mut bot = AiController::new(Handicap::perfect(), AI_SEED);
 
     let mut placed = 0usize;
     // Generous safety cap: a piece resolves in well under 200 frames of pulses.

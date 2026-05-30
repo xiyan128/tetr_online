@@ -31,21 +31,23 @@
 //!   existing renderer, for watching/tuning the bot.
 
 pub mod controller;
-pub mod difficulty;
+pub mod handicap;
 pub mod eval;
 pub mod movegen;
 pub mod plan;
+pub mod policy;
 pub mod runner;
 pub mod sandbox;
 pub mod search;
 pub mod state;
 
 pub use controller::{AiController, DEFAULT_AI_SEED};
-pub use difficulty::DifficultyConfig;
+pub use handicap::Handicap;
 pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
-pub use runner::{ComputeRunner, SyncRunner};
+pub use policy::{Decision, Observation, Policy, SearchPolicy};
+pub use runner::{DecisionRunner, SyncRunner};
 pub use sandbox::{AiPlayer, AiSandbox, AiSandboxPlugin};
 pub use search::{GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
 pub use state::{BagState, SearchState};
