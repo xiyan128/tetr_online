@@ -1,4 +1,4 @@
-//! Acceptance suite for reference_guideline.md §25.8 "Scoring (Level 1)" plus
+//! Acceptance suite for the guideline §25.8 "Scoring (Level 1)" plus
 //! the canonical Back-to-Back example whose total is 5400 (§13.3).
 //!
 //! Every scenario is one `#[test]` driven through the public engine boundary.

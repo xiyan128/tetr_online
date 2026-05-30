@@ -1,4 +1,4 @@
-//! Acceptance tests for SRS rotation / kick behaviour (reference_guideline.md §25.5).
+//! Acceptance tests for SRS rotation / kick behaviour (the guideline §25.5).
 //!
 //! Each scenario in §25.5 maps to exactly one `#[test]` fn below:
 //!   1. Empty-board Test 1 rotations succeed.

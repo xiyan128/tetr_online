@@ -1,6 +1,13 @@
+# Build outputs
 /target
 /dist
-.DS_Store
-.idea/
 /node_modules
 /.wasm-dev
+
+# OS / editor cruft
+.DS_Store
+.idea/
+
+# Agent-internal planning & reference docs (roadmap, guideline, research notes).
+# Kept locally for the agents working on the project; not part of the repo.
+/agent

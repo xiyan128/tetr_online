@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.1 "Board and spawn".
+//! Acceptance tests for the guideline §25.1 "Board and spawn".
 //!
 //! These exercise the real `Engine` end-to-end through its public
 //! `InputFrame`/`step`/`snapshot` API plus the public spawn geometry helpers

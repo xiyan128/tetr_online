@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.2 "Seven-bag and queues".
+//! Acceptance tests for the guideline §25.2 "Seven-bag and queues".
 //!
 //! Spec bullets covered:
 //!   * Every bag of seven contains exactly one of each piece.

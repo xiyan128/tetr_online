@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.6 "Lock Down"
+//! Acceptance tests for the guideline §25.6 "Lock Down"
 //! (Extended / Infinite / Classic), anchored to the normative rules in §8.1-8.4.
 //!
 //! These exercise the public engine boundary only: deterministic `Engine::new`

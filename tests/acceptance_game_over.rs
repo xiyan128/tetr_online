@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.10 "Game over".
+//! Acceptance tests for the guideline §25.10 "Game over".
 //!
 //! Spec mapping (the guideline numbers rows 1-based; the engine is 0-based):
 //!   * §16.1 Block Out: a spawn cell of the freshly generated Tetrimino overlaps

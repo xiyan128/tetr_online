@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.3 "Movement and DAS".
+//! Acceptance tests for the guideline §25.3 "Movement and DAS".
 //!
 //! Engine-level spec items covered here (§25.3):
 //!   * Tap left/right moves one cell.        -> tap_left/right_moves_one_cell

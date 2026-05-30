@@ -1,4 +1,4 @@
-//! Acceptance suite for reference_guideline.md §25.4 "Drops and Hold".
+//! Acceptance suite for the guideline §25.4 "Drops and Hold".
 //!
 //! Each scenario is one `#[test]` and is driven exclusively through the public
 //! engine boundary (`Engine::new` + `step()` + `snapshot()`), with the sole

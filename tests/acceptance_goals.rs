@@ -1,4 +1,4 @@
-//! Acceptance suite for reference_guideline.md §25.9 "Goals (Fixed/Variable)".
+//! Acceptance suite for the guideline §25.9 "Goals (Fixed/Variable)".
 //!
 //! Each scenario from §25.9 maps to exactly one `#[test]` below. The pure-goal
 //! helpers (`fixed_goal_for_level`, `variable_goal_for_level`,

@@ -1,4 +1,4 @@
-//! Acceptance tests for reference_guideline.md §25.7 (T-Spins).
+//! Acceptance tests for the guideline §25.7 (T-Spins).
 //!
 //! These exercise the T-Spin recognition rules and the zero-line T-Spin
 //! scoring / back-to-back interaction through the engine's public boundary.
