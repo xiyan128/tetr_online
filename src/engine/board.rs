@@ -11,8 +11,7 @@ use std::fmt::{Display, Write};
 
 use crate::engine::pieces::PieceType;
 use array2d::Array2D;
-use itertools::{iproduct, Product};
-use std::ops::Range;
+use itertools::iproduct;
 
 #[derive(Clone)]
 pub struct Board {
@@ -26,7 +25,7 @@ impl Board {
         Self {
             width,
             height,
-            cells: Array2D::filled_with(Cell::dummy(0, 0), height, width),
+            cells: Array2D::filled_with(Cell::default(), height, width),
         }
     }
 
@@ -34,7 +33,7 @@ impl Board {
         Self {
             width,
             height,
-            cells: Array2D::filled_with(Cell::dummy(0, 0), height + margin, width),
+            cells: Array2D::filled_with(Cell::default(), height + margin, width),
         }
     }
 
@@ -80,7 +79,7 @@ impl Board {
         CellKind::None
     }
 
-    pub fn coords(&self) -> Product<Range<isize>, Range<isize>> {
+    pub fn coords(&self) -> impl Iterator<Item = (isize, isize)> {
         iproduct!(0..self.width as isize, 0..self.height as isize)
     }
 
@@ -103,8 +102,11 @@ impl Board {
             cleared.push(cell);
         }
 
-        // move all cells above down
-        for y in (y + 1)..self.height {
+        // Move every cell above the cleared row down one. Bound by the full
+        // backing array (visible + buffer), not `self.height`: a piece can lock
+        // partly in the buffer zone above the skyline (§16.4), and those cells
+        // must fall too — otherwise they are left floating, unsupported (§11.3).
+        for y in (y + 1)..self.cells.column_len() {
             for x in 0..self.width {
                 let cell = self.cells[(y, x)].clone();
                 self.set(x as isize, y as isize, CellKind::None);
@@ -225,6 +227,27 @@ mod tests {
     }
 
     #[test]
+    fn clear_line_drops_cells_in_the_buffer_zone_above_visible_height() {
+        // Regression: the shift-down must cover the full backing array, not just
+        // the visible height. A cell that locked in the buffer zone (y >= visible
+        // height, legal per §16.4) above a cleared visible row has to fall like
+        // any other — otherwise it is left floating above the skyline (§11.3).
+        // The plain `Board::new` clear test above hides this: with no buffer, the
+        // visible-height bound *is* the array bound.
+        let mut board = Board::with_top_margin(4, 4, 4); // visible 4, buffer 4 => 8 rows
+        fill_row(&mut board, 0, PieceType::I); // full visible row 0 -> clears
+        assert!(board.set(0, 2, CellKind::Some(PieceType::T))); // visible cell above
+        assert!(board.set(0, 4, CellKind::Some(PieceType::S))); // buffer-zone cell
+
+        assert_eq!(board.clear_lines(), 1);
+
+        // Both cells dropped one row; nothing left floating in the buffer.
+        assert_eq!(board.get_cell_kind(0, 1), CellKind::Some(PieceType::T));
+        assert_eq!(board.get_cell_kind(0, 3), CellKind::Some(PieceType::S));
+        assert_eq!(board.get_cell_kind(0, 4), CellKind::None);
+    }
+
+    #[test]
     fn clear_lines_handles_multiple_adjacent_full_rows() {
         let mut board = Board::new(4, 4);
         fill_row(&mut board, 0, PieceType::I);
@@ -296,14 +319,6 @@ impl Default for Cell {
 impl Cell {
     pub fn new(x: isize, y: isize, cell_kind: CellKind) -> Self {
         Self { x, y, cell_kind }
-    }
-
-    pub fn dummy(x: isize, y: isize) -> Self {
-        Self {
-            x,
-            y,
-            cell_kind: CellKind::None,
-        }
     }
 
     #[cfg(test)]
