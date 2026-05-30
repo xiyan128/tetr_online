@@ -17,7 +17,9 @@
 //! so it can never disagree with the real rules.
 
 pub mod eval;
+pub mod movegen;
 pub mod state;
 
 pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
+pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use state::{BagState, SearchState};
