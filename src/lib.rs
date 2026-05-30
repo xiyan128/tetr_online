@@ -21,6 +21,10 @@ use bevy_egui::{egui, EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEg
 use bevy_inspector_egui::{bevy_inspector, DefaultInspectorConfigPlugin};
 
 pub mod ai;
+/// Play-evaluation harness (feature `arena`). Dev/research tooling — off by
+/// default so it never compiles into the shipped game.
+#[cfg(feature = "arena")]
+pub mod arena;
 mod assets;
 pub mod engine;
 pub(crate) mod features;
