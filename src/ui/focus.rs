@@ -62,21 +62,31 @@ pub enum NavAction {
     Back,
 }
 
-/// Move the focus cursor with Up/Down (and W/S) and restyle focusable buttons so
-/// the focused row reads as highlighted. Generic over a screen marker `M` so each
-/// screen's lists are isolated.
+/// Drive focus from BOTH keyboard and mouse, and restyle the focusable buttons.
+/// Generic over a screen marker `M` so each screen's lists are isolated.
+///
+/// - **Mouse:** hovering (or pressing) a row moves the cursor to it, so the
+///   keyboard focus and the pointer always agree — and a click therefore lands on
+///   the highlighted item. A pressed row shows the pressed color.
+/// - **Keyboard:** Up/Down (and W/S) move the cursor.
 ///
 /// `M` is the screen-root marker component; the [`FocusList`] is expected on the
 /// same entity. Call `app.add_systems(Update, focus_navigation::<MyScreen>.run_if(in_state(...)))`.
-///
-/// `Single` makes the scheduler skip this entirely unless exactly one `FocusList`
-/// with marker `M` exists — which is also the only state in which the focusable
-/// rows (and thus the restyle below) are meaningful, so skipping is correct.
+/// `Single` makes the scheduler skip this unless exactly one `FocusList` with
+/// marker `M` exists — the only state in which the rows are meaningful.
 pub fn focus_navigation<M: Component>(
     keys: Res<ButtonInput<KeyCode>>,
     mut list: Single<&mut FocusList, With<M>>,
-    mut buttons: Query<(&Focusable, &mut BackgroundColor)>,
+    mut buttons: Query<(&Focusable, &Interaction, &mut BackgroundColor)>,
 ) {
+    // Mouse hover/press moves the cursor to the pointed row.
+    if let Some(index) = buttons.iter().find_map(|(focusable, interaction, _)| {
+        matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
+            .then_some(focusable.index)
+    }) {
+        list.index = index;
+    }
+
     if keys.just_pressed(KeyCode::ArrowDown) || keys.just_pressed(KeyCode::KeyS) {
         list.move_by(1);
     }
@@ -84,8 +94,10 @@ pub fn focus_navigation<M: Component>(
         list.move_by(-1);
     }
 
-    for (focusable, mut color) in &mut buttons {
-        *color = if focusable.index == list.index {
+    for (focusable, interaction, mut color) in &mut buttons {
+        *color = if *interaction == Interaction::Pressed {
+            theme::BUTTON_PRESSED.into()
+        } else if focusable.index == list.index {
             theme::BUTTON_FOCUSED.into()
         } else {
             theme::BUTTON_NORMAL.into()
@@ -94,7 +106,8 @@ pub fn focus_navigation<M: Component>(
 }
 
 /// Detect Enter/Space (select focused) and Esc (back), returning a [`NavAction`]
-/// for the caller to handle against the current [`FocusList`].
+/// for the caller to handle against the current [`FocusList`]. Keyboard only;
+/// pair with [`clicked_focusable`] for mouse selection.
 ///
 /// Screens typically wrap this in their own system that matches on the result
 /// and sets `NextState<GameState>` accordingly.
@@ -109,6 +122,19 @@ pub fn read_nav_action(keys: &ButtonInput<KeyCode>, list: &FocusList) -> Option<
         return Some(NavAction::Select(list.index));
     }
     None
+}
+
+/// The 0-based index of a focusable menu button being clicked (pressed) this
+/// frame, if any — the mouse counterpart to [`read_nav_action`]'s `Select`.
+///
+/// A screen's activation handler treats this exactly like a keyboard Select:
+/// `read_nav_action(..).or_else(|| clicked_focusable(&clicks).map(NavAction::Select))`.
+/// [`focus_navigation`] already moves the cursor to the hovered row, so the click
+/// and the highlight always agree.
+pub fn clicked_focusable(buttons: &Query<(&Focusable, &Interaction)>) -> Option<usize> {
+    buttons.iter().find_map(|(focusable, interaction)| {
+        (*interaction == Interaction::Pressed).then_some(focusable.index)
+    })
 }
 
 #[cfg(test)]

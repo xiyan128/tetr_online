@@ -30,7 +30,9 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::level::common::{BackgroundBlock, FallingBlock, GhostBlock, PreviewBlock, StaticBlock};
 use crate::settings::{GameAction, GameSettings};
-use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, Focusable, NavAction};
+use crate::ui::focus::{
+    clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
+};
 use crate::ui::widgets::{label_text, menu_button, screen_root, title_text};
 use crate::{GameState, PauseState};
 
@@ -137,6 +139,7 @@ fn activate(
     settings: Res<GameSettings>,
     lists: Query<&FocusList, With<PauseRoot>>,
     actions: Query<(&Focusable, &PauseAction)>,
+    clicks: Query<(&Focusable, &Interaction)>,
     mut pause: ResMut<NextState<PauseState>>,
     mut game: ResMut<NextState<GameState>>,
 ) {
@@ -154,7 +157,10 @@ fn activate(
     let Some(list) = lists.iter().next() else {
         return;
     };
-    match read_nav_action(&keys, list) {
+    // Keyboard (Enter/Space/Esc) or a mouse click on a row.
+    let nav =
+        read_nav_action(&keys, list).or_else(|| clicked_focusable(&clicks).map(NavAction::Select));
+    match nav {
         // Resume = re-enter the Running sub-state (stays in Playing). Quit = leave
         // Playing entirely, which despawns the session and the overlay.
         Some(NavAction::Back) => pause.set(PauseState::Running),

@@ -7,7 +7,9 @@
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
-use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, NavAction};
+use crate::ui::focus::{
+    clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
+};
 use crate::ui::widgets::{label_text, menu_button, screen_root, title_text};
 use crate::variant::{ActiveVariant, Variant};
 use crate::GameState;
@@ -61,10 +63,14 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<ModeSelectRoot>>,
+    clicks: Query<(&Focusable, &Interaction)>,
     mut active: ResMut<ActiveVariant>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    match read_nav_action(&keys, *list) {
+    // Keyboard (Enter/Space) or a mouse click both select the focused variant.
+    let nav =
+        read_nav_action(&keys, *list).or_else(|| clicked_focusable(&clicks).map(NavAction::Select));
+    match nav {
         Some(NavAction::Select(index)) => {
             if let Some(&variant) = Variant::ALL.get(index) {
                 *active = ActiveVariant(variant);

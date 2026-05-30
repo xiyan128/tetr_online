@@ -9,7 +9,9 @@ use bevy::prelude::*;
 
 use crate::ai::AiSandbox;
 use crate::assets::GameAssets;
-use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, Focusable, NavAction};
+use crate::ui::focus::{
+    clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
+};
 use crate::ui::widgets::{menu_button, screen_root, title_text};
 use crate::GameState;
 
@@ -84,10 +86,19 @@ fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
+    clicks: Query<(&Focusable, &Interaction)>,
     mut sandbox: ResMut<AiSandbox>,
     mut next: ResMut<NextState<GameState>>,
 ) {
-    let Some(NavAction::Select(index)) = read_nav_action(&keys, *list) else {
+    // Select via keyboard (Enter/Space on the focused row) or a mouse click on a
+    // row. Esc is a no-op here (the main menu is the root).
+    let Some(index) = read_nav_action(&keys, *list)
+        .and_then(|nav| match nav {
+            NavAction::Select(index) => Some(index),
+            NavAction::Back => None,
+        })
+        .or_else(|| clicked_focusable(&clicks))
+    else {
         return;
     };
 
