@@ -431,10 +431,15 @@ mod tests {
         let start = spawn_piece(active.piece_type, w, h);
         // Hold is empty after the first spawn, so a hold swaps in the next-queue piece
         // — exactly what generate_with_hold enumerates with hold = None.
-        let queue_front = snapshot.next_queue.first().copied().expect("a queued piece");
+        let queue_front = snapshot
+            .next_queue
+            .first()
+            .copied()
+            .expect("a queued piece");
 
-        let placements =
-            generate_with_hold(&board, &start, None, Some(queue_front), |pt| spawn_piece(pt, w, h));
+        let placements = generate_with_hold(&board, &start, None, Some(queue_front), |pt| {
+            spawn_piece(pt, w, h)
+        });
         // A held placement that tucks: holds, soft-drops, then shifts AFTER the
         // soft-drop (the tuck signature).
         let tuck = placements
@@ -504,8 +509,10 @@ mod tests {
 
         // Each piece's true fall on this board: the I onto the pillar, the O past it.
         let held_fall = drop_to_floor(&board, &mut ActivePiece::new(PieceType::I, held_i.origin()));
-        let active_fall =
-            drop_to_floor(&board, &mut ActivePiece::new(PieceType::O, active_o.origin()));
+        let active_fall = drop_to_floor(
+            &board,
+            &mut ActivePiece::new(PieceType::O, active_o.origin()),
+        );
         assert_ne!(
             held_fall, active_fall,
             "premise: the two footprints must fall different distances"

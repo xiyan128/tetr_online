@@ -423,7 +423,7 @@ fn clear_rebind_state(mut rebind: ResMut<RebindState>) {
 
 fn load_settings(storage: Res<StorageResource>, mut settings: ResMut<GameSettings>) {
     if let Some(raw) = storage.0.load(keys::SETTINGS) {
-        if let Some(loaded) = decode_settings(&raw) {
+        if let Some(loaded) = crate::settings::decode_settings(&raw) {
             *settings = loaded;
             settings.sanitize();
         }
@@ -435,183 +435,26 @@ fn save_settings(storage: Res<StorageResource>, settings: Res<GameSettings>) {
 }
 
 fn persist(storage: &StorageResource, settings: &GameSettings) {
-    storage.0.save(keys::SETTINGS, &encode_settings(settings));
-}
-
-/// Serialize [`GameSettings`] to a `key=value`-per-line blob. Stable, forgiving
-/// format: unknown lines are ignored on decode and any missing field falls back
-/// to its [`Default`], so older/newer blobs degrade gracefully.
-fn encode_settings(s: &GameSettings) -> String {
-    use std::fmt::Write as _;
-
-    let mut out = String::new();
-    // Writing into a `String` is infallible, so the `writeln!` results can't
-    // error; `let _ =` keeps that explicit without unwrap noise.
-    let _ = writeln!(out, "next_count={}", s.next_count);
-    let _ = writeln!(out, "hold_enabled={}", s.hold_enabled);
-    let _ = writeln!(out, "ghost_enabled={}", s.ghost_enabled);
-    let _ = writeln!(out, "lock_down_mode={}", lock_down_token(s.lock_down_mode));
-    let _ = writeln!(out, "music_volume={}", s.music_volume);
-    let _ = writeln!(out, "sfx_volume={}", s.sfx_volume);
-    for action in GameAction::ALL {
-        let (primary, secondary) = s.keybinds.get(action);
-        // Persist primary (+ optional secondary) as key codes.
-        let sec = secondary
-            .and_then(key_code_token)
-            .map(|t| format!(",{t}"))
-            .unwrap_or_default();
-        if let Some(prim) = key_code_token(primary) {
-            let _ = writeln!(out, "bind.{}={}{}", action_token(action), prim, sec);
-        }
-    }
-    out
-}
-
-/// Parse a blob produced by [`encode_settings`]. Returns `None` only if the
-/// input is empty/whitespace; otherwise builds on top of [`GameSettings::default`]
-/// so partial blobs still load.
-fn decode_settings(raw: &str) -> Option<GameSettings> {
-    if raw.trim().is_empty() {
-        return None;
-    }
-    let mut s = GameSettings::default();
-    for line in raw.lines() {
-        let line = line.trim();
-        if line.is_empty() {
-            continue;
-        }
-        let Some((key, value)) = line.split_once('=') else {
-            continue;
-        };
-        let (key, value) = (key.trim(), value.trim());
-        match key {
-            "next_count" => {
-                if let Ok(v) = value.parse() {
-                    s.next_count = v;
-                }
-            }
-            "hold_enabled" => {
-                if let Ok(v) = value.parse() {
-                    s.hold_enabled = v;
-                }
-            }
-            "ghost_enabled" => {
-                if let Ok(v) = value.parse() {
-                    s.ghost_enabled = v;
-                }
-            }
-            "lock_down_mode" => {
-                if let Some(v) = lock_down_from_token(value) {
-                    s.lock_down_mode = v;
-                }
-            }
-            "music_volume" => {
-                if let Ok(v) = value.parse() {
-                    s.music_volume = v;
-                }
-            }
-            "sfx_volume" => {
-                if let Ok(v) = value.parse() {
-                    s.sfx_volume = v;
-                }
-            }
-            other => {
-                if let Some(action_name) = other.strip_prefix("bind.") {
-                    if let Some(action) = action_from_token(action_name) {
-                        // value = "PRIMARY" or "PRIMARY,SECONDARY". Restore the
-                        // full tuple so default aliases (e.g. rotate-CW = Up,X)
-                        // survive a round-trip; the rebind UI itself only ever
-                        // sets a primary (clearing the secondary) via set_primary.
-                        let mut parts = value.split(',');
-                        let primary = parts.next().and_then(key_code_from_token);
-                        let secondary = parts.next().and_then(key_code_from_token);
-                        if let Some(primary) = primary {
-                            apply_binding(&mut s.keybinds, action, (primary, secondary));
-                        }
-                    }
-                }
-            }
-        }
-    }
-    Some(s)
-}
-
-fn lock_down_token(mode: LockDownMode) -> &'static str {
-    match mode {
-        LockDownMode::Extended => "extended",
-        LockDownMode::Infinite => "infinite",
-        LockDownMode::Classic => "classic",
-    }
-}
-
-fn lock_down_from_token(token: &str) -> Option<LockDownMode> {
-    match token {
-        "extended" => Some(LockDownMode::Extended),
-        "infinite" => Some(LockDownMode::Infinite),
-        "classic" => Some(LockDownMode::Classic),
-        _ => None,
-    }
-}
-
-fn action_token(action: GameAction) -> &'static str {
-    match action {
-        GameAction::MoveLeft => "move_left",
-        GameAction::MoveRight => "move_right",
-        GameAction::SoftDrop => "soft_drop",
-        GameAction::HardDrop => "hard_drop",
-        GameAction::RotateCw => "rotate_cw",
-        GameAction::RotateCcw => "rotate_ccw",
-        GameAction::Hold => "hold",
-        GameAction::Pause => "pause",
-    }
-}
-
-fn action_from_token(token: &str) -> Option<GameAction> {
-    GameAction::ALL
-        .into_iter()
-        .find(|a| action_token(*a) == token)
-}
-
-/// Write a full `(primary, secondary)` binding for `action`. `Keybinds` only
-/// exposes `set_primary` (which clears the secondary), but its fields are public;
-/// persistence uses this so a stored secondary alias is restored exactly. The
-/// rebind UI still goes through `set_primary`.
-fn apply_binding(binds: &mut Keybinds, action: GameAction, value: (KeyCode, Option<KeyCode>)) {
-    let slot = match action {
-        GameAction::MoveLeft => &mut binds.move_left,
-        GameAction::MoveRight => &mut binds.move_right,
-        GameAction::SoftDrop => &mut binds.soft_drop,
-        GameAction::HardDrop => &mut binds.hard_drop,
-        GameAction::RotateCw => &mut binds.rotate_cw,
-        GameAction::RotateCcw => &mut binds.rotate_ccw,
-        GameAction::Hold => &mut binds.hold,
-        GameAction::Pause => &mut binds.pause,
-    };
-    *slot = value;
+    storage
+        .0
+        .save(keys::SETTINGS, &crate::settings::encode_settings(settings));
 }
 
 // ---------------------------------------------------------------------------
-// KeyCode <-> string mapping
+// KeyCode -> display label
 // ---------------------------------------------------------------------------
 //
-// Bevy's `KeyCode` has no stable string parse, so we keep an explicit table for
-// the keys a player can plausibly bind. Serialization uses the same table; an
-// unmapped key simply isn't persisted (and the display falls back to Debug).
+// Bevy's `KeyCode` has no friendly `Display`, so we keep an explicit table of
+// short labels for the keys a player can plausibly bind. This is display-only —
+// persistence is `serde`-derived in `settings.rs` and serializes `KeyCode`
+// directly, so the table no longer participates in the storage format.
 
-/// Stable token for persistence, or `None` if we don't have a round-trippable
-/// name for this key (it then won't be saved, preserving the prior binding).
+/// The label-table token for `code`, if present.
 fn key_code_token(code: KeyCode) -> Option<&'static str> {
     KEY_TABLE
         .iter()
         .find(|(c, _)| *c == code)
         .map(|(_, token)| *token)
-}
-
-fn key_code_from_token(token: &str) -> Option<KeyCode> {
-    KEY_TABLE
-        .iter()
-        .find(|(_, t)| *t == token)
-        .map(|(code, _)| *code)
 }
 
 /// Short human-facing label for a bound key (shown in the rebind rows). Falls
@@ -706,69 +549,10 @@ pub fn keyboard_input_from_keybinds(
 mod tests {
     use super::*;
 
-    #[test]
-    fn round_trips_default_settings() {
-        let settings = GameSettings::default();
-        let encoded = encode_settings(&settings);
-        let decoded = decode_settings(&encoded).expect("non-empty blob decodes");
-        assert_eq!(decoded, settings);
-    }
-
-    #[test]
-    fn round_trips_edited_settings() {
-        let mut settings = GameSettings {
-            next_count: 3,
-            hold_enabled: false,
-            ghost_enabled: false,
-            lock_down_mode: LockDownMode::Classic,
-            music_volume: 0.2,
-            sfx_volume: 0.9,
-            ..GameSettings::default()
-        };
-        settings
-            .keybinds
-            .set_primary(GameAction::HardDrop, KeyCode::KeyK);
-        settings
-            .keybinds
-            .set_primary(GameAction::MoveLeft, KeyCode::KeyA);
-
-        let decoded = decode_settings(&encode_settings(&settings)).unwrap();
-        assert_eq!(decoded, settings);
-    }
-
-    #[test]
-    fn empty_blob_yields_none() {
-        assert!(decode_settings("").is_none());
-        assert!(decode_settings("   \n  ").is_none());
-    }
-
-    #[test]
-    fn partial_and_garbage_blob_falls_back_to_defaults() {
-        // Only one field set; unknown lines ignored; result is defaults + override.
-        let decoded = decode_settings("ghost_enabled=false\nnonsense\nbogus=key\n").unwrap();
-        let expected = GameSettings {
-            ghost_enabled: false,
-            ..GameSettings::default()
-        };
-        assert_eq!(decoded, expected);
-    }
-
-    #[test]
-    fn decode_clamps_via_caller_sanitize_contract() {
-        // decode itself is lenient; sanitize (called by load_settings) clamps.
-        let mut decoded = decode_settings("next_count=99\nmusic_volume=5.0\n").unwrap();
-        decoded.sanitize();
-        assert_eq!(decoded.next_count, MAX_NEXT_COUNT);
-        assert_eq!(decoded.music_volume, 1.0);
-    }
-
-    #[test]
-    fn key_table_round_trips_every_entry() {
-        for (code, token) in KEY_TABLE {
-            assert_eq!(key_code_token(*code), Some(*token));
-            assert_eq!(key_code_from_token(token), Some(*code));
-        }
-    }
+    // The settings persistence codec (RON round-trip, leniency, lock-down tokens)
+    // is tested in `crate::settings`, where it now lives; these cover the options
+    // UI itself — row coverage, lock-down cycling, key labels, and the input
+    // read-path the gameplay driver calls.
 
     #[test]
     fn lock_down_cycles_forward_and_back() {
@@ -796,20 +580,21 @@ mod tests {
     }
 
     #[test]
-    fn every_default_keybind_is_persistable() {
-        // If any default key lacked a KEY_TABLE entry it would be silently
-        // dropped on save, so guard against that explicitly.
+    fn every_default_keybind_has_a_friendly_label() {
+        // Persistence now serializes `KeyCode` directly, so the table is display
+        // only — but every default binding should still render as a friendly label
+        // (a table token) in the rebind UI, not a raw `Debug` name.
         let binds = Keybinds::default();
         for action in GameAction::ALL {
             let (primary, secondary) = binds.get(action);
             assert!(
                 key_code_token(primary).is_some(),
-                "{action:?} primary not in table"
+                "{action:?} primary has no friendly label"
             );
             if let Some(sec) = secondary {
                 assert!(
                     key_code_token(sec).is_some(),
-                    "{action:?} secondary not in table"
+                    "{action:?} secondary has no friendly label"
                 );
             }
         }

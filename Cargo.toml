@@ -24,6 +24,11 @@ array2d = "0.3.2"
 bevy_asset_loader = "0.26.0"
 itertools = "0.14.0"
 rand = "0.10.1"
+# Settings persistence (RON, via serde derives). `ron` is already in the graph
+# transitively through `bevy_asset`; both are size-cheap and let `GameSettings`
+# round-trip through derives instead of a hand-rolled key=value codec.
+ron = "0.12"
+serde = { version = "1", features = ["derive"] }
 # Dev-only ECS inspector overlay (egui). Optional + behind the `dev` feature so
 # release builds never pull or compile egui — keeps the size-optimized wasm
 # clean. Run with `cargo run --features dev`. (Bevy 0.18 ↔ inspector 0.36.)
@@ -71,6 +76,10 @@ features = [
     "vorbis",
     "png",
     "webgl2",
+    # Enables serde on Bevy types (notably `KeyCode`) so `GameSettings` keybinds
+    # persist via plain serde derives + RON instead of a hand-rolled key codec.
+    # A deliberate exception to the otherwise size-curated feature set.
+    "serialize",
 ]
 
 [target.wasm32-unknown-unknown.dependencies]
