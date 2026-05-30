@@ -14,9 +14,49 @@
  * (version pinned to Cargo.lock), and wasm-opt (binaryen) for optimized builds.
  */
 import { $ } from "bun";
-import { CRATE, RENDERERS, WASM_DEV_DIR, bundleName, type Renderer } from "../web/bundles";
+import {
+  CRATE,
+  EMBED_DEV_DIR,
+  EMBED_DIST_DIR,
+  EMBED_NAME,
+  RENDERERS,
+  WASM_DEV_DIR,
+  bundleName,
+  type Renderer,
+} from "../web/bundles";
 
 const WASM_IN = `target/wasm32-unknown-unknown/web/${CRATE}.wasm`;
+
+/**
+ * Fail loudly if the installed `wasm-bindgen` CLI doesn't match the version the build
+ * links (pinned in `Cargo.lock`). A mismatch silently produces glue that's subtly
+ * incompatible with the generated `.wasm` (cryptic runtime errors, not a build
+ * failure), which is exactly the kind of "works on my machine" trap a reproducible
+ * build must rule out. Runs once per build invocation; cached after the first call.
+ */
+let checkedBindgen = false;
+async function assertWasmBindgenVersion(): Promise<void> {
+  if (checkedBindgen) return;
+  checkedBindgen = true;
+
+  // The version Cargo.lock pins for the `wasm-bindgen` crate (the glue must match).
+  const lock = await Bun.file("Cargo.lock").text();
+  const locked = lock.match(/name = "wasm-bindgen"\nversion = "([^"]+)"/)?.[1];
+  if (!locked) {
+    console.warn("==> [warn] could not read wasm-bindgen version from Cargo.lock; skipping check");
+    return;
+  }
+
+  // The installed CLI version (`wasm-bindgen 0.2.118` → `0.2.118`).
+  const cli = (await $`wasm-bindgen --version`.text()).trim().split(/\s+/).at(-1);
+  if (cli !== locked) {
+    throw new Error(
+      `wasm-bindgen CLI ${cli} != Cargo.lock ${locked}. The CLI and the linked crate ` +
+        `must match or the generated glue is incompatible with the .wasm. ` +
+        `Install the matching CLI: cargo install -f wasm-bindgen-cli --version ${locked}`,
+    );
+  }
+}
 
 // Recent rustc emits these wasm features by default, so wasm-opt must be told to
 // accept them or validation fails. They only *permit* features the binary already
@@ -92,6 +132,50 @@ async function buildWeb(): Promise<void> {
   await $`ls -la ${out}`;
 }
 
+// The embed crate compiles WITHOUT Bevy, so its wasm is a few hundred KB (vs the
+// game's ~14 MB) and builds in seconds. Same pipeline: cargo -> wasm-bindgen -> wasm-opt.
+const EMBED_WASM_IN = `target/wasm32-unknown-unknown/web/${EMBED_NAME}.wasm`;
+
+async function buildEmbedWasm(outDir: string, optimize: boolean): Promise<void> {
+  await $`mkdir -p ${outDir}`;
+  console.log(`==> [${EMBED_NAME}] cargo build (no Bevy)`);
+  await $`cargo build -p tetr-embed --profile web --target wasm32-unknown-unknown`;
+
+  console.log(`==> [${EMBED_NAME}] wasm-bindgen`);
+  await $`wasm-bindgen --no-typescript --target web --out-dir ${outDir} --out-name ${EMBED_NAME} ${EMBED_WASM_IN}`;
+
+  const wasm = `${outDir}/${EMBED_NAME}_bg.wasm`;
+  if (optimize) {
+    console.log(`==> [${EMBED_NAME}] wasm-opt -Oz`);
+    await $`wasm-opt -Oz ${WASM_OPT_FLAGS} --output ${wasm} ${wasm}`;
+  }
+  console.log(`==> embed wasm ready in ${outDir}/ (${(Bun.file(wasm).size / 1024) | 0} KB)`);
+}
+
+// Distributable bundle: the optimized wasm + a single minified `tetris-embed.js`
+// (Preact bundled in) you can drop onto any page.
+async function buildEmbedDist(): Promise<void> {
+  const out = EMBED_DIST_DIR;
+  console.log(`==> Cleaning ${out}/`);
+  await $`rm -rf ${out}`;
+  await buildEmbedWasm(out, /* optimize */ true);
+
+  console.log("==> bun build (tetris-embed.js)");
+  const result = await Bun.build({
+    entrypoints: ["web/embed/index.ts"],
+    outdir: out,
+    naming: "tetris-embed.[ext]",
+    minify: true,
+    format: "esm",
+  });
+  if (!result.success) {
+    for (const log of result.logs) console.error(log);
+    throw new Error("bun build (tetris-embed.js) failed");
+  }
+  console.log(`==> Done. ${out}/ contents:`);
+  await $`ls -la ${out}`;
+}
+
 const cmd = process.argv[2];
 switch (cmd) {
   case "wasm":
@@ -100,7 +184,13 @@ switch (cmd) {
   case "web":
     await buildWeb();
     break;
+  case "embed":
+    await buildEmbedWasm(EMBED_DEV_DIR, /* optimize */ !process.argv.includes("--no-opt"));
+    break;
+  case "embed-dist":
+    await buildEmbedDist();
+    break;
   default:
-    console.error("usage: bun scripts/build.ts <wasm [--no-opt] | web>");
+    console.error("usage: bun scripts/build.ts <wasm [--no-opt] | web | embed [--no-opt] | embed-dist>");
     process.exit(1);
 }

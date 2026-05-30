@@ -6,7 +6,10 @@
     "build:wasm": "bun scripts/build.ts wasm --no-opt",
     "dev": "bun run build:wasm && bun --hot serve.ts",
     "serve": "bun --hot serve.ts",
-    "build": "bun scripts/build.ts web"
+    "build": "bun scripts/build.ts web",
+    "build:embed": "bun scripts/build.ts embed --no-opt",
+    "embedded-demo": "bun run build:embed && bun --hot serve-embed.ts",
+    "embed:dist": "bun scripts/build.ts embed-dist"
   },
   "dependencies": {
     "preact": "^10.27.2"

@@ -17,3 +17,14 @@ export const bundleName = (r: Renderer): string => `${CRATE}_${r}`;
 
 /** The JS glue filename the page dynamically imports at runtime. */
 export const bundleJs = (r: Renderer): string => `${bundleName(r)}.js`;
+
+// ---- Embed component (the headless engine+AI wasm + Preact/Canvas board) ----
+
+/** The embed crate's wasm-bindgen `--out-name` (`tetr_embed.js` / `_bg.wasm`). */
+export const EMBED_NAME = "tetr_embed";
+
+/** Dev staging dir for the embed wasm, served by `serve-embed.ts`. */
+export const EMBED_DEV_DIR = ".embed-dev";
+
+/** Distributable output dir: `tetris-embed.js` + the embed wasm. */
+export const EMBED_DIST_DIR = "dist-embed";

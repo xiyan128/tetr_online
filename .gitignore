@@ -3,6 +3,8 @@
 /dist
 /node_modules
 /.wasm-dev
+/dist-embed
+/.embed-dev
 
 # OS / editor cruft
 .DS_Store
