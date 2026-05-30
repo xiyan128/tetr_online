@@ -360,10 +360,9 @@ mod tests {
     /// contract as [`drive_engine`](crate::player::drive_engine): maneuver frames
     /// carry `dt == 0` so gravity does not desync the placement, neutral frames
     /// carry the sim slice.
-    fn play(controller: &mut AiController, seed: u64, max_frames: usize) -> (usize, bool) {
+    fn play(controller: &mut AiController, seed: u64, max_frames: usize) -> (usize, usize, bool) {
         let mut engine = Engine::new(EngineConfig::default(), seed);
         let mut locks = 0usize;
-        let mut prev_locked = 0usize;
         let mut topped_out = false;
         for _ in 0..max_frames {
             let snapshot = engine.snapshot();
@@ -371,27 +370,34 @@ mod tests {
                 topped_out = true;
                 break;
             }
-            engine.step(controller.poll(&snapshot));
-            // Count locks by watching the locked-cell count step up.
-            let now = engine.snapshot().board_cells.len();
-            if now > prev_locked {
-                locks += 1;
-            }
-            prev_locked = now;
+            // Count locks exactly via the engine's Locked events (robust to line
+            // clears, which shrink the board-cell count).
+            let events = engine.step(controller.poll(&snapshot));
+            locks += events
+                .iter()
+                .filter(|e| matches!(e, crate::engine::EngineEvent::Locked { .. }))
+                .count();
         }
-        (locks, topped_out)
+        (locks, engine.snapshot().lines, topped_out)
     }
 
     #[test]
-    fn controller_drives_a_real_game_placing_many_pieces() {
-        // Driving a real engine through the controller (no dt override — the
-        // `drive_engine` contract) must actually play: the controller positions
-        // and locks a long run of pieces. (How *well* it plays — line-clear rate,
-        // survival depth — is the evaluator's job, exercised in `eval`/`search`
-        // tests, not the controller's.)
+    fn controller_survives_and_clears_lines_with_default_weights() {
+        // Play-QUALITY regression guard (not just "places pieces"): with the shipped
+        // survival reward profile, the no-handicap bot keeps a clean board and clears
+        // lines for a long run instead of stacking into a fast top-out. The old
+        // Cold-Clear *downstacking* default — meant for a multi-ply beam — buried a
+        // 1-ply greedy by ~piece 40-126, which this test would now catch.
         let mut controller = AiController::new(DifficultyConfig::perfect(), DEFAULT_AI_SEED);
-        let (locks, _topped_out) = play(&mut controller, 7, 4_000);
-        assert!(locks >= 20, "the controller should place many pieces, placed {locks}");
+        let (locks, lines, topped_out) = play(&mut controller, 7, 8_000);
+        assert!(
+            !topped_out,
+            "survival weights must not top out within 8k frames (placed {locks}, cleared {lines})"
+        );
+        assert!(
+            lines >= 40,
+            "the bot should be clearing lines; cleared only {lines} (placed {locks})"
+        );
     }
 
     #[test]

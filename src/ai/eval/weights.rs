@@ -29,9 +29,15 @@
 //! (landing height, eroded cells). Treat every number as a starting point for
 //! tuning, never as a guideline-Tetris-correct constant.
 //!
-//! Reward weights are seeded from Cold Clear's master config (findings [4],[5]),
-//! which deliberately rewards Tetrises / T-spins / B2B far above low clears and
-//! *penalizes* singles/doubles to force downstacking and B2B-chain preservation.
+//! The shipped default reward weights are a **survival** profile
+//! ([`RewardWeights::SURVIVAL`]) that pays the Tier-1 greedy planner to clear lines
+//! *now* — a 1-ply search has no lookahead to defer them. Cold Clear's master
+//! reward config ([`RewardWeights::COLD_CLEAR`], findings [4],[5]) — which
+//! *penalizes* small clears to force downstacking and preserve the B2B chain — is
+//! kept as the [`Weights::DOWNSTACK`] profile for a future multi-ply Tier-2 beam,
+//! where deferring clears actually pays off. Pairing Cold Clear's downstacking
+//! rewards with a 1-ply greedy buries the bot (it never cashes the downstack in),
+//! so it is deliberately NOT the default.
 
 /// Board-quality weights: one coefficient per static board feature.
 ///
@@ -98,20 +104,22 @@ impl BoardWeights {
 
 /// Per-move payoff weights: how much each line-clear / spin outcome is worth.
 ///
-/// Seeded from Cold Clear's master reward config (findings [4],[5]). The negative
-/// single/double/triple weights are intentional: they push the bot to downstack
-/// and hold out for Tetrises / T-spins, preserving the Back-to-Back chain.
+/// Two profiles ship: [`SURVIVAL`](Self::SURVIVAL) (the Tier-1 greedy default —
+/// every clear positive) and [`COLD_CLEAR`](Self::COLD_CLEAR) (a downstacking
+/// profile for a future multi-ply beam, where small clears are penalized to hold
+/// out for Tetrises / T-spins). The *sign* of each weight therefore depends on the
+/// profile; the field docs below describe what each measures, not its sign.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RewardWeights {
-    /// Clearing exactly one line (penalized — wastes the row).
+    /// Payoff for clearing exactly one line.
     pub clear1: f32,
-    /// Clearing exactly two lines (penalized).
+    /// Payoff for clearing exactly two lines.
     pub clear2: f32,
-    /// Clearing exactly three lines (mildly penalized).
+    /// Payoff for clearing exactly three lines.
     pub clear3: f32,
-    /// Clearing four lines — a Tetris (strongly rewarded).
+    /// Payoff for clearing four lines — a Tetris.
     pub clear4: f32,
-    /// Mini T-spin clearing one line (penalized — a wasted T).
+    /// Payoff for a mini T-spin clearing a line.
     pub mini_tspin: f32,
     /// Full T-spin single.
     pub tspin1: f32,
@@ -139,6 +147,30 @@ impl RewardWeights {
         b2b_clear: 104.0,
         perfect_clear: 999.0,
     };
+
+    /// Survival reward weights for the **Tier-1 greedy** planner — the shipped
+    /// default.
+    ///
+    /// Unlike [`COLD_CLEAR`](Self::COLD_CLEAR) — whose negative single/double/triple
+    /// weights assume a deep beam that *defers* clears to build Tetrises — a 1-ply
+    /// greedy has no lookahead to cash a downstack in later, so it must be paid to
+    /// clear *now* or it buries itself and tops out. These weights reward every
+    /// clear, rising with lines (Tetris best) and with T-spins above same-line
+    /// normal clears, while the board weights stay in charge of keeping the stack
+    /// clean. Empirically the greedy bot then survives indefinitely instead of
+    /// topping out in ~40-126 pieces.
+    pub const SURVIVAL: Self = Self {
+        clear1: 80.0,
+        clear2: 200.0,
+        clear3: 360.0,
+        clear4: 640.0,
+        mini_tspin: 60.0,
+        tspin1: 240.0,
+        tspin2: 480.0,
+        tspin3: 720.0,
+        b2b_clear: 80.0,
+        perfect_clear: 1600.0,
+    };
 }
 
 /// The full tunable weight set: a board-quality group and a per-move reward group.
@@ -151,18 +183,29 @@ pub struct Weights {
 }
 
 impl Weights {
-    /// The shipped default: DT-20 board weights + Cold Clear reward weights.
-    ///
-    /// A reasonable, citable starting point — *not* a tuned-for-this-engine
-    /// optimum. See the module docs for why every number here is provisional.
-    pub const DT20: Self = Self {
+    /// The shipped **Tier-1 default**: DT-20 board weights + the survival reward
+    /// profile. The board group keeps the stack clean and low; the reward group
+    /// pays the greedy planner to clear lines (see [`RewardWeights::SURVIVAL`]).
+    /// Citable starting points, not a tuned-for-this-engine optimum — tune in the
+    /// AI3.6 sandbox.
+    pub const SURVIVAL: Self = Self {
+        board: BoardWeights::DT20,
+        reward: RewardWeights::SURVIVAL,
+    };
+
+    /// A **downstacking** profile for a future Tier-2 beam: DT-20 board weights +
+    /// Cold Clear's reward weights (which penalize small clears to hold out for
+    /// Tetrises / T-spins). Only viable with multi-ply lookahead — a 1-ply greedy
+    /// using this buries itself, which is exactly why it is NOT the default.
+    pub const DOWNSTACK: Self = Self {
         board: BoardWeights::DT20,
         reward: RewardWeights::COLD_CLEAR,
     };
 }
 
 impl Default for Weights {
+    /// The Tier-1 survival default ([`Weights::SURVIVAL`]).
     fn default() -> Self {
-        Self::DT20
+        Self::SURVIVAL
     }
 }

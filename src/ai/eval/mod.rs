@@ -195,6 +195,16 @@ mod tests {
         }
     }
 
+    /// An evaluator on the Cold Clear *downstacking* reward profile, for pinning
+    /// that profile's reward math now that the shipped default is the survival
+    /// profile.
+    fn downstack_eval() -> LinearEvaluator {
+        LinearEvaluator::new(Weights {
+            board: BoardWeights::DT20,
+            reward: RewardWeights::COLD_CLEAR,
+        })
+    }
+
     #[test]
     fn value_plus_reward_sums_the_scalars() {
         assert_eq!(Value(10) + Reward(5), Value(15));
@@ -210,10 +220,33 @@ mod tests {
     }
 
     #[test]
-    fn default_evaluator_uses_dt20_and_cold_clear_weights() {
+    fn default_evaluator_uses_dt20_board_and_survival_reward() {
         let eval = LinearEvaluator::default();
         assert_eq!(eval.weights().board, BoardWeights::DT20);
-        assert_eq!(eval.weights().reward, RewardWeights::COLD_CLEAR);
+        assert_eq!(eval.weights().reward, RewardWeights::SURVIVAL);
+    }
+
+    #[test]
+    fn default_survival_profile_rewards_line_clears_positively() {
+        // The fix's core property: the shipped (Tier-1 greedy) default must PAY for
+        // clearing lines so the 1-ply bot cashes them in instead of stacking into a
+        // top-out. (The Cold Clear downstack profile — `downstack_eval` — does the
+        // opposite on purpose.)
+        let eval = LinearEvaluator::default();
+        let mut board = Board::new(4, 6);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        for lines in 1..=4usize {
+            let lock = LockOutcome {
+                cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+                cleared_rows: (0..lines as isize).collect(),
+                top_y_after_lock: None,
+            };
+            let (_v, reward) = eval.evaluate(&lock, &board, None);
+            assert!(
+                reward.0 > 0,
+                "survival default must reward a {lines}-line clear, got {reward:?}"
+            );
+        }
     }
 
     #[test]
@@ -253,7 +286,7 @@ mod tests {
 
     #[test]
     fn reward_tetris_adds_b2b_bonus() {
-        let eval = LinearEvaluator::default();
+        let eval = downstack_eval();
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
             cleared_rows: vec![0, 1, 2, 3],
@@ -269,7 +302,7 @@ mod tests {
 
     #[test]
     fn reward_single_is_penalized_and_no_b2b() {
-        let eval = LinearEvaluator::default();
+        let eval = downstack_eval();
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::O))],
             cleared_rows: vec![0],
@@ -283,7 +316,7 @@ mod tests {
 
     #[test]
     fn reward_t_spin_double_uses_tspin2_and_b2b() {
-        let eval = LinearEvaluator::default();
+        let eval = downstack_eval();
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::T))],
             cleared_rows: vec![0, 1],
@@ -298,7 +331,7 @@ mod tests {
 
     #[test]
     fn reward_perfect_clear_stacks_on_top() {
-        let eval = LinearEvaluator::default();
+        let eval = downstack_eval();
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
             cleared_rows: vec![0, 1, 2, 3],
@@ -312,7 +345,7 @@ mod tests {
 
     #[test]
     fn reward_mini_t_spin_is_penalized() {
-        let eval = LinearEvaluator::default();
+        let eval = downstack_eval();
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::T))],
             cleared_rows: vec![0],
