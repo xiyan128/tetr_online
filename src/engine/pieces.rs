@@ -257,27 +257,26 @@ impl Piece {
             _ => &DEFAULT_KICKS,
         };
 
-        let kicks_idx = match (self.rotation, rotation) {
-            //0->R
-            // R->0
-            // R->2
-            // 2->R
-            // 2->L
-            // L->2
-            // L->0
-            // 0->L
-            (PieceRotation::R0, PieceRotation::R90) => 0,
-            (PieceRotation::R90, PieceRotation::R0) => 1,
-            (PieceRotation::R90, PieceRotation::R180) => 2,
-            (PieceRotation::R180, PieceRotation::R90) => 3,
-            (PieceRotation::R180, PieceRotation::R270) => 4,
-            (PieceRotation::R270, PieceRotation::R180) => 5,
-            (PieceRotation::R270, PieceRotation::R0) => 6,
-            (PieceRotation::R0, PieceRotation::R270) => 7,
-            _ => unreachable!("Invalid rotation: {:?} -> {:?}", self.rotation, rotation),
-        };
+        // Row = current orientation, column = target, both keyed by the
+        // `PieceRotation` discriminant (R0..R270 = 0..3). The value is the row to
+        // use in the kick table. SRS only kicks between adjacent orientations, so
+        // every non-adjacent (e.g. 0->180) cell is `NONE` — an unreachable state.
+        const NONE: u8 = u8::MAX;
+        #[rustfmt::skip]
+        const KICK_INDEX: [[u8; 4]; 4] = [
+            //         to:  R0    R90   R180  R270
+            /* R0   */     [NONE, 0,    NONE, 7   ],
+            /* R90  */     [1,    NONE, 2,    NONE],
+            /* R180 */     [NONE, 3,    NONE, 4   ],
+            /* R270 */     [6,    NONE, 5,    NONE],
+        ];
 
-        let kicks = kicks_table[kicks_idx];
+        let kicks_idx = KICK_INDEX[self.rotation as usize][rotation as usize];
+        if kicks_idx == NONE {
+            unreachable!("Invalid rotation: {:?} -> {:?}", self.rotation, rotation);
+        }
+
+        let kicks = kicks_table[kicks_idx as usize];
 
         for (set_idx, (x_offset, y_offset)) in kicks.iter().enumerate() {
             let new_offset = (offset.0 + x_offset, offset.1 + y_offset);
