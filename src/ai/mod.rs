@@ -7,23 +7,42 @@
 //!
 //! # Determinism & the engine boundary
 //!
-//! The search *core* (this module's [`state`], and the evaluator / movegen /
-//! search added in later AI3.x tasks) is **pure Rust with no Bevy imports** so it
-//! stays deterministic and unit-testable exactly like [`crate::engine`]. It never
-//! touches the engine's piece generator RNG; any randomness the AI needs (tie
-//! breaking, error injection) lives behind an AI-owned seeded RNG in the
-//! controller layer, never here. The core simulates placements by reusing the
-//! engine's own board primitives ([`lock_and_clear`](crate::engine::lock_and_clear)),
-//! so it can never disagree with the real rules.
+//! The search *core* — [`state`], [`eval`], [`movegen`], [`search`], [`plan`],
+//! and even the [`controller`] and [`runner`] — is **pure Rust with no Bevy
+//! imports**, so it stays deterministic and unit-testable exactly like
+//! [`crate::engine`]. It never touches the engine's piece generator RNG; the only
+//! randomness the AI needs (tie-breaking, error injection) lives behind an
+//! AI-owned seeded [`StdRng`](rand::rngs::StdRng) in the [`controller`], never the
+//! engine's. The core simulates placements by reusing the engine's own board
+//! primitives ([`lock_and_clear`](crate::engine::lock_and_clear)), so it can never
+//! disagree with the real rules.
+//!
+//! # Layers
+//!
+//! - [`state`] (AI3.1) — cheap cloneable search state from a snapshot.
+//! - [`eval`] (AI3.2) — the `(Value, Reward)` evaluator seam.
+//! - [`movegen`] + [`search`] (AI3.3) — reachable placements + the planner.
+//! - [`plan`] (AI3.4) — placement → [`InputFrame`](crate::engine::InputFrame)s.
+//! - [`runner`] + [`controller`] + [`difficulty`] (AI3.5) — the compute seam, the
+//!   [`AiController`] (a [`PlayerController`](crate::player::PlayerController)),
+//!   and the difficulty knobs.
+//!
+//! The Bevy-aware sandbox that *runs* a game against the controller is AI3.6.
 
+pub mod controller;
+pub mod difficulty;
 pub mod eval;
 pub mod movegen;
 pub mod plan;
+pub mod runner;
 pub mod search;
 pub mod state;
 
+pub use controller::{AiController, DEFAULT_AI_SEED};
+pub use difficulty::DifficultyConfig;
 pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
+pub use runner::{ComputeRunner, SyncRunner};
 pub use search::{GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
 pub use state::{BagState, SearchState};
