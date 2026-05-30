@@ -46,7 +46,11 @@ impl SyncRunner {
     /// [`PlannerStep::Done`] on the first call. The `NeedMoreBudget` loop is
     /// bounded by the node budget plus a hard cap, so a misbehaving incremental
     /// planner can never spin forever here.
-    fn run_to_completion(&mut self, state: &SearchState, budget: SearchBudget) -> Option<PlacementPlan> {
+    fn run_to_completion(
+        &mut self,
+        state: &SearchState,
+        budget: SearchBudget,
+    ) -> Option<PlacementPlan> {
         // A generous safety cap: even an incremental planner that yields one node
         // at a time terminates. Greedy never iterates more than once.
         const MAX_STEPS: u32 = 100_000;

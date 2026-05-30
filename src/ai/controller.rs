@@ -421,7 +421,11 @@ mod tests {
         // Planner's intended board after placing the first piece (hold-aware, like
         // the controller's own planner).
         let state = SearchState::from_snapshot(&snapshot).unwrap();
-        let plan = match GreedyPlanner::new().plan(&state, &LinearEvaluator::default(), SearchBudget::greedy()) {
+        let plan = match GreedyPlanner::new().plan(
+            &state,
+            &LinearEvaluator::default(),
+            SearchBudget::greedy(),
+        ) {
             PlannerStep::Done(Some(plan)) => plan,
             other => panic!("expected a plan, got {other:?}"),
         };
@@ -520,7 +524,11 @@ mod tests {
             }
             engine.snapshot().board_cells.len()
         };
-        assert_eq!(run(123), run(123), "same AI seed reproduces even with errors");
+        assert_eq!(
+            run(123),
+            run(123),
+            "same AI seed reproduces even with errors"
+        );
     }
 
     fn pressed_anything(frame: &InputFrame) -> bool {

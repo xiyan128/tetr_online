@@ -246,7 +246,7 @@ mod tests {
         let mut runner = runner();
         runner.submit(tetris_state(), SearchBudget::greedy());
         runner.cancel(); // reclaims the planner
-        // A fresh submit must still work (the planner was returned, not lost).
+                         // A fresh submit must still work (the planner was returned, not lost).
         runner.submit(tetris_state(), SearchBudget::greedy());
         let plan = poll_until_ready(&mut runner);
         assert!(plan.is_some(), "planner reused after cancel");
