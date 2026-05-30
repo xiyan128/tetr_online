@@ -18,10 +18,12 @@
 
 pub mod eval;
 pub mod movegen;
+pub mod plan;
 pub mod search;
 pub mod state;
 
 pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
 pub use movegen::{generate, generate_with_hold, Move, Placement};
+pub use plan::placement_to_inputs;
 pub use search::{GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
 pub use state::{BagState, SearchState};
