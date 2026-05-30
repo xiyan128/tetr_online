@@ -1,103 +1,154 @@
-# Tetr Online: A Guideline Tetris Clone with Rust & Bevy
+# Tetr Online — a guideline Tetris in Rust + Bevy
 
-## Table of Contents
+<img width="1289" alt="Screenshot" src="https://user-images.githubusercontent.com/17198282/229279595-87174f68-c88e-41cd-81c2-47be0f383f72.png">
 
-1. [Introduction](#introduction)
-2. [Features](#features)
-3. [Controls](#controls)
-4. [Getting Started](#getting-started)
-    * [Prerequisites](#prerequisites)
-    * [Installation](#installation)
-    * [Running the game](#running-the-game)
-5. [WebAssembly (WASM) Support](#webassembly-support)
-6. [Acknowledgements](#acknowledgements)
-7. [Contributing](#contributing)
-8. [License](#license)
+A guideline-compliant Tetris built in Rust on the [Bevy](https://bevyengine.org/)
+engine. It began as a single-player clone and is growing toward a modern
+multiplayer game in the spirit of Jstris and TETR.IO, built on a pure,
+deterministic rule engine so that bots, replays, and lockstep netplay can all
+share one source of truth.
 
-<img width="1289" alt="Screenshot 2023-04-01 at 3 00 39 AM" src="https://user-images.githubusercontent.com/17198282/229279595-87174f68-c88e-41cd-81c2-47be0f383f72.png">
+Try the web demo: https://www.xiyan.dev/tetr_online/
 
-## Introduction
-
-This project is an open-source implementation of a guideline-compliant Tetris clone, created using the Rust programming language. It is still in early development and borrows some resources from other open-source Tetris implementations, such as sound effects from Techmino, which will be replaced later.
-
-Try an early demo here: https://www.xiyan.dev/tetr_online/
+> **Status:** single-player is fully playable — Marathon / Sprint / Ultra, menus,
+> options, and high scores — and a built-in AI can play any mode. Local and online
+> multiplayer are the next milestones (see [Roadmap](#roadmap)).
 
 ## Features
 
-- SRS (Super Rotation System): A standard rotation system for Tetrimino shapes.
-- Bag of 7: A randomization system that ensures each of the 7 Tetrimino shapes will appear once before repeating.
-- Hard drop: Instantly drops the Tetrimino to the bottom of the playfield.
-- Hold: Allows the player to save a Tetrimino for later use.
-- Ghost pieces: A transparent representation of the current Tetrimino, showing where it would land if hard dropped.
-- Half-second lock delay: Provides a brief delay before the Tetrimino locks into place, allowing for last-second adjustments.
-- Score calculation: Calculates the player's score based on lines cleared and other factors.
-- T-spin detection: Recognizes and rewards the player for successfully executing T-spins.
+**Gameplay (guideline-compliant):**
+
+- SRS rotation with the full five-test wall kicks, including the §7.5 T-spin
+  point-5 override.
+- A seeded 7-bag randomizer (reproducible piece order).
+- Hold, ghost piece, hard/soft drop, and a configurable lock-down rule
+  (Extended / Infinite / Classic).
+- Guideline scoring with T-spin and mini-T-spin recognition, Back-to-Back, and
+  combos, plus on-screen line-clear / Tetris / T-spin notifications.
+- A 10×20 visible field over a 20-row buffer, with block-out and lock-out
+  detection.
+
+**Modes and shell:**
+
+- Three variants: **Marathon** (climb to the final level), **Sprint** (40 lines,
+  fastest time), and **Ultra** (highest score in two minutes).
+- Title and menu flow, pause, persisted per-variant high-score tables, and an
+  options screen for remappable keys, next-queue length, hold/ghost toggles,
+  lock-down mode, and music/SFX volume.
+
+**AI:**
+
+- A built-in bot plays through the exact same input surface as a human. The
+  **Watch AI** menu entry runs it in any variant.
+- It's a one-piece greedy search over a tunable board evaluator, with an
+  adjustable *handicap* (reaction delay plus an imperfection rate) so it's a
+  beatable opponent rather than a flawless one. The player architecture is
+  model-agnostic: a deeper search — or a neural policy — drops in behind a single
+  trait without touching the rest.
+
+**Cross-platform:** runs natively on Windows, macOS, and Linux, and in the browser
+via WebAssembly with both WebGPU and WebGL2 renderers.
+
+## Architecture
+
+The codebase is split along one hard boundary:
+
+- **`src/engine/`** is the rule core — plain Rust with **no Bevy types**. It is a
+  pure, deterministic function of `(seed, input frames)`: no wall-clock, no
+  thread-local RNG. That purity is what makes headless AI evaluation, replays, and
+  future lockstep multiplayer possible.
+- **The Bevy host** (everything else) drives the engine through a small plain-data
+  contract — `InputFrame` in, `EngineSnapshot` and `EngineEvent` out — and owns
+  rendering, audio, input, menus, and persistence.
+- **`src/ai/`** is the bot, also Bevy-free. It plugs in through the same
+  `PlayerController` seam the keyboard uses, so keyboard, AI, and a future
+  network/replay source are interchangeable.
+
+The engine boundary is held by a guideline acceptance suite under `tests/`.
 
 ## Controls
 
-- Arrow keys: Move the Tetrimino left, right, or down.
-- Z/X/Up arrow: Rotate the Tetrimino.
-- Space: Hard drop.
-- Left Shift: Hold the current Tetrimino.
+Defaults (all remappable in **Options**):
 
-## Getting Started
+| Action | Key |
+| --- | --- |
+| Move left / right | ← / → |
+| Soft drop | ↓ |
+| Hard drop | Space |
+| Rotate clockwise | ↑ or X |
+| Rotate counter-clockwise | Z |
+| Hold | Left Shift |
+| Pause | Esc |
 
-### Prerequisites
+## Getting started
 
-To build and run the project, you'll need the following:
+You'll need [Rust](https://www.rust-lang.org/tools/install).
 
-1. [Rust programming language](https://www.rust-lang.org/tools/install) installed on your system.
-2. A compatible web browser for running the game in WebAssembly (WASM) mode.
-
-### Installation
-
-1. Clone the repository to your local machine:
-
-```
+```sh
 git clone https://github.com/xiyan128/tetr_online.git
-```
-
-2. Navigate to the project directory:
-
-```
 cd tetr_online
-```
-
-### Running the game
-
-1. To run the game locally using the Rust toolchain, execute the following command:
-
-```
 cargo run
 ```
 
-## WebAssembly (WASM) Support
+### Web build (WebAssembly)
 
-This Tetris clone can be compiled to WebAssembly (WASM) and played in a web browser. Follow the instructions from [Trunk](https://trunkrs.dev/) for guidance.
+The web bundles are built with [Bun](https://bun.sh/). You'll also need the
+`wasm32-unknown-unknown` Rust target, `wasm-bindgen-cli` (version matched to
+`Cargo.lock`), and `wasm-opt` from [Binaryen](https://github.com/WebAssembly/binaryen).
 
+```sh
+rustup target add wasm32-unknown-unknown
+bun install
+bun run dev      # build wasm + hot-reloading dev server
+bun run build    # production build into dist/ (WebGPU + WebGL2 bundles)
+```
 
-## Goals and Motivations
+Bevy bakes the graphics backend in at compile time, so the production build
+compiles the binary twice — once per renderer — and serves the WebGPU bundle where
+it's supported, falling back to WebGL2 elsewhere.
 
-This Tetris clone is a hobby project created by a regular Tetris fan. The primary motivation behind the project is to develop a modern, multiplayer Tetris implementation that rivals popular platforms such as Jstris and Tetr.io. The game aims to support both web and native platforms, while delivering better performance.
+## Development
 
-However, progress on the project is limited by the author's available time. The hope is that by sharing this project with the open-source community, other Tetris enthusiasts and developers can contribute to its development, shaping it into a polished and feature-rich game that serves as a testament to the passion and dedication of Tetris fans everywhere.
+```sh
+cargo test                       # unit tests + the guideline acceptance suite
+cargo run --features dev         # in-game ECS inspector overlay (egui)
+cargo bench                      # criterion benchmarks (engine + AI)
 
+# AI play-evaluation harness (dev-only; deterministic, never ships):
+cargo run --release --example arena_smoke --features arena
+```
+
+The `arena` feature is a harness for measuring *how well* a bot plays —
+reproducible, variance-aware numbers used to tune and compare AI implementations.
+It is gated off so it never compiles into the shipped game.
+
+## Roadmap
+
+- [x] **Engine** — pure, deterministic, guideline-correct, with a full acceptance suite.
+- [x] **Single-player** — Marathon / Sprint / Ultra, menus, options, high scores, pause.
+- [x] **AI player** — a model-agnostic bot with a tunable handicap and a sandbox mode.
+- [ ] **Local multiplayer** — human/AI vs human/AI on one machine, with attack and garbage.
+- [ ] **Online multiplayer** — deterministic lockstep over a relay server.
+- [ ] **Polish** — original assets, replays, spectating, larger formats.
+
+The end goal is any mix of human and AI players against any other mix, locally or
+online — on a single engine that stays deterministic the whole way.
 
 ## Acknowledgements
 
-- Sound effects: [Techmino](https://github.com/26F-Studio/Techmino)
-- Additional open-source Tetris implementations that inspired and informed this project.
+- Sound effects from [Techmino](https://github.com/26F-Studio/Techmino), used as
+  placeholders to be replaced with original assets before any public release.
 
-Please note that this project is an independently developed, open-source Tetris clone and is not affiliated with or endorsed by The Tetris Company or any other entity owning rights to the Tetris brand or game. The purpose of this project is to create a Tetris-inspired game for educational and recreational purposes.
-
-While the project aims to adhere to Tetris guidelines and implements some Tetris-specific features, it does not use any copyrighted assets or materials from the official Tetris games. Some resources, such as sound effects, have been borrowed from other open-source projects and will be replaced in the future with original assets.
-
-If you are a copyright holder and believe that any content in this project infringes on your copyrights, please contact the project author with the relevant information. Upon receiving a valid notice, the project author will take appropriate action to address any copyright concerns. (This section is entirely GPT-4 generated, you get the idea XP
+This is an independent, open-source project, not affiliated with or endorsed by The
+Tetris Company. It implements Tetris-guideline mechanics for educational and
+recreational purposes and uses no copyrighted assets from official Tetris games. If
+you're a rights holder with a concern, please open an issue.
 
 ## Contributing
 
-Contributions are welcome! If you have an idea, bug report, or feature request, please create an issue or submit a pull request.
+Contributions are welcome — open an issue or a pull request. The `tests/` acceptance
+suite is the regression net, so please keep it green.
 
 ## License
 
-This project is released under the MIT License.
+Released under the MIT License.
