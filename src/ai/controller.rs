@@ -205,7 +205,15 @@ impl AiController {
         }
 
         // Error fired: gather scored candidates and softmax-sample the top window.
-        let mut scored = score_candidates(state);
+        // Score with the runner's *own* evaluator so the sampled near-best is
+        // near-best under the metric the planner optimized — not a hardcoded
+        // default that could rank by a different yardstick. If the runner can't
+        // lend its evaluator right now (an off-thread search in flight), skip the
+        // mistake for this piece and play the planner's best.
+        let Some(eval) = self.runner.evaluator() else {
+            return best;
+        };
+        let mut scored = score_candidates(state, eval);
         if scored.len() <= 1 {
             return best; // nothing to substitute
         }
@@ -303,13 +311,14 @@ impl PlayerController for AiController {
     }
 }
 
-/// Scored candidate placements for error injection — mirrors the greedy planner's
-/// scoring but keeps every candidate (the planner only returns the best).
-fn score_candidates(state: &SearchState) -> Vec<PlacementPlan> {
+/// Scored candidate placements for error injection — scores every candidate with
+/// `eval` (the runner's own evaluator), keeping all of them (the planner returns
+/// only its best). Using the same evaluator the planner optimized keeps a sampled
+/// "mistake" a genuine near-best alternative, not near-best under a different metric.
+fn score_candidates(state: &SearchState, eval: &dyn Evaluator) -> Vec<PlacementPlan> {
     use crate::ai::movegen;
-    use crate::engine::{classify_t_spin, lock_and_clear};
+    use crate::ai::search::score_placement;
 
-    let eval = LinearEvaluator::default();
     let candidates = movegen::generate_with_hold(
         &state.board,
         &state.active,
@@ -320,14 +329,9 @@ fn score_candidates(state: &SearchState) -> Vec<PlacementPlan> {
     candidates
         .into_iter()
         .map(|placement| {
-            let mut board = state.board.clone();
-            let t_spin = classify_t_spin(&placement.piece, &board);
-            let lock = lock_and_clear(&placement.piece, &mut board);
-            let (value, reward) = eval.evaluate(&lock, &board, t_spin);
-            PlacementPlan {
-                placement,
-                score: (value + reward).0,
-            }
+            // Same scorer the planner ranks with — see `search::score_placement`.
+            let score = score_placement(&state.board, &placement, eval);
+            PlacementPlan { placement, score }
         })
         .collect()
 }

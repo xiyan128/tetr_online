@@ -34,6 +34,7 @@ pub use greedy::GreedyPlanner;
 use crate::ai::eval::Evaluator;
 use crate::ai::movegen::{Move, Placement};
 use crate::ai::state::SearchState;
+use crate::engine::{classify_t_spin, lock_and_clear, Board};
 
 /// How much work a planner may do in one [`Planner::plan`] call.
 ///
@@ -92,6 +93,25 @@ impl PlacementPlan {
     pub fn uses_hold(&self) -> bool {
         self.placement.used_hold
     }
+}
+
+/// Score one placement exactly as the engine's lock path would: classify the
+/// T-spin against the pre-lock `board`, lock the placement's piece into a clone,
+/// then evaluate the resulting board + lock outcome. Returns `Value + Reward` as a
+/// single `i32` (higher is better).
+///
+/// This is the **one** place per-placement scoring lives. Both the greedy planner
+/// ([`GreedyPlanner`]) and the controller's error-injection rescan score through it,
+/// so the two can never silently disagree on what a placement is worth (the
+/// DRY/SRP fix the SOLID review flagged).
+pub(crate) fn score_placement(board: &Board, placement: &Placement, eval: &dyn Evaluator) -> i32 {
+    // Classify the T-spin against the board *before* the lock mutates it (engine
+    // order), then lock into a clone and evaluate the result.
+    let mut board = board.clone();
+    let t_spin = classify_t_spin(&placement.piece, &board);
+    let lock = lock_and_clear(&placement.piece, &mut board);
+    let (value, reward) = eval.evaluate(&lock, &board, t_spin);
+    (value + reward).0
 }
 
 /// The result of one [`Planner::plan`] call.

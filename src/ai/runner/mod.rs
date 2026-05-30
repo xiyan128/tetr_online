@@ -40,6 +40,7 @@ pub mod sync;
 pub use native::ThreadedRunner;
 pub use sync::SyncRunner;
 
+use crate::ai::eval::Evaluator;
 use crate::ai::search::{PlacementPlan, SearchBudget};
 use crate::ai::state::SearchState;
 
@@ -68,4 +69,14 @@ pub trait ComputeRunner: Send {
     /// stale). After this, [`poll`](Self::poll) returns `None` until the next
     /// [`submit`](Self::submit). An off-thread runner drops its `Task` here.
     fn cancel(&mut self);
+
+    /// The evaluator this runner's planner scores with, when available.
+    ///
+    /// The controller uses it so error-injection candidate scoring matches the
+    /// metric the planner actually optimized — rather than a hardcoded default
+    /// that could rank a "near-best mistake" by a different yardstick. Returns
+    /// `None` only when the evaluator is momentarily not owned by the runner (an
+    /// off-thread runner whose search is in flight); the controller treats that as
+    /// "skip the mistake this piece", never as a reason to fall back to a default.
+    fn evaluator(&self) -> Option<&dyn Evaluator>;
 }

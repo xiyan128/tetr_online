@@ -28,9 +28,8 @@
 
 use crate::ai::eval::Evaluator;
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
+use crate::ai::search::{score_placement, PlacementPlan, Planner, PlannerStep, SearchBudget};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, lock_and_clear};
 
 /// The greedy one-piece planner. Stateless; holds no search state between calls
 /// because it finishes every plan in a single call.
@@ -54,19 +53,6 @@ impl GreedyPlanner {
         Self {
             consider_hold: false,
         }
-    }
-
-    /// Score one placement exactly as the engine would: classify the T-spin against
-    /// the pre-lock board, lock into a clone, then evaluate the result.
-    fn score(&self, state: &SearchState, placement: &Placement, eval: &dyn Evaluator) -> i32 {
-        let mut board = state.board.clone();
-        // Step 2: classify against the board *before* the lock (engine order).
-        let t_spin = classify_t_spin(&placement.piece, &board);
-        // Step 3: lock the placement's piece into the cloned board.
-        let lock = lock_and_clear(&placement.piece, &mut board);
-        // Step 4 + 5: static board Value plus the move's accumulated Reward.
-        let (value, reward) = eval.evaluate(&lock, &board, t_spin);
-        (value + reward).0
     }
 
     /// Enumerate the candidate placements for `state`, with or without the hold
@@ -103,7 +89,7 @@ impl Planner for GreedyPlanner {
         let best = candidates
             .into_iter()
             .fold(None::<PlacementPlan>, |best, placement| {
-                let score = self.score(state, &placement, eval);
+                let score = score_placement(&state.board, &placement, eval);
                 match best {
                     Some(plan) if score <= plan.score => Some(plan),
                     _ => Some(PlacementPlan { placement, score }),
@@ -129,7 +115,9 @@ fn board_geometry(state: &SearchState) -> (usize, usize) {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::engine::{ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType};
+    use crate::engine::{
+        lock_and_clear, ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType,
+    };
     use std::collections::VecDeque;
 
     /// Build a `SearchState` from a crafted board + active piece (no hold/queue).

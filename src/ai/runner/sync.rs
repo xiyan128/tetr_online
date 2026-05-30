@@ -80,6 +80,12 @@ impl ComputeRunner for SyncRunner {
     fn cancel(&mut self) {
         self.pending = None;
     }
+
+    fn evaluator(&self) -> Option<&dyn Evaluator> {
+        // The synchronous runner always owns its evaluator (the search runs inline,
+        // never moving it elsewhere), so it is always available.
+        Some(self.evaluator.as_ref())
+    }
 }
 
 #[cfg(test)]
@@ -142,6 +148,63 @@ mod tests {
         runner.submit(tetris_state(), SearchBudget::greedy());
         runner.cancel();
         assert!(runner.poll().is_none(), "cancel discarded the pending plan");
+    }
+
+    #[test]
+    fn evaluator_accessor_returns_the_runners_own_evaluator() {
+        // Regression for the error-injection scoring gap: the controller scores
+        // candidates with `runner.evaluator()`, so the accessor must hand back the
+        // evaluator the runner was built with — not a fresh default. Build a runner
+        // with a custom weight set and confirm its score, distinct from the default.
+        use crate::ai::eval::{BoardWeights, Evaluator, RewardWeights, Value, Weights};
+        use crate::engine::LockOutcome;
+
+        // The composite board + lock pinned in `eval::tests`: with the weights
+        // below it scores Value(-15).
+        let lock = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::O))],
+            cleared_rows: Vec::new(),
+            top_y_after_lock: Some(0),
+        };
+        let mut board = Board::new(3, 4);
+        for y in 0..3 {
+            board.set(0, y, CellKind::Some(PieceType::O));
+        }
+        board.set(2, 0, CellKind::Some(PieceType::O));
+
+        let custom = Weights {
+            board: BoardWeights {
+                landing_height: 0.0,
+                eroded_piece_cells: 0.0,
+                row_transitions: -1.0,
+                column_transitions: -2.0,
+                holes: 0.0,
+                board_wells: -3.0,
+                hole_depth: 0.0,
+                rows_with_holes: 0.0,
+            },
+            reward: RewardWeights::COLD_CLEAR,
+        };
+        let runner = SyncRunner::new(
+            Box::new(GreedyPlanner::new()),
+            Box::new(LinearEvaluator::new(custom)),
+        );
+
+        let eval = runner
+            .evaluator()
+            .expect("the synchronous runner always lends its evaluator");
+        let (value, _reward) = eval.evaluate(&lock, &board, None);
+        assert_eq!(
+            value,
+            Value(-15),
+            "accessor returns the runner's custom eval"
+        );
+
+        let (default_value, _) = LinearEvaluator::default().evaluate(&lock, &board, None);
+        assert_ne!(
+            value, default_value,
+            "must be the runner's evaluator, not a hardcoded default",
+        );
     }
 
     #[test]

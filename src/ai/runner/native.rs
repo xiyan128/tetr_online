@@ -154,6 +154,14 @@ impl ComputeRunner for ThreadedRunner {
             }
         }
     }
+
+    fn evaluator(&self) -> Option<&dyn Evaluator> {
+        // The evaluator is parked in `idle` between searches and owned by the
+        // worker thread while a search is in flight. The controller only asks after
+        // a successful `poll` (which reclaims it into `idle`), so in practice this
+        // is `Some`; `None` would just skip error injection for that piece.
+        self.idle.as_ref().map(|(_, evaluator)| evaluator.as_ref())
+    }
 }
 
 /// Run the planner to a final plan (mirrors [`SyncRunner`]'s loop): drive it while
