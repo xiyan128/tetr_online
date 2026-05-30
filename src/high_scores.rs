@@ -42,31 +42,41 @@ impl HighScore {
     }
 }
 
-/// Per-variant top-10 boards. Lookups/inserts go through [`Variant`].
-#[derive(Resource, Debug, Clone, Default, Reflect)]
+/// Per-variant top-10 boards: one slot per [`Variant`], indexed by its position in
+/// [`Variant::ALL`]. Keying by index — rather than a named field plus a `match`
+/// arm per variant — means adding a mode is a single edit to `Variant`, not a
+/// shotgun edit across this file.
+#[derive(Resource, Debug, Clone, Reflect)]
 #[reflect(Resource)]
 pub struct HighScores {
-    marathon: Vec<HighScore>,
-    sprint: Vec<HighScore>,
-    ultra: Vec<HighScore>,
+    tables: Vec<Vec<HighScore>>,
+}
+
+impl Default for HighScores {
+    fn default() -> Self {
+        // One empty board per variant; slots line up with `Variant::ALL`.
+        Self {
+            tables: vec![Vec::new(); Variant::ALL.len()],
+        }
+    }
 }
 
 impl HighScores {
+    /// `variant`'s slot index (its position in [`Variant::ALL`]).
+    fn slot(variant: Variant) -> usize {
+        Variant::ALL
+            .iter()
+            .position(|v| *v == variant)
+            .expect("Variant::ALL contains every variant")
+    }
+
     /// The (sorted, best-first) table for `variant`.
     pub fn table(&self, variant: Variant) -> &[HighScore] {
-        match variant {
-            Variant::Marathon => &self.marathon,
-            Variant::Sprint => &self.sprint,
-            Variant::Ultra => &self.ultra,
-        }
+        &self.tables[Self::slot(variant)]
     }
 
     fn table_mut(&mut self, variant: Variant) -> &mut Vec<HighScore> {
-        match variant {
-            Variant::Marathon => &mut self.marathon,
-            Variant::Sprint => &mut self.sprint,
-            Variant::Ultra => &mut self.ultra,
-        }
+        &mut self.tables[Self::slot(variant)]
     }
 
     /// Whether `candidate` would make `variant`'s top-10 (the board isn't full,
@@ -170,5 +180,19 @@ mod tests {
         // A score below the (new) worst does not qualify.
         assert!(!boards.qualifies(Variant::Ultra, &run(5, 0.0)));
         assert_eq!(boards.insert(Variant::Ultra, run(5, 0.0)), None);
+    }
+
+    #[test]
+    fn each_variant_addresses_an_independent_board() {
+        // Guards the index mapping: every variant has its own slot (default has one
+        // empty board per variant) and inserting into one never aliases another.
+        let mut boards = HighScores::default();
+        for variant in Variant::ALL {
+            assert!(boards.table(variant).is_empty());
+        }
+        boards.insert(Variant::Marathon, run(100, 0.0));
+        assert_eq!(boards.table(Variant::Marathon).len(), 1);
+        assert!(boards.table(Variant::Sprint).is_empty());
+        assert!(boards.table(Variant::Ultra).is_empty());
     }
 }
