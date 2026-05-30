@@ -26,8 +26,9 @@
 //! - [`runner`] + [`controller`] + [`difficulty`] (AI3.5) — the compute seam, the
 //!   [`AiController`] (a [`PlayerController`](crate::player::PlayerController)),
 //!   and the difficulty knobs.
-//!
-//! The Bevy-aware sandbox that *runs* a game against the controller is AI3.6.
+//! - [`sandbox`] (AI3.6) — the **only** Bevy-aware AI module: a "Watch AI"
+//!   gameplay session that drives the engine with the [`AiController`] through the
+//!   existing renderer, for watching/tuning the bot.
 
 pub mod controller;
 pub mod difficulty;
@@ -35,6 +36,7 @@ pub mod eval;
 pub mod movegen;
 pub mod plan;
 pub mod runner;
+pub mod sandbox;
 pub mod search;
 pub mod state;
 
@@ -44,5 +46,6 @@ pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
 pub use runner::{ComputeRunner, SyncRunner};
+pub use sandbox::{AiPlayer, AiSandbox, AiSandboxPlugin};
 pub use search::{GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
 pub use state::{BagState, SearchState};

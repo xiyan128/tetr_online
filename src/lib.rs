@@ -126,6 +126,11 @@ impl Plugin for GamePlugin {
             ))
             // Gameplay + screen-shell + feature plugins.
             .add_plugins(LevelPlugin)
+            // AI sandbox (AI3.6): the "Watch AI" mode that drives a gameplay
+            // session with the bot. Owns the `AiSandbox` flag the menus arm/clear
+            // and the AI engine driver; the level driver reads the flag to choose
+            // keyboard vs. AI, so adding this is purely additive.
+            .add_plugins(crate::ai::AiSandboxPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
             .add_plugins(crate::features::FeaturesPlugin);
 

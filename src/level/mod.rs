@@ -30,6 +30,11 @@ mod score;
 mod sound_effects;
 mod ui;
 
+// The engine-driver resources the per-frame pipeline owns. Re-exported so the AI
+// sandbox driver (AI3.6) — which steps the *same* engine with a different
+// controller — can read/publish them without reaching into `engine_bridge`.
+pub use engine_bridge::{EngineState, FrameEvents, LatestSnapshot, PlayerInput, SIM_DT_SECONDS};
+
 pub struct LevelPlugin;
 
 impl Plugin for LevelPlugin {
@@ -116,9 +121,17 @@ impl Plugin for LevelPlugin {
                     .chain()
                     .in_set(LevelSystems::EngineDriver),
             )
+            // Keyboard driver. Gated on the AI sandbox being *off* so it and the
+            // AI driver (`crate::ai::sandbox::step_engine_ai`) are mutually
+            // exclusive: a sandbox session is driven by the bot, a normal game by
+            // the keyboard, and the keyboard path is byte-identical when the
+            // sandbox is unused (the condition defaults to keyboard if the
+            // `AiSandbox` flag resource is absent — e.g. headless level tests).
             .add_systems(
                 FixedUpdate,
-                step_engine.run_if(in_state(GameState::Playing)),
+                step_engine.run_if(
+                    in_state(GameState::Playing).and(not(crate::ai::sandbox::sandbox_active)),
+                ),
             )
             .add_systems(
                 Update,

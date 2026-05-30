@@ -7,6 +7,7 @@
 
 use bevy::prelude::*;
 
+use crate::ai::AiSandbox;
 use crate::assets::GameAssets;
 use crate::ui::focus::{focus_navigation, read_nav_action, FocusList, Focusable, NavAction};
 use crate::ui::widgets::{menu_button, screen_root, title_text};
@@ -36,13 +37,15 @@ struct MainMenuRoot;
 #[reflect(Component)]
 enum MainMenuAction {
     Play,
+    WatchAi,
     Options,
     Help,
     HighScores,
 }
 
-const ITEMS: [(MainMenuAction, &str); 4] = [
+const ITEMS: [(MainMenuAction, &str); 5] = [
     (MainMenuAction::Play, "Play"),
+    (MainMenuAction::WatchAi, "Watch AI"),
     (MainMenuAction::Options, "Options"),
     (MainMenuAction::Help, "Help"),
     (MainMenuAction::HighScores, "High Scores"),
@@ -71,10 +74,17 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 /// On Enter, route to the focused item's screen. Esc is a no-op here (the main
 /// menu is the root). Also paints the focused row's "pressed" color briefly via
 /// the focus helper's normal restyle on the next frame.
+///
+/// Both **Play** and **Watch AI** lead to mode select (pick a variant) and then a
+/// gameplay session; they differ only in the [`AiSandbox`] flag, which decides
+/// whether the keyboard or the bot drives the engine. Arming it *here* (and
+/// clearing it on the Play path) means the flag is always fresh for the next
+/// session — a previous "Watch AI" run can never leave a keyboard game bot-driven.
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
+    mut sandbox: ResMut<AiSandbox>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     let Some(NavAction::Select(index)) = read_nav_action(&keys, *list) else {
@@ -86,7 +96,14 @@ fn activate(
             continue;
         }
         match action {
-            MainMenuAction::Play => next.set(GameState::ModeSelect),
+            MainMenuAction::Play => {
+                *sandbox = AiSandbox(false);
+                next.set(GameState::ModeSelect);
+            }
+            MainMenuAction::WatchAi => {
+                *sandbox = AiSandbox(true);
+                next.set(GameState::ModeSelect);
+            }
             MainMenuAction::Options => next.set(GameState::Options),
             MainMenuAction::Help => next.set(GameState::Help),
             MainMenuAction::HighScores => next.set(GameState::HighScores),
