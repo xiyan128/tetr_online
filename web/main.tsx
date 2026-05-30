@@ -21,6 +21,46 @@ import { RENDERERS, bundleJs, type Renderer } from "./bundles";
 /** wasm-bindgen `--target web` module shape: default export is the async init(). */
 type WasmModule = { default: (module_or_path?: string) => Promise<unknown> };
 
+/**
+ * Work around the browser autoplay policy so the game's audio plays.
+ *
+ * An `AudioContext` created outside a user gesture starts "suspended" and stays
+ * muted until something calls `resume()` after the user interacts. Bevy's audio
+ * backend (cpal) creates its context during startup — long before the first
+ * click — so without this, no SFX ever play on the web. We can't reach cpal's
+ * context from JS, so we wrap the `AudioContext` constructor to track every
+ * instance, then resume any suspended ones on each pointer/key/touch. Must run
+ * before the wasm bundle is imported (it patches the global the bundle will use).
+ */
+function unlockAudioOnFirstGesture(): void {
+  const w = window as typeof window & { webkitAudioContext?: typeof AudioContext };
+  const Native = w.AudioContext ?? w.webkitAudioContext;
+  if (!Native) return;
+
+  const live = new Set<AudioContext>();
+  const Tracked = new Proxy(Native, {
+    construct(target, args) {
+      const ctx = Reflect.construct(target, args) as AudioContext;
+      live.add(ctx);
+      return ctx;
+    },
+  });
+  w.AudioContext = Tracked;
+  if (w.webkitAudioContext) w.webkitAudioContext = Tracked;
+
+  // Resume on EVERY gesture (not just the first): cpal may create its context
+  // slightly after the first keypress, and a tab can re-suspend on blur. Resuming
+  // an already-running context is a cheap no-op.
+  const resumeAll = () => {
+    for (const ctx of live) {
+      if (ctx.state === "suspended") void ctx.resume().catch(() => {});
+    }
+  };
+  for (const type of ["pointerdown", "keydown", "touchstart"]) {
+    window.addEventListener(type, resumeAll, { capture: true, passive: true });
+  }
+}
+
 function forced(): Renderer | null {
   const r = new URLSearchParams(location.search).get("renderer");
   return RENDERERS.includes(r as Renderer) ? (r as Renderer) : null;
@@ -93,5 +133,9 @@ function App() {
     </div>
   );
 }
+
+// Patch AudioContext before the wasm bundle loads, so cpal's context is tracked
+// and unmuted on the player's first interaction (see the function).
+unlockAudioOnFirstGesture();
 
 render(<App />, document.getElementById("app")!);
