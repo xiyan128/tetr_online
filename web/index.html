@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport"
+          content="width=device-width, user-scalable=no, initial-scale=1.0, maximum-scale=1.0, minimum-scale=1.0">
+    <title>tetr_online</title>
+    <!-- Empty inline icon: avoids a spurious favicon.ico 404 on hosts without one. -->
+    <link rel="icon" href="data:,">
+    <style>
+        html, body { margin: 0; height: 100%; width: 100%; background: #333; overflow: hidden; }
+        #app, #wrap { height: 100%; width: 100%; }
+        #bevy { display: block; outline: none; }
+        #overlay {
+            position: fixed; inset: 0;
+            display: flex; align-items: center; justify-content: center;
+            color: #ccc; font: 14px system-ui, sans-serif;
+        }
+    </style>
+</head>
+<body>
+<div id="app"></div>
+<!-- The entire page lives in this one TSX module; Bun bundles it on build. -->
+<script type="module" src="./main.tsx"></script>
+</body>
+</html>

@@ -1,0 +1,17 @@
+{
+  "name": "tetr_online-web",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build:wasm": "bun scripts/build.ts wasm --no-opt",
+    "dev": "bun run build:wasm && bun --hot serve.ts",
+    "serve": "bun --hot serve.ts",
+    "build": "bun scripts/build.ts web"
+  },
+  "dependencies": {
+    "preact": "^10.27.2"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.3.5"
+  }
+}

@@ -2,3 +2,5 @@
 /dist
 .DS_Store
 .idea/
+/node_modules
+/.wasm-dev

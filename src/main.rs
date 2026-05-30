@@ -11,6 +11,11 @@ use bevy::prelude::*;
 use tetr_online::GamePlugin;
 
 fn main() {
+    // On the web, route panics to the browser console with a readable stack.
+    // No-op on native (the hook crate is a wasm-only dependency).
+    #[cfg(target_arch = "wasm32")]
+    console_error_panic_hook::set_once();
+
     App::new()
         .insert_resource(ClearColor(Color::srgb(0.2, 0.2, 0.2)))
         .add_plugins(

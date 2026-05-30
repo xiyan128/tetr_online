@@ -1,0 +1,84 @@
+# Build the dual WebGPU/WebGL2 wasm bundles and deploy them to GitHub Pages.
+#
+# Build mechanics follow the official Bevy CI template: plain `cargo build` for
+# wasm32-unknown-unknown + `wasm-bindgen --target web`, with the CLI pinned to
+# the exact `wasm-bindgen` version resolved in Cargo.lock to avoid CLI/runtime
+# mismatch. All build logic lives in scripts/build.ts (run locally too).
+name: Deploy web build to Pages
+
+on:
+  push:
+    branches: ["master"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time; never cancel an in-flight production deploy.
+concurrency:
+  group: "pages"
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust (stable + wasm target)
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: wasm32-unknown-unknown
+
+      - name: Cache cargo build
+        uses: Swatinem/rust-cache@v2
+
+      - name: Install Bun
+        uses: oven-sh/setup-bun@v2
+
+      - name: Install JS dependencies
+        run: bun install --frozen-lockfile
+
+      - name: Install cargo-binstall
+        uses: cargo-bins/cargo-binstall@main
+
+      # Pin wasm-bindgen-cli to the Cargo.lock-resolved version. A version skew
+      # between the CLI and the `wasm-bindgen` crate yields a silently broken
+      # bundle (blank canvas, no error), so this match is load-bearing. binstall
+      # fetches the prebuilt binary (seconds) instead of compiling from source.
+      - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
+        run: |
+          version="$(cargo metadata --format-version 1 --locked \
+            | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version' \
+            | head -n1)"
+          echo "Pinning wasm-bindgen-cli to ${version}"
+          cargo binstall -y wasm-bindgen-cli --version "${version}"
+
+      - name: Install binaryen (wasm-opt)
+        run: |
+          BINARYEN_VERSION=version_119
+          curl -sSfL \
+            "https://github.com/WebAssembly/binaryen/releases/download/${BINARYEN_VERSION}/binaryen-${BINARYEN_VERSION}-x86_64-linux.tar.gz" \
+            | tar -xz
+          echo "$PWD/binaryen-${BINARYEN_VERSION}/bin" >> "$GITHUB_PATH"
+
+      - name: Build web bundles
+        run: bun run build
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist
+
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

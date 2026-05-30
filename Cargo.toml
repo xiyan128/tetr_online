@@ -47,6 +47,15 @@ bevy-inspector-egui = { version = "0.36", default-features = false, features = [
 bevy_egui = { version = "0.39", optional = true }
 
 [features]
+# Web renderer backend. Bevy bakes the wasm graphics backend in at compile time
+# (`webgpu` overrides `webgl2`), so a single binary is built twice — once per
+# feature — to produce the two web bundles. `webgl2` is the default so native
+# `cargo run` and `cargo test` Just Work; the web build script passes
+# `--no-default-features --features webgpu` for the WebGPU bundle. On native
+# targets `bevy/webgl2` is inert (it only constrains the wasm wgpu backend).
+default = ["webgl2"]
+webgl2 = ["bevy/webgl2"]
+webgpu = ["bevy/webgpu"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
 # never touches release builds. Usage: `cargo run --features dev`.
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
@@ -75,7 +84,9 @@ features = [
     "bevy_core_pipeline",
     "vorbis",
     "png",
-    "webgl2",
+    # NOTE: the web render backend (`webgl2`/`webgpu`) is NOT listed here — it is
+    # driven by this crate's own `webgl2`/`webgpu` features (see `[features]`) so
+    # the web build can produce both bundles from one binary. Default is webgl2.
     # Enables serde on Bevy types (notably `KeyCode`) so `GameSettings` keybinds
     # persist via plain serde derives + RON instead of a hand-rolled key codec.
     # A deliberate exception to the otherwise size-curated feature set.
@@ -84,11 +95,26 @@ features = [
 
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
+# Routes Rust panics to `console.error` with a readable stack instead of the
+# opaque `unreachable executed` wasm trap. Wasm-only + tiny; installed in main().
+console_error_panic_hook = "0.1"
 
 [profile.release]
 # optimize for size
 opt-level = 'z'
 lto = "thin"
+
+# Dedicated profile for the shipped web bundles. Kept separate from `release` so
+# the aggressive (slow-to-compile) full LTO + `panic = "abort"` never affect
+# native release builds or the criterion benches (which inherit `release`).
+# Used by `scripts/build.ts` via `cargo build --profile web`.
+[profile.web]
+inherits = "release"
+opt-level = "z"     # size over speed — a 2D board is not compute-bound
+lto = true          # full cross-crate LTO: smaller AND faster than thin
+codegen-units = 1   # maximise optimisation/inlining opportunities
+panic = "abort"     # drop unwinding tables (wasm doesn't unwind anyway)
+strip = true        # strip symbols from the .wasm
 
 [dev-dependencies]
 # Statistics-driven micro-benchmark harness for `benches/`. Dev-only: never
