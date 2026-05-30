@@ -1,0 +1,24 @@
+[package]
+name = "tetr-embed"
+version = "0.1.0"
+edition = "2021"
+description = "Headless wasm surface for the tetr_online engine + AI — drives a tiny embeddable component."
+
+# cdylib: the wasm artifact wasm-bindgen consumes. rlib: lets it build/test natively too.
+[lib]
+crate-type = ["cdylib", "rlib"]
+bench = false
+
+[dependencies]
+tetr-core = { path = "../tetr-core" }
+# Pinned to the installed wasm-bindgen CLI (0.2.118) — the runtime crate and the CLI
+# must match exactly. Already at 0.2.118 in the workspace lockfile.
+wasm-bindgen = "0.2.118"
+
+# wasm-only deps: the panic hook for readable browser stacks, and the getrandom
+# `wasm_js` backend. The engine/AI only ever *seed* their RNG (no entropy draw), but
+# `rand`'s default features still pull `getrandom` into the graph, so the wasm target
+# needs its backend feature or it won't compile.
+[target.wasm32-unknown-unknown.dependencies]
+console_error_panic_hook = "0.1"
+getrandom = { version = "0.4", features = ["wasm_js"] }
