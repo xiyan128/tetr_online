@@ -32,18 +32,17 @@
 //! [`HighScoresRoot`]: crate::screens::HighScoresRoot
 //! [`Variant`]: crate::variant::Variant
 //! [`ScoreKind`]: crate::variant::ScoreKind
-//!
-//! Touch only this file.
 
 use bevy::prelude::*;
 
 use crate::assets::GameAssets;
+use crate::engine::EngineSnapshot;
 use crate::high_scores::{HighScore, HighScores};
 use crate::level::engine_bridge::LatestSnapshot;
 use crate::screens::HighScoresRoot;
 use crate::storage::{keys, StorageResource};
 use crate::ui::widgets::label_text;
-use crate::variant::{ActiveVariant, ScoreKind, Variant, VariantProgress};
+use crate::variant::{ActiveVariant, ScoreKind, Variant, VariantDef, VariantProgress};
 use crate::GameState;
 
 /// Records qualifying runs into [`HighScores`], persists the table, loads it on
@@ -83,6 +82,17 @@ fn record_run(
     mut scores: ResMut<HighScores>,
 ) {
     let snap = &snapshot.0;
+    let variant = active.0;
+
+    // Only file a run that actually qualifies for the board. A time-ranked
+    // variant (Sprint) ranks by *lowest* time, so a top-out before the line
+    // target would post a sub-target time that beats every legitimate
+    // completion — drop it. Score-ranked variants (Marathon, Ultra) record
+    // every run; a partial run's lower score already sorts correctly.
+    if !run_qualifies(&variant.def(), snap, progress.elapsed_seconds) {
+        return;
+    }
+
     let candidate = HighScore {
         score: snap.score,
         time_seconds: progress.elapsed_seconds,
@@ -90,7 +100,6 @@ fn record_run(
         level: snap.level,
     };
 
-    let variant = active.0;
     if let Some(rank) = scores.insert(variant, candidate) {
         info!(
             "high score recorded for {}: rank {} (score {}, {})",
@@ -103,6 +112,21 @@ fn record_run(
             .0
             .save(keys::HIGH_SCORES, &codec::serialize(&scores));
     }
+}
+
+/// Whether a finished run should be filed for `def`.
+///
+/// Time-ranked variants (Sprint) only produce a meaningful ranking time when the
+/// goal was actually reached — `end_condition_met` is the same predicate
+/// [`check_variant_end_conditions`](crate::variant::check_variant_end_conditions)
+/// uses to detect a legitimate finish. A top-out short of the target is *not*
+/// recorded. Score-ranked variants (Marathon, Ultra) always qualify: a partial
+/// run posts a legitimate, lower score that sorts correctly on its own.
+fn run_qualifies(def: &VariantDef, snapshot: &EngineSnapshot, elapsed_seconds: f32) -> bool {
+    if def.score_kind == ScoreKind::Time {
+        return VariantProgress::end_condition_met(def, snapshot, elapsed_seconds);
+    }
+    true
 }
 
 /// Load the persisted leaderboard on startup, if present. Each entry is routed
@@ -402,10 +426,11 @@ S 1500 30.0 40 6
         fn deserialize_reorders_and_truncates_unsorted_input() {
             // Sprint ranks by time ascending; feed times out of order and over
             // the cap to prove load re-derives the canonical board.
+            use std::fmt::Write as _;
             let mut blob = String::new();
             for i in 0..15 {
                 // times 14.0, 13.0, ... 0.0 (descending input order).
-                blob.push_str(&format!("S 0 {}.0 40 1\n", 14 - i));
+                let _ = writeln!(blob, "S 0 {}.0 40 1", 14 - i);
             }
             let restored = deserialize(&blob);
             let times: Vec<f32> = restored
@@ -423,6 +448,45 @@ S 1500 30.0 40 6
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::{Engine, EngineConfig};
+
+    fn snapshot_with_lines(lines: usize) -> EngineSnapshot {
+        let mut snap = Engine::new(EngineConfig::default(), 0).snapshot();
+        snap.lines = lines;
+        snap
+    }
+
+    #[test]
+    fn sprint_topout_before_target_is_not_recorded() {
+        // The bug: a Sprint top-out at ~0.5s with the target unmet would post a
+        // sub-target time and silently win the time-ranked board over every real
+        // 40-line completion. The gate must reject it.
+        let def = Variant::Sprint.def();
+        assert!(!run_qualifies(&def, &snapshot_with_lines(12), 0.5));
+    }
+
+    #[test]
+    fn sprint_completion_is_recorded() {
+        let def = Variant::Sprint.def();
+        assert!(run_qualifies(&def, &snapshot_with_lines(40), 32.0));
+    }
+
+    #[test]
+    fn score_ranked_variants_record_partial_runs() {
+        // Marathon/Ultra rank by score, so a top-out short of the goal still posts
+        // a legitimate (lower) score and must qualify — only time-ranked Sprint is
+        // gated on completion.
+        assert!(run_qualifies(
+            &Variant::Marathon.def(),
+            &snapshot_with_lines(5),
+            10.0
+        ));
+        assert!(run_qualifies(
+            &Variant::Ultra.def(),
+            &snapshot_with_lines(5),
+            10.0
+        ));
+    }
 
     #[test]
     fn format_time_renders_minutes_and_millis() {
