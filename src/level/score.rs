@@ -80,6 +80,26 @@ pub enum ScoreType {
     TSpin,
     MiniTSpin,
     BackToBack,
+    /// Consecutive-clear combo. Carries the displayed combo number (the count of
+    /// *additional* clears beyond the first), so `Combo(1)` is the second clear in
+    /// a row. Renderer-derived; see [`emit_score_types`].
+    Combo(u32),
+}
+
+impl ScoreType {
+    /// The on-screen callout text for this label (guideline §19.2 wording).
+    pub fn label(&self) -> String {
+        match self {
+            ScoreType::Single => "SINGLE".to_string(),
+            ScoreType::Double => "DOUBLE".to_string(),
+            ScoreType::Triple => "TRIPLE".to_string(),
+            ScoreType::Tetris => "TETRIS".to_string(),
+            ScoreType::TSpin => "T-SPIN".to_string(),
+            ScoreType::MiniTSpin => "T-SPIN MINI".to_string(),
+            ScoreType::BackToBack => "BACK-TO-BACK".to_string(),
+            ScoreType::Combo(n) => format!("COMBO x{n}"),
+        }
+    }
 }
 
 /// Translate an engine score action (+ its back-to-back flag) into the labels
@@ -130,21 +150,47 @@ pub(crate) fn score_types_for(
     types
 }
 
-/// Single canonical consumer of [`EngineEvent::ScoreAwarded`]: turn each award
-/// into a [`ScoreTypes`] message for the popup UI.
-fn emit_score_types(frame_events: Res<FrameEvents>, mut ev_score_types: MessageWriter<ScoreTypes>) {
+/// Single canonical consumer of the engine's lock/score events for the on-board
+/// callout readout: turn each [`EngineEvent::ScoreAwarded`] into a [`ScoreTypes`]
+/// message for the popup UI, folding in the renderer-side combo counter.
+///
+/// `combo` counts consecutive line-clearing locks. It reads
+/// [`EngineEvent::Locked`] — the authority on how many lines a lock cleared —
+/// which the engine pushes *before* the matching `ScoreAwarded`, so the counter is
+/// already current when we build that award's labels. A combo only reads as one
+/// from the second consecutive clear onward (guideline §19.2). The `Local` is
+/// safe across games: a fresh board can't clear a line on its first lock, so the
+/// run's first no-clear lock zeroes any stale count before the first callout.
+fn emit_score_types(
+    frame_events: Res<FrameEvents>,
+    mut ev_score_types: MessageWriter<ScoreTypes>,
+    mut combo: Local<u32>,
+) {
     use crate::engine::EngineEvent;
     for event in &frame_events.0 {
-        if let EngineEvent::ScoreAwarded {
-            action,
-            back_to_back_bonus,
-            ..
-        } = event
-        {
-            let types = score_types_for(*action, *back_to_back_bonus);
-            if !types.is_empty() {
+        match event {
+            EngineEvent::Locked { lines_cleared, .. } => {
+                if *lines_cleared > 0 {
+                    *combo += 1;
+                } else {
+                    *combo = 0;
+                }
+            }
+            EngineEvent::ScoreAwarded {
+                action,
+                back_to_back_bonus,
+                ..
+            } => {
+                let mut types = score_types_for(*action, *back_to_back_bonus);
+                if types.is_empty() {
+                    continue;
+                }
+                if *combo >= 2 {
+                    types.push(ScoreType::Combo(*combo - 1));
+                }
                 ev_score_types.write(ScoreTypes(types));
             }
+            _ => {}
         }
     }
 }

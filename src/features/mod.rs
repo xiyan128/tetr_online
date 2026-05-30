@@ -10,7 +10,7 @@
 //! | info_panel     | `features/info_panel.rs`      | `InfoPanelPlugin`          | in-game variant/goal/time/score panel |
 //! | options        | `features/options.rs`         | `OptionsPlugin`            | Options-screen widgets that mutate `GameSettings` |
 //! | help           | `features/help.rs`            | `HelpPlugin`               | Help-screen controls/about content |
-//! | notifications  | `features/notifications.rs`   | `NotificationsPlugin`      | transient on-screen messages |
+//! | notifications  | `features/notifications.rs`   | `NotificationsPlugin`      | line-clear flash + hard-drop trail effects |
 //! | sfx            | `features/sfx.rs`             | `SfxPlugin`                | music + volume (reads `GameSettings`) |
 //! | high_scores    | `features/high_scores.rs`     | `HighScoresFeaturePlugin`  | record runs + render leaderboard tables |
 

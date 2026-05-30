@@ -69,7 +69,7 @@ impl Plugin for UIPlugin {
         )
         .add_systems(
             Update,
-            fade_out_score_type_text.run_if(any_with_component::<ScoreTypeText>),
+            animate_callout.run_if(any_with_component::<ScoreTypeText>),
         )
         .add_systems(OnEnter(PlayingState::Locking), spawn_locking_timer_bar)
         .add_systems(
