@@ -10,6 +10,7 @@
 //! Screen plugins (and the options/help/high-scores feature agents) reuse this
 //! so every menu navigates identically.
 
+use bevy::input::mouse::AccumulatedMouseMotion;
 use bevy::prelude::*;
 
 use super::theme;
@@ -65,10 +66,16 @@ pub enum NavAction {
 /// Drive focus from BOTH keyboard and mouse, and restyle the focusable buttons.
 /// Generic over a screen marker `M` so each screen's lists are isolated.
 ///
-/// - **Mouse:** hovering (or pressing) a row moves the cursor to it, so the
-///   keyboard focus and the pointer always agree — and a click therefore lands on
-///   the highlighted item. A pressed row shows the pressed color.
+/// - **Mouse:** moving the pointer onto a row (or pressing one) moves the cursor
+///   to it, so the keyboard focus and the pointer agree and a click lands on the
+///   highlighted item. A pressed row shows the pressed color.
 /// - **Keyboard:** Up/Down (and W/S) move the cursor.
+///
+/// "Most recent input device wins": a hover only claims the cursor on a frame the
+/// pointer actually *moved*. A pointer merely resting over a row must not re-grab
+/// focus every frame, or it would immediately undo an arrow-key press (the row
+/// stays `Hovered`, so the cursor would snap back under the pointer on the very
+/// next frame) — that was the "hover + arrow keys fight" bug.
 ///
 /// `M` is the screen-root marker component; the [`FocusList`] is expected on the
 /// same entity. Call `app.add_systems(Update, focus_navigation::<MyScreen>.run_if(in_state(...)))`.
@@ -76,13 +83,21 @@ pub enum NavAction {
 /// marker `M` exists — the only state in which the rows are meaningful.
 pub fn focus_navigation<M: Component>(
     keys: Res<ButtonInput<KeyCode>>,
+    pointer_motion: Res<AccumulatedMouseMotion>,
     mut list: Single<&mut FocusList, With<M>>,
     mut buttons: Query<(&Focusable, &Interaction, &mut BackgroundColor)>,
 ) {
-    // Mouse hover/press moves the cursor to the pointed row.
+    // Move the cursor to the pointed row — but weigh a press and a hover
+    // differently. A press is an explicit action, so it always claims the cursor;
+    // a hover only does on a frame the pointer moved (see the doc comment).
+    let pointer_moved = pointer_motion.delta != Vec2::ZERO;
     if let Some(index) = buttons.iter().find_map(|(focusable, interaction, _)| {
-        matches!(*interaction, Interaction::Hovered | Interaction::Pressed)
-            .then_some(focusable.index)
+        let claims_cursor = match *interaction {
+            Interaction::Pressed => true,
+            Interaction::Hovered => pointer_moved,
+            Interaction::None => false,
+        };
+        claims_cursor.then_some(focusable.index)
     }) {
         list.index = index;
     }
