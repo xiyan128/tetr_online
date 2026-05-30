@@ -209,6 +209,33 @@ impl SearchState {
         self.active = ActivePiece::new(piece_type, origin);
         self.bag.deal(piece_type);
     }
+
+    /// Build a search state directly from parts, for crafted-board unit tests in the
+    /// AI crate that need a specific position without spinning up an [`Engine`].
+    ///
+    /// The board geometry is taken from `board`, the bag starts full, and B2B is
+    /// off; pass the `hold` slot and revealed `queue` explicitly. Test-only — the
+    /// production path is [`SearchState::from_snapshot`].
+    #[cfg(test)]
+    pub(crate) fn for_test(
+        board: Board,
+        active: ActivePiece,
+        hold: Option<crate::engine::PieceType>,
+        queue: VecDeque<crate::engine::PieceType>,
+    ) -> Self {
+        let board_width = board.width();
+        let visible_height = board.height();
+        Self {
+            board,
+            active,
+            hold,
+            queue,
+            bag: BagState::full(),
+            b2b: false,
+            board_width,
+            visible_height,
+        }
+    }
 }
 
 /// Rebuild the playfield (margin included) from the snapshot's occupied cells.
