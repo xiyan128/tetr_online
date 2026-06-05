@@ -26,7 +26,7 @@
 //! Ties are broken by movegen's canonical placement order (stable), so the result
 //! is fully deterministic with no RNG.
 
-use crate::ai::eval::Evaluator;
+use crate::ai::eval::{EvalContext, Evaluator};
 use crate::ai::movegen::{self, Placement};
 use crate::ai::search::{score_placement, PlacementPlan, Planner, PlannerStep, SearchBudget};
 use crate::ai::state::SearchState;
@@ -64,7 +64,7 @@ impl GreedyPlanner {
                 &state.board,
                 &state.active,
                 state.hold,
-                state.queue.front().copied(),
+                state.queue.first().copied(),
                 move |piece_type| movegen::spawn_piece(piece_type, width, visible),
             )
         } else {
@@ -97,7 +97,11 @@ impl Planner for GreedyPlanner {
         let best = candidates
             .into_iter()
             .fold(None::<PlacementPlan>, |best, placement| {
-                let score = score_placement(&state.board, &placement, eval);
+                let ctx = EvalContext {
+                    combo: state.combo,
+                    b2b: state.b2b,
+                };
+                let score = score_placement(&state.board, &placement, eval, ctx);
                 match best {
                     Some(plan) if score <= plan.score => Some(plan),
                     _ => Some(PlacementPlan { placement, score }),
@@ -124,7 +128,7 @@ mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
     use crate::engine::{
-        lock_and_clear, ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType,
+        ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType,
     };
     use std::collections::VecDeque;
 
@@ -178,8 +182,8 @@ mod tests {
         let plan = plan_of(&state, &mut planner);
 
         // The chosen placement, locked, clears the four stacked rows.
-        let mut check = state.board.clone();
-        let lock = lock_and_clear(&plan.placement.piece, &mut check);
+        let mut check = state.board;
+        let lock = check.lock_piece(&plan.placement.piece);
         assert_eq!(
             lock.cleared_rows.len(),
             4,
@@ -210,8 +214,9 @@ mod tests {
 
         // The chosen placement must not leave a hole (a None cell with a filled
         // cell somewhere above it in the same column).
-        let mut after = state.board.clone();
-        lock_and_clear(&plan.placement.piece, &mut after);
+        let mut after = state.board;
+        after.lock_piece(&plan.placement.piece);
+        let after = after.to_array2d();
         assert!(
             !has_hole(&after),
             "greedy should avoid creating a hole; resulting board:\n{after}"
@@ -300,8 +305,8 @@ mod tests {
         // On an empty board the best placement rests on the floor (no holes, low
         // height): assert the plan is executable (non-empty path or already resting)
         // and lands on the floor.
-        let mut after = state.board.clone();
-        lock_and_clear(&plan.placement.piece, &mut after);
-        assert!(!after.cells().is_empty(), "a piece was placed");
+        let mut after = state.board;
+        after.lock_piece(&plan.placement.piece);
+        assert!(!after.is_empty(), "a piece was placed");
     }
 }

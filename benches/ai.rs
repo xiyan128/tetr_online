@@ -9,10 +9,16 @@ mod common;
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BenchmarkId, Criterion, Throughput};
+use criterion::{
+    criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
+};
 
-use common::{first_locked, play_pieces, search_state, spawner, Scenario};
-use tetr_online::ai::{movegen, Evaluator, GreedyPlanner, LinearEvaluator, Planner, SearchBudget};
+use common::{first_locked, first_placement, play_pieces, search_state, spawner, Scenario};
+use tetr_online::ai::{
+    movegen, Cc2Evaluator, EvalContext, Evaluator, GreedyPlanner, LinearEvaluator, Planner,
+    SearchBudget,
+};
+use tetr_online::engine::classify_t_spin;
 
 /// Reachable-placement enumeration — the search's inner loop. Throughput is the
 /// number of placements found, so criterion reports placements/sec (and the count
@@ -22,7 +28,7 @@ fn bench_movegen(c: &mut Criterion) {
     for scenario in Scenario::ALL {
         let state = search_state(scenario);
         let spawn = spawner();
-        let queue_front = state.queue.front().copied();
+        let queue_front = state.queue.first().copied();
 
         let no_hold = movegen::generate(&state.board, &state.active).len() as u64;
         group.throughput(Throughput::Elements(no_hold.max(1)));
@@ -52,12 +58,59 @@ fn bench_movegen(c: &mut Criterion) {
 /// The board evaluator (`Value` feature extraction + `Reward` classification) on a
 /// realistic locked-placement fixture, across scenarios.
 fn bench_evaluate(c: &mut Criterion) {
-    let eval = LinearEvaluator::default();
+    // Both shipped evaluators: the linear DT-20 vector vs the ported Cold Clear 2 eval.
+    // The CC2 eval is the per-node cost the best-first attack bot pays ~35×/expansion,
+    // so its absolute µs sets the search's compute/quality frontier.
+    let linear = LinearEvaluator::default();
+    let cc2 = Cc2Evaluator::default();
+    let evals: [(&str, &dyn Evaluator); 2] = [("linear", &linear), ("cc2", &cc2)];
     let mut group = c.benchmark_group("ai/evaluate");
     for scenario in Scenario::ALL {
         let (lock, board, t_spin) = first_locked(scenario);
-        group.bench_function(BenchmarkId::from_parameter(scenario.name()), |b| {
-            b.iter(|| black_box(eval.evaluate(black_box(&lock), black_box(&board), black_box(t_spin))));
+        for (name, eval) in &evals {
+            group.bench_function(BenchmarkId::new(*name, scenario.name()), |b| {
+                b.iter(|| {
+                    black_box(eval.evaluate(
+                        black_box(&lock),
+                        black_box(&board),
+                        black_box(t_spin),
+                        black_box(EvalContext::default()),
+                    ))
+                });
+            });
+        }
+    }
+    group.finish();
+}
+
+/// The per-candidate **board machinery** the search pays for every child: clone the
+/// state, `commit_placement` (place the piece + line-clear + queue/hold advance), and
+/// the pre-lock T-spin classification. With the evaluator benched cheap (~0.4µs), these
+/// dominate best-first's per-piece cost — the target of a future bitboard `SearchState`
+/// (Copy clone, free `column_bits`, bit-op commit). Reported per scenario.
+fn bench_transition(c: &mut Criterion) {
+    let mut group = c.benchmark_group("ai/transition");
+    for scenario in Scenario::ALL {
+        let state = search_state(scenario);
+        let placement = first_placement(&state);
+
+        group.bench_function(BenchmarkId::new("clone", scenario.name()), |b| {
+            b.iter(|| black_box(black_box(&state).clone()));
+        });
+        group.bench_function(BenchmarkId::new("commit", scenario.name()), |b| {
+            b.iter_batched(
+                || state.clone(),
+                |mut s| black_box(s.commit_placement(black_box(&placement))),
+                BatchSize::SmallInput,
+            );
+        });
+        group.bench_function(BenchmarkId::new("classify_t_spin", scenario.name()), |b| {
+            b.iter(|| {
+                black_box(classify_t_spin(
+                    black_box(&placement.piece),
+                    black_box(&state.board),
+                ))
+            });
         });
     }
     group.finish();
@@ -100,6 +153,7 @@ criterion_group!(
     benches,
     bench_movegen,
     bench_evaluate,
+    bench_transition,
     bench_plan,
     bench_game_throughput
 );

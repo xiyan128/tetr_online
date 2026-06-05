@@ -175,7 +175,7 @@ impl AiController {
             Decision::Place(placement) => {
                 // Render against the board the maneuver happens on, from the active
                 // piece's current pose — the inputs `placement_to_inputs` round-trips.
-                let frames = placement_to_inputs(&obs.board, &obs.active, &placement);
+                let frames = placement_to_inputs(&obs.board.to_array2d(), &obs.active, &placement);
                 self.plan = frames.into();
                 true
             }
@@ -329,7 +329,7 @@ mod tests {
             PlannerStep::Done(Some(plan)) => plan,
             other => panic!("expected a plan, got {other:?}"),
         };
-        let mut intended = state.board.clone();
+        let mut intended = state.board.to_array2d();
         lock_and_clear(&plan.placement.piece, &mut intended);
 
         // Drive the controller until the board first changes (the piece locked).

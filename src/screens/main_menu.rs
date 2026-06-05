@@ -113,7 +113,8 @@ fn activate(
             }
             MainMenuAction::WatchAi => {
                 *sandbox = AiSandbox(true);
-                next.set(GameState::ModeSelect);
+                // Watch-AI picks a model first, then the mode.
+                next.set(GameState::ModelSelect);
             }
             MainMenuAction::Options => next.set(GameState::Options),
             MainMenuAction::Help => next.set(GameState::Help),

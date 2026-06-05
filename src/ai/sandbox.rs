@@ -115,8 +115,20 @@ pub fn sandbox_active(sandbox: Option<Res<AiSandbox>>) -> bool {
 /// Exclusive (`&mut World`) because a non-send resource cannot be inserted through
 /// [`Commands`] — `insert_non_send_resource` is a `World` method.
 fn setup_ai_player(world: &mut World) {
-    info!("AI sandbox: bot takes control");
-    world.insert_non_send_resource(AiPlayer(AiController::beatable()));
+    // Build the controller for the model the player picked (model-select screen).
+    // The immutable `ModelRegistry` borrow must end before the non-send insert, so
+    // build the controller (and copy the label for the log) inside the `if let`.
+    let controller = if let Some(registry) = world.get_resource::<crate::ai::ModelRegistry>() {
+        let label = registry.selected_label().to_string();
+        let controller = registry.selected_controller();
+        info!("AI sandbox: bot takes control (model: {label})");
+        controller
+    } else {
+        // No registry (e.g. a headless LevelPlugin-only test): the shipped default.
+        info!("AI sandbox: bot takes control");
+        AiController::beatable()
+    };
+    world.insert_non_send_resource(AiPlayer(controller));
 }
 
 /// Remove the sandbox controller when the gameplay session ends (quit to menu,

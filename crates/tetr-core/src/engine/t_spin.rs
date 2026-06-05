@@ -8,7 +8,7 @@
 //! override that promotes a Mini to Full.
 
 use crate::engine::active_piece::{ActivePiece, PieceAction};
-use crate::engine::board::{Board, CellKind};
+use crate::engine::bit_board::Occupancy;
 use crate::engine::pieces::{PieceRotation, PieceType};
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
@@ -34,7 +34,7 @@ impl TSpinCorners {
     }
 }
 
-pub fn t_spin_corners(active_piece: &ActivePiece, board: &Board) -> Option<TSpinCorners> {
+pub fn t_spin_corners<B: Occupancy>(active_piece: &ActivePiece, board: &B) -> Option<TSpinCorners> {
     if active_piece.piece_type() != PieceType::T {
         return None;
     }
@@ -42,7 +42,7 @@ pub fn t_spin_corners(active_piece: &ActivePiece, board: &Board) -> Option<TSpin
     let center = t_center(active_piece.origin());
     let corner = |offset: (isize, isize)| {
         let (x, y) = (center.0 + offset.0, center.1 + offset.1);
-        is_corner_blocked(board, x, y)
+        board.blocked(x, y)
     };
 
     let nw = corner((-1, 1));
@@ -85,11 +85,11 @@ pub fn t_spin_corners(active_piece: &ActivePiece, board: &Board) -> Option<TSpin
 /// kick-5 rotation's resting pose to decide whether to set the sticky
 /// `used_kick_5_into_t_slot` flag, which promotes the spin to Full and *survives*
 /// later non-rotation actions (§12.4). Returns `false` for a non-T piece.
-pub fn is_t_slot(active_piece: &ActivePiece, board: &Board) -> bool {
+pub fn is_t_slot<B: Occupancy>(active_piece: &ActivePiece, board: &B) -> bool {
     t_spin_corners(active_piece, board).is_some_and(|corners| corners.blocked_count() >= 3)
 }
 
-pub fn classify_t_spin(active_piece: &ActivePiece, board: &Board) -> Option<TSpinKind> {
+pub fn classify_t_spin<B: Occupancy>(active_piece: &ActivePiece, board: &B) -> Option<TSpinKind> {
     if active_piece.piece_type() != PieceType::T {
         return None;
     }
@@ -123,14 +123,11 @@ fn t_center(origin: (isize, isize)) -> (isize, isize) {
     (origin.0 + 1, origin.1 + 1)
 }
 
-fn is_corner_blocked(board: &Board, x: isize, y: isize) -> bool {
-    !matches!(board.get_cell_kind(x, y), CellKind::None)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::engine::active_piece::RotationDirection;
+    use crate::engine::board::{Board, CellKind};
 
     const ORIGIN: (isize, isize) = (4, 4);
 

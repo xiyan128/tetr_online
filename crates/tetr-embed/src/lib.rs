@@ -109,6 +109,34 @@ fn event_tag(e: &EngineEvent) -> Option<u8> {
     }
 }
 
+/// Build the AI controller for a fresh game.
+///
+/// With the `nn` feature, the embedded AI is driven by the `tetr-nn` neural value
+/// net (CPU backend) loaded from the weights baked into the wasm — falling back to
+/// the linear bot if those weights fail to parse. Without it, the linear bot. The
+/// handicap (reaction delay + imperfection) is honored either way, so swapping the
+/// policy never changes the embed's "click to take over" / beatability contract.
+fn make_ai(handicap: Handicap, seed: u32) -> AiController {
+    #[cfg(feature = "nn")]
+    {
+        const MODEL: &[u8] = include_bytes!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tetr-nn/assets/value_net.safetensors"
+        ));
+        if let Ok(ai) = tetr_nn::nn_ai_controller(
+            MODEL,
+            tetr_core::ai::eval::RewardWeights::SURVIVAL,
+            handicap.reaction,
+            handicap.imperfection,
+            ai_seed(seed),
+        ) {
+            return ai;
+        }
+        // Weights failed to parse — degrade to the linear bot rather than abort.
+    }
+    AiController::new(handicap, ai_seed(seed))
+}
+
 /// Which controller is currently driving the engine.
 enum Mode {
     /// Autoplay: the [`AiController`] drives.
@@ -165,7 +193,7 @@ impl Game {
         let (engine, snap) = fresh_engine(seed);
         Game {
             engine,
-            ai: AiController::new(handicap, ai_seed(seed)),
+            ai: make_ai(handicap, seed),
             keyboard: KeyboardController::default(),
             handicap,
             mode: Mode::Ai,
@@ -181,7 +209,7 @@ impl Game {
         let (engine, snap) = fresh_engine(seed);
         self.engine = engine;
         self.snap = snap;
-        self.ai = AiController::new(self.handicap, ai_seed(seed));
+        self.ai = make_ai(self.handicap, seed);
         self.keyboard = KeyboardController::default();
         self.pressed = 0;
         self.prev_pressed = 0;

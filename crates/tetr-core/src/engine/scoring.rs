@@ -133,6 +133,11 @@ pub(crate) struct ScoreState {
     score: usize,
     lines: usize,
     back_to_back_active: bool,
+    /// Consecutive line-clearing placements so far (the guideline combo counter): the
+    /// number of immediately preceding placements that each cleared ≥1 line, reset by
+    /// any clear-less lock. A search reads this (via the snapshot) to value continuing
+    /// a combo — the attack it earns escalates with the chain ([`super::attack_lines`]).
+    combo: u32,
     goal_progress: GoalProgress,
 }
 
@@ -142,6 +147,7 @@ impl ScoreState {
             score: 0,
             lines: 0,
             back_to_back_active: false,
+            combo: 0,
             goal_progress: GoalProgress::new(goal_system, starting_level),
         }
     }
@@ -164,6 +170,12 @@ impl ScoreState {
 
     pub(crate) fn back_to_back_active(&self) -> bool {
         self.back_to_back_active
+    }
+
+    /// Consecutive line-clearing placements so far (the combo counter); `0` when no
+    /// combo is active. See the [`combo`](Self::combo) field.
+    pub(crate) fn combo(&self) -> u32 {
+        self.combo
     }
 
     /// Test-only: rewind the goal/level progression to the starting level while
@@ -197,6 +209,10 @@ impl ScoreState {
         } else if action.breaks_back_to_back() {
             self.back_to_back_active = false;
         }
+
+        // Combo advances on any line clear, resets on a clear-less lock — the guideline
+        // rule (and the one `crate::action_clear_lines` enforces in the research harness).
+        self.combo = if lines_cleared > 0 { self.combo + 1 } else { 0 };
 
         let goal_units = match goal_system {
             GoalSystem::Fixed => lines_cleared,
@@ -246,4 +262,23 @@ pub(crate) struct ScoreAward {
     pub(crate) score: usize,
     pub(crate) total_score: usize,
     pub(crate) back_to_back_bonus: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn combo_advances_on_clears_and_resets_on_clearless_lock() {
+        let mut s = ScoreState::new(GoalSystem::Fixed, 0);
+        assert_eq!(s.combo(), 0, "no combo at start");
+        s.lock_result(GoalSystem::Fixed, None, 1); // single — chain starts
+        assert_eq!(s.combo(), 1);
+        s.lock_result(GoalSystem::Fixed, None, 2); // double — chain continues
+        assert_eq!(s.combo(), 2);
+        s.lock_result(GoalSystem::Fixed, None, 0); // clear-less lock breaks it
+        assert_eq!(s.combo(), 0);
+        s.lock_result(GoalSystem::Fixed, None, 4); // a fresh chain restarts at 1
+        assert_eq!(s.combo(), 1);
+    }
 }

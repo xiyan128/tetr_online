@@ -27,14 +27,18 @@
 //! (stable), never by randomness; any error injection the AI wants lives in the
 //! controller's own seeded RNG, never here.
 
+pub mod beam;
+pub mod best_first;
 pub mod greedy;
 
+pub use beam::BeamPlanner;
+pub use best_first::BestFirstPlanner;
 pub use greedy::GreedyPlanner;
 
-use crate::ai::eval::Evaluator;
+use crate::ai::eval::{EvalContext, Evaluator};
 use crate::ai::movegen::{Move, Placement};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, lock_and_clear, Board};
+use crate::engine::{classify_t_spin, BitBoard};
 
 /// How much work a planner may do in one [`Planner::plan`] call.
 ///
@@ -57,6 +61,17 @@ impl SearchBudget {
         Self {
             nodes: 0,
             max_depth: 1,
+        }
+    }
+
+    /// A budget for a multi-ply beam search up to `max_depth` plies, expanding a
+    /// whole generation per `plan` call (`nodes == 0`, unbounded per call). The beam
+    /// *width* is a [`BeamPlanner`](crate::ai::search::BeamPlanner) field, not part of
+    /// the budget. `beam(1)` reproduces the greedy single-ply decision.
+    pub fn beam(max_depth: u8) -> Self {
+        Self {
+            nodes: 0,
+            max_depth,
         }
     }
 }
@@ -104,13 +119,18 @@ impl PlacementPlan {
 /// ([`GreedyPlanner`]) and the controller's error-injection rescan score through it,
 /// so the two can never silently disagree on what a placement is worth (the
 /// DRY/SRP fix the SOLID review flagged).
-pub(crate) fn score_placement(board: &Board, placement: &Placement, eval: &dyn Evaluator) -> i32 {
+pub(crate) fn score_placement(
+    board: &BitBoard,
+    placement: &Placement,
+    eval: &dyn Evaluator,
+    ctx: EvalContext,
+) -> i32 {
     // Classify the T-spin against the board *before* the lock mutates it (engine
-    // order), then lock into a clone and evaluate the result.
-    let mut board = board.clone();
+    // order), then lock into a copy and evaluate the result.
+    let mut board = *board;
     let t_spin = classify_t_spin(&placement.piece, &board);
-    let lock = lock_and_clear(&placement.piece, &mut board);
-    let (value, reward) = eval.evaluate(&lock, &board, t_spin);
+    let lock = board.lock_piece(&placement.piece);
+    let (value, reward) = eval.evaluate_cols(&lock, &board, t_spin, ctx);
     (value + reward).0
 }
 

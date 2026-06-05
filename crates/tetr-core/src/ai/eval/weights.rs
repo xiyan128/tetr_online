@@ -64,6 +64,14 @@ pub struct BoardWeights {
     pub hole_depth: f32,
     /// BCTS-8: number of distinct rows that contain at least one hole.
     pub rows_with_holes: f32,
+    /// Tetris-well readiness (offense): rows ready to clear via an I-piece in the
+    /// lowest column. Positive ⇒ reward building toward a Tetris. See
+    /// [`BoardFeatures::tetris_well`](super::features::BoardFeatures::tetris_well).
+    pub tetris_well: f32,
+    /// Combo-readiness (offense): rows one cell from clearing. Positive ⇒ reward
+    /// building a combo machine. See
+    /// [`BoardFeatures::near_full_rows`](super::features::BoardFeatures::near_full_rows).
+    pub near_full_rows: f32,
 }
 
 impl BoardWeights {
@@ -81,6 +89,11 @@ impl BoardWeights {
         board_wells: -2.71,
         hole_depth: -0.43,
         rows_with_holes: -9.48,
+        // Offense feature, neutral by default: DT-20 is a survival vector, so this
+        // adds nothing until autoresearch tunes it positive to build Tetrises.
+        tetris_well: 0.0,
+        // Combo-readiness, neutral by default (tuned positive for combo offense).
+        near_full_rows: 0.0,
     };
 
     /// The static-board contribution to a board's Value: the dot product of these
@@ -97,8 +110,47 @@ impl BoardWeights {
             + self.holes * features.holes as f32
             + self.board_wells * features.board_wells as f32
             + self.hole_depth * features.hole_depth as f32
-            + self.rows_with_holes * features.rows_with_holes as f32;
+            + self.rows_with_holes * features.rows_with_holes as f32
+            + self.tetris_well * features.tetris_well as f32
+            + self.near_full_rows * features.near_full_rows as f32;
         sum.round() as i32
+    }
+
+    /// Number of tunable coefficients (one per board feature).
+    pub const PARAM_COUNT: usize = 10;
+
+    /// The weights as a flat vector in [`BoardFeatures`](super::features::BoardFeatures)
+    /// order, for hillclimbing: `[landing_height, eroded_piece_cells, row_transitions,
+    /// column_transitions, holes, board_wells, hole_depth, rows_with_holes]`.
+    pub fn params(&self) -> [f32; Self::PARAM_COUNT] {
+        [
+            self.landing_height,
+            self.eroded_piece_cells,
+            self.row_transitions,
+            self.column_transitions,
+            self.holes,
+            self.board_wells,
+            self.hole_depth,
+            self.rows_with_holes,
+            self.tetris_well,
+            self.near_full_rows,
+        ]
+    }
+
+    /// Build a weight set from a flat vector (see [`params`](Self::params) for order).
+    pub fn from_params(p: &[f32; Self::PARAM_COUNT]) -> Self {
+        Self {
+            landing_height: p[0],
+            eroded_piece_cells: p[1],
+            row_transitions: p[2],
+            column_transitions: p[3],
+            holes: p[4],
+            board_wells: p[5],
+            hole_depth: p[6],
+            rows_with_holes: p[7],
+            tetris_well: p[8],
+            near_full_rows: p[9],
+        }
     }
 }
 
@@ -131,6 +183,16 @@ pub struct RewardWeights {
     pub b2b_clear: f32,
     /// Bonus for a perfect clear (board fully emptied).
     pub perfect_clear: f32,
+    /// Scales the **actual guideline attack** this clear sends — combo, Back-to-Back,
+    /// spin, and perfect-clear bonuses all included, via
+    /// [`attack_lines`](crate::engine::attack_lines) evaluated over the search-path
+    /// [`EvalContext`](super::EvalContext). The direct APP lever: where the abstract
+    /// `clearN` / `tspinN` weights are a hand-tuned *proxy* for attack value, this
+    /// rewards the garbage a placement *actually* produces, so a multi-ply search
+    /// values escalating combos and sustained B2B chains (the multipliers that
+    /// weight-tuning alone, blind to chain state, cannot reach). Default `0.0` ⇒ the
+    /// shipped survival profile is unchanged; the attack sprint tunes it up.
+    pub attack: f32,
 }
 
 impl RewardWeights {
@@ -146,6 +208,7 @@ impl RewardWeights {
         tspin3: 602.0,
         b2b_clear: 104.0,
         perfect_clear: 999.0,
+        attack: 0.0,
     };
 
     /// Survival reward weights for the **Tier-1 greedy** planner — the shipped
@@ -170,7 +233,47 @@ impl RewardWeights {
         tspin3: 720.0,
         b2b_clear: 80.0,
         perfect_clear: 1600.0,
+        attack: 0.0,
     };
+
+    /// Number of tunable reward coefficients.
+    pub const PARAM_COUNT: usize = 11;
+
+    /// The reward weights as a flat vector, for hillclimbing: `[clear1, clear2,
+    /// clear3, clear4, mini_tspin, tspin1, tspin2, tspin3, b2b_clear, perfect_clear,
+    /// attack]`.
+    pub fn params(&self) -> [f32; Self::PARAM_COUNT] {
+        [
+            self.clear1,
+            self.clear2,
+            self.clear3,
+            self.clear4,
+            self.mini_tspin,
+            self.tspin1,
+            self.tspin2,
+            self.tspin3,
+            self.b2b_clear,
+            self.perfect_clear,
+            self.attack,
+        ]
+    }
+
+    /// Build a reward set from a flat vector (see [`params`](Self::params) for order).
+    pub fn from_params(p: &[f32; Self::PARAM_COUNT]) -> Self {
+        Self {
+            clear1: p[0],
+            clear2: p[1],
+            clear3: p[2],
+            clear4: p[3],
+            mini_tspin: p[4],
+            tspin1: p[5],
+            tspin2: p[6],
+            tspin3: p[7],
+            b2b_clear: p[8],
+            perfect_clear: p[9],
+            attack: p[10],
+        }
+    }
 }
 
 /// The full tunable weight set: a board-quality group and a per-move reward group.
@@ -207,5 +310,46 @@ impl Default for Weights {
     /// The Tier-1 survival default ([`Weights::SURVIVAL`]).
     fn default() -> Self {
         Self::SURVIVAL
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // The hill-climbers tune these weights as flat `f32` vectors, so `params()` and
+    // `from_params()` must be exact inverses and `PARAM_COUNT` must equal the vector
+    // width. These are hand-indexed (a field added to the struct but not to both
+    // methods, or listed in a different order, is the classic desync), so the round
+    // trip is the contract that catches it. Until a `#[derive(Tunable)]` makes the
+    // mapping unforgeable, these tests are the lock.
+
+    #[test]
+    fn board_weights_round_trip_through_params() {
+        let w = BoardWeights::DT20;
+        assert_eq!(w.params().len(), BoardWeights::PARAM_COUNT);
+        assert_eq!(BoardWeights::from_params(&w.params()), w);
+    }
+
+    #[test]
+    fn board_weights_from_params_is_positional() {
+        // Distinct value per slot ⇒ any index swap between `params`/`from_params`
+        // changes the result and fails the comparison.
+        let p: [f32; BoardWeights::PARAM_COUNT] = std::array::from_fn(|i| (i as f32 + 1.0) * 1.5);
+        assert_eq!(BoardWeights::from_params(&p).params(), p);
+    }
+
+    #[test]
+    fn reward_weights_round_trip_through_params() {
+        for w in [RewardWeights::SURVIVAL, RewardWeights::COLD_CLEAR] {
+            assert_eq!(w.params().len(), RewardWeights::PARAM_COUNT);
+            assert_eq!(RewardWeights::from_params(&w.params()), w);
+        }
+    }
+
+    #[test]
+    fn reward_weights_from_params_is_positional() {
+        let p: [f32; RewardWeights::PARAM_COUNT] = std::array::from_fn(|i| (i as f32 + 1.0) * 7.0);
+        assert_eq!(RewardWeights::from_params(&p).params(), p);
     }
 }

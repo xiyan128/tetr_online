@@ -213,7 +213,7 @@ mod tests {
     fn placement_with_path(piece: ActivePiece, path: Vec<Move>) -> Placement {
         Placement {
             piece,
-            path,
+            path: path.into(),
             used_hold: false,
         }
     }
@@ -520,7 +520,7 @@ mod tests {
 
         let placement = Placement {
             piece: held_i,
-            path: vec![Move::Hold, Move::SoftDrop],
+            path: vec![Move::Hold, Move::SoftDrop].into(),
             used_hold: true,
         };
         let soft_pulses = placement_to_inputs(&board, &active_o, &placement)

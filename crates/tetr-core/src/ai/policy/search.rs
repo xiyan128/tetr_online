@@ -20,7 +20,7 @@ use rand::rngs::StdRng;
 use rand::seq::IndexedRandom;
 use rand::{RngExt, SeedableRng};
 
-use crate::ai::eval::{Evaluator, LinearEvaluator};
+use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy};
 use crate::ai::search::{score_placement, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
@@ -145,13 +145,22 @@ fn score_candidates(obs: &Observation, eval: &dyn Evaluator) -> Vec<PlacementPla
         &obs.board,
         &obs.active,
         obs.hold,
-        obs.queue.front().copied(),
+        obs.queue.first().copied(),
         |piece_type| movegen::spawn_piece(piece_type, obs.board.width(), obs.board.height()),
     );
     candidates
         .into_iter()
         .map(|placement| {
-            let score = score_placement(&obs.board, &placement, eval);
+            // Score with the live chain state — the Observation IS the SearchState, so it
+            // carries combo/B2B. This must match the planner's basis: a chain-sensitive
+            // eval (e.g. CC2's combo_attack / B2B value) would otherwise rank candidates
+            // here on a chain-stripped score and the imperfection sample would diverge
+            // from the policy it is meant to perturb.
+            let ctx = EvalContext {
+                combo: obs.combo,
+                b2b: obs.b2b,
+            };
+            let score = score_placement(&obs.board, &placement, eval, ctx);
             PlacementPlan { placement, score }
         })
         .collect()

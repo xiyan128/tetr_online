@@ -42,10 +42,14 @@ pub mod state;
 
 pub use controller::{AiController, DEFAULT_AI_SEED};
 pub use handicap::Handicap;
-pub use eval::{Evaluator, LinearEvaluator, Reward, Value, Weights};
+pub use eval::{
+    Cc2Evaluator, Cc2Weights, EvalContext, Evaluator, LinearEvaluator, Reward, Value, Weights,
+};
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
 pub use runner::{DecisionRunner, SyncRunner};
-pub use search::{GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
+pub use search::{
+    BeamPlanner, BestFirstPlanner, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget,
+};
 pub use state::{BagState, SearchState};

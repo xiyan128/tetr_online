@@ -48,12 +48,21 @@ pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {
         cells_locked.push((x, y, cell_kind));
     }
 
-    let cleared_rows = full_rows(board);
-    if !cleared_rows.is_empty() {
+    // Full-row detection and the post-lock skyline both come from the column
+    // bitboard: one cheap scan plus O(width) bit ops, rather than repeatedly
+    // materialising `board.cells()` (a whole-board scan that allocates a `Vec` of
+    // every occupied cell). The lock path is the search's hottest mutation — it runs
+    // once per candidate placement — so this is a large constant-factor win, and it
+    // is exactly equivalent: a row is full iff every column's bit is set there, and
+    // the skyline is the highest set bit across columns.
+    let cols = board.column_bits();
+    let cleared_rows = full_rows(&cols);
+    let top_y_after_lock = if cleared_rows.is_empty() {
+        highest_occupied_y(&cols)
+    } else {
         board.clear_lines();
-    }
-
-    let top_y_after_lock = highest_occupied_y(board);
+        highest_occupied_y(&board.column_bits())
+    };
 
     LockOutcome {
         cells_locked,
@@ -62,18 +71,23 @@ pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {
     }
 }
 
-fn full_rows(board: &Board) -> Vec<isize> {
-    let width = board.width();
-    let mut rows: Vec<isize> = board.cells().iter().map(|cell| cell.coords().1).collect();
-    rows.sort_unstable();
-    rows.dedup();
-    rows.into_iter()
-        .filter(|y| board.row_cells(*y as usize).count() == width)
+/// Indices of completely-filled rows, ascending. A row is full iff every column has
+/// its bit set there, so the bitwise-AND of all column bitboards has exactly the full
+/// rows' bits set. (`fold(!0, &)` over the columns; an empty board ANDs to `0`.)
+fn full_rows(cols: &[u64]) -> Vec<isize> {
+    let full = cols.iter().fold(!0u64, |acc, &c| acc & c);
+    (0..u64::BITS)
+        .filter(|&y| full & (1u64 << y) != 0)
+        .map(|y| y as isize)
         .collect()
 }
 
-fn highest_occupied_y(board: &Board) -> Option<isize> {
-    board.cells().iter().map(|cell| cell.coords().1).max()
+/// Highest occupied row across all columns, or `None` if the board is empty.
+fn highest_occupied_y(cols: &[u64]) -> Option<isize> {
+    cols.iter()
+        .filter(|&&c| c != 0)
+        .map(|&c| (u64::BITS - 1 - c.leading_zeros()) as isize)
+        .max()
 }
 
 #[cfg(test)]

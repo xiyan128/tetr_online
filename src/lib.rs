@@ -69,6 +69,9 @@ pub enum GameState {
     Title,
     /// Root navigation menu (Play / Options / Help / High Scores).
     MainMenu,
+    /// Choose which AI model drives the Watch-AI session (Watch-AI path only,
+    /// before mode select). See [`screens`]/`model_select` + [`ai::ModelRegistry`].
+    ModelSelect,
     /// Choose a [`variant::Variant`] (Marathon/Sprint/Ultra) before playing.
     ModeSelect,
     /// Settings screen (filled by the options feature).
@@ -127,6 +130,10 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
+            // The Watch-AI model registry (always has the linear model; the `nn`
+            // feature adds the tetr-nn value net). Read by the model-select screen
+            // and the sandbox.
+            .init_resource::<crate::ai::ModelRegistry>()
             // Runtime visual-FX toggles (all-on; the dev panel flips them live).
             .init_resource::<crate::vfx::VfxToggles>()
             .register_type::<crate::vfx::VfxToggles>()

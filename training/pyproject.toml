@@ -1,0 +1,33 @@
+[project]
+name = "tetr-training"
+version = "0.1.0"
+description = "JAX/Flax training + model development for the tetr-nn value net."
+requires-python = ">=3.11"
+dependencies = [
+    "jax>=0.4.30",
+    "flax>=0.8",
+    "optax>=0.2",
+    "numpy>=1.26",
+    "safetensors>=0.4",
+]
+
+[dependency-groups]
+dev = [
+    "ruff>=0.14",
+]
+
+# Scripts-only project (not an installable package): uv just manages the venv +
+# deps, it doesn't build/install `tetr-training` itself.
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+# pycodestyle/pyflakes + import sorting, pyupgrade, bugbear.
+select = ["E", "F", "I", "UP", "B"]
+
+[tool.ruff.format]
+quote-style = "double"

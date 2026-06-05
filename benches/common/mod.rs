@@ -31,8 +31,8 @@
 
 use tetr_online::ai::{movegen, AiController, Handicap, SearchState};
 use tetr_online::engine::{
-    classify_t_spin, lock_and_clear, ActivePiece, Board, CellKind, Engine, EngineConfig,
-    EngineEvent, InputFrame, LockOutcome, PieceType, TSpinKind,
+    classify_t_spin, ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent, InputFrame,
+    LockOutcome, PieceType, TSpinKind,
 };
 use tetr_online::player::drive_engine;
 
@@ -139,10 +139,10 @@ pub fn first_placement(state: &SearchState) -> movegen::Placement {
 pub fn first_locked(scenario: Scenario) -> (LockOutcome, Board, Option<TSpinKind>) {
     let state = search_state(scenario);
     let placement = first_placement(&state);
-    let mut board = state.board.clone();
+    let mut board = state.board;
     let t_spin = classify_t_spin(&placement.piece, &board);
-    let lock = lock_and_clear(&placement.piece, &mut board);
-    (lock, board, t_spin)
+    let lock = board.lock_piece(&placement.piece);
+    (lock, board.to_array2d(), t_spin)
 }
 
 /// Play a flawless, seeded bot against a fresh engine until it has placed `target`

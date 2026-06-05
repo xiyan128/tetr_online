@@ -7,6 +7,7 @@
 //! return the resolved offset/rotation when unobstructed, implementing the SRS
 //! kick tables, and `None` otherwise.
 
+use crate::engine::bit_board::Occupancy;
 use crate::engine::board::{Board, CellKind};
 use std::fmt::Debug;
 
@@ -231,21 +232,23 @@ impl Piece {
         }
     }
 
-    pub fn collide_with(&self, board: &Board, offset: (isize, isize)) -> bool {
+    pub fn collide_with<B: Occupancy>(&self, board: &B, offset: (isize, isize)) -> bool {
         let (x_offset, y_offset) = offset;
 
         for (x, y) in self.cells() {
-            let board_cell = board.get_cell_kind(x + x_offset, y + y_offset);
-            if board_cell != CellKind::None {
+            // `Occupancy::blocked` is exactly the old `get_cell_kind(..) != None`:
+            // out-of-bounds (wall/floor) or a filled cell. Generic over the board so the
+            // search can collision-check on the fast `BitBoard`, not just the `Array2D`.
+            if board.blocked(x + x_offset, y + y_offset) {
                 return true;
             }
         }
         false
     }
 
-    pub fn try_move(
+    pub fn try_move<B: Occupancy>(
         &self,
-        board: &Board,
+        board: &B,
         offset: (isize, isize),
         direction: MoveDirection,
     ) -> Option<(isize, isize)> {
@@ -263,9 +266,9 @@ impl Piece {
         }
     }
 
-    pub fn try_rotate_with_kicks(
+    pub fn try_rotate_with_kicks<B: Occupancy>(
         &self,
-        board: &Board,
+        board: &B,
         offset: (isize, isize),
         rotation: PieceRotation,
     ) -> Option<(PieceRotation, (isize, isize), u8)> {
@@ -311,9 +314,9 @@ impl Piece {
         None
     }
 
-    pub fn try_rotate(
+    pub fn try_rotate<B: Occupancy>(
         &self,
-        board: &Board,
+        board: &B,
         offset: (isize, isize),
         rotation: PieceRotation,
     ) -> Option<PieceRotation> {

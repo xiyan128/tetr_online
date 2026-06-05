@@ -1,0 +1,59 @@
+[package]
+name = "tetr-research"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+# Headless research + evaluation for the Tetris bot — Bevy-free, so it compiles
+# and iterates fast. Drives the tetr-core engine with a chosen Evaluator and
+# measures the bot's attack/behavior metrics, and compares against Cold Clear 2.
+
+[dependencies]
+tetr-core = { path = "../tetr-core" }
+# Default (ndarray/CPU) backend — deterministic, matches the in-browser path.
+tetr-nn = { path = "../tetr-nn" }
+# Direct Burn dep with autodiff for the bootstrap distiller. NATIVE-ONLY: the
+# wasm game build never pulls tetr-research, so autodiff stays off the size budget.
+burn = { version = "0.21", default-features = false, features = ["ndarray", "std", "autodiff"] }
+rand = "0.10"
+# TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON).
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[lib]
+bench = false
+
+# APP / DS-P / behavior suite across garbage scenarios (the primary bot metric).
+# Run: SEEDS=24 cargo run --release -p tetr-research --bin behavior
+[[bin]]
+name = "behavior"
+path = "src/bin/behavior.rs"
+
+# Fast single-config metric for the /autoresearch loop (one number out). Run:
+# BENCH_SEEDS=6 BEAM_DEPTH=2 cargo run --release -p tetr-research --bin metric
+[[bin]]
+name = "metric"
+path = "src/bin/metric.rs"
+
+# Full 3-way Marathon scoring-speed sweep (greedy | beam | beam+NN).
+[[bin]]
+name = "bench-marathon"
+path = "src/bin/bench_marathon.rs"
+
+# Cold Clear 2 baseline: drive CC2 over TBP on the same seeded task and report its
+# attack-per-piece. Run: CC2_BIN=... cargo run --release -p tetr-research --bin cc2-baseline
+[[bin]]
+name = "cc2-baseline"
+path = "src/bin/cc2_baseline.rs"
+
+# Native CC2 head-to-head: CC2's ported evaluator vs our DT-20, both on our beam +
+# engine + garbage (fair, no TBP). Run: cargo run --release -p tetr-research --bin cc2-native
+[[bin]]
+name = "cc2-native"
+path = "src/bin/cc2_native.rs"
+
+# Bootstrap distiller: train the value net to match the DT-20 linear evaluator and
+# export safetensors. Run: cargo run --release -p tetr-research --bin distill
+[[bin]]
+name = "distill"
+path = "src/bin/distill.rs"

@@ -6,9 +6,20 @@
 //! tunable weight vector. Keeping the two apart means the feature definitions can
 //! be pinned by exact unit tests independent of any particular weight set.
 //!
+//! # Performance: one column bitboard, then bit ops
+//!
+//! [`BoardFeatures::extract`] builds a `[u64; width]` column bitboard **once** (bit
+//! `y` of column `x` set ⇔ `(x, y)` filled) and every feature reads it with cheap bit
+//! tests / `leading_zeros`, instead of re-scanning the board through bounds-checked
+//! [`Board::get_cell_kind`] per cell. The evaluator runs millions of times inside the
+//! beam, so this is the difference between a research climb taking minutes vs hours.
+//! The algorithms are unchanged — only the cell-access primitive — so the pinned
+//! feature tests below still hold exactly.
+//!
 //! # Feature catalog (finding [1], [2])
 //!
-//! [`BoardFeatures`] ships Dellacherie's canonical **six** plus the BCTS **two**:
+//! [`BoardFeatures`] ships Dellacherie's canonical **six** plus the BCTS **two**, and
+//! a Tetris-well offense term:
 //!
 //! | feature              | meaning                                                        |
 //! |----------------------|----------------------------------------------------------------|
@@ -20,10 +31,7 @@
 //! | `board_wells`        | cumulative well depth: `Σ 1+2+…+depth` over each well run      |
 //! | `hole_depth`         | BCTS: filled cells stacked directly above each hole            |
 //! | `rows_with_holes`    | BCTS: distinct rows containing ≥1 hole                          |
-//!
-//! Extending to the full BCTS-8 / DT-9 set (a `diversity` feature) is additive:
-//! give [`BoardFeatures`] another field, extract it here, weight it in
-//! [`super::weights::BoardWeights`].
+//! | `tetris_well`        | rows ready to clear via an I-piece in the single lowest column |
 //!
 //! # Coordinate conventions
 //!
@@ -37,7 +45,7 @@
 
 use crate::engine::{Board, LockOutcome};
 
-/// Static board-quality features (the Dellacherie-6 + BCTS-2 set).
+/// Static board-quality features (the Dellacherie-6 + BCTS-2 set, plus `tetris_well`).
 ///
 /// Built by [`BoardFeatures::extract`]. All counts are non-negative integers; the
 /// sign/scale of their contribution lives entirely in the weights.
@@ -65,6 +73,16 @@ pub struct BoardFeatures {
     pub hole_depth: i32,
     /// BCTS: the number of distinct rows that contain at least one hole.
     pub rows_with_holes: i32,
+    /// Tetris-well readiness: rows that would clear if the single lowest column were
+    /// filled — i.e. lines an I-piece in the well clears. Rewards a Tetris setup,
+    /// the offense the general [`board_wells`](Self::board_wells) penalty discourages.
+    pub tetris_well: i32,
+    /// Combo-readiness: rows filled to exactly `width − 1` (missing a single cell), so
+    /// one well-placed cell clears each. A stack of these is a **combo machine** —
+    /// clearing one per piece runs up the guideline combo bonus. Rewarding it (with
+    /// combo-aware search) is the offense path to high *clean* attack-per-piece, which
+    /// concentrated Tetris/T-spin play alone caps out below.
+    pub near_full_rows: i32,
 }
 
 impl BoardFeatures {
@@ -77,49 +95,71 @@ impl BoardFeatures {
     /// outcome to score a board with no associated move (those two features come
     /// out `0`).
     pub fn extract(board: &Board, lock: &LockOutcome) -> Self {
-        let heights = column_heights(board);
+        let cols = board.column_bits();
+        let heights = column_heights(&cols);
         let stack_height = heights.iter().copied().max().unwrap_or(0);
 
-        let (holes, hole_depth, rows_with_holes) = hole_features(board, &heights);
+        let (holes, hole_depth, rows_with_holes) = hole_features(&cols, &heights);
 
         Self {
             landing_height: landing_height(lock),
             eroded_piece_cells: eroded_piece_cells(lock),
-            row_transitions: row_transitions(board, stack_height),
-            column_transitions: column_transitions(board, &heights, stack_height),
+            row_transitions: row_transitions(&cols, stack_height),
+            column_transitions: column_transitions(&cols, stack_height),
             holes,
-            board_wells: board_wells(board, stack_height),
+            board_wells: board_wells(&cols, stack_height),
             hole_depth,
             rows_with_holes,
+            tetris_well: tetris_well(&cols, &heights, stack_height),
+            near_full_rows: near_full_rows(&cols, stack_height),
         }
     }
 }
 
-/// Per-column stack height: `(highest filled y) + 1`, or `0` for an empty column.
-fn column_heights(board: &Board) -> Vec<i32> {
-    let width = board.width();
-    let scan_top = board_scan_top(board);
-    (0..width as isize)
-        .map(|x| {
-            (0..scan_top)
-                .rev()
-                .find(|&y| board.get_cell_kind(x, y).is_some())
-                .map_or(0, |y| (y + 1) as i32)
+/// Combo-readiness: count of rows (below the skyline) filled to exactly `width − 1`
+/// cells — one placed cell away from clearing. See
+/// [`BoardFeatures::near_full_rows`](BoardFeatures::near_full_rows).
+fn near_full_rows(cols: &[u64], stack_height: i32) -> i32 {
+    let width = cols.len();
+    if width == 0 {
+        return 0;
+    }
+    (0..stack_height)
+        .filter(|&y| {
+            let filled = cols.iter().filter(|&&c| (c >> y) & 1 == 1).count();
+            filled == width - 1
         })
-        .collect()
+        .count() as i32
 }
 
-/// An exclusive upper `y` bound that covers every filled cell, including any in
-/// the hidden spawn buffer. `Board` does not expose its total row count, so we
-/// bound by the highest filled cell it reports and add one (everything above is
-/// guaranteed empty). Returns `0` for an empty board.
-fn board_scan_top(board: &Board) -> isize {
-    board
-        .cells()
-        .iter()
-        .map(|cell| cell.coords().1)
-        .max()
-        .map_or(0, |max_y| max_y + 1)
+/// Whether `(x, y)` is a filled in-bounds cell. Off the playfield (any `x` outside
+/// `0..width`, or `y < 0` / `y ≥ 64`) reads as **empty** — matching
+/// `get_cell_kind(..).is_some()` (a [`CellKind::Wall`] is not `Some`).
+fn filled(cols: &[u64], x: isize, y: isize) -> bool {
+    x >= 0 && (x as usize) < cols.len() && (0..64).contains(&y) && (cols[x as usize] >> y) & 1 == 1
+}
+
+/// Whether `(x, y)` is "blocked" for a well: a filled cell **or** off the playfield
+/// (a side wall / the floor). Matches `!get_cell_kind(..).is_none()` (which is true
+/// for both `Some` and `Wall`).
+fn blocked(cols: &[u64], x: isize, y: isize) -> bool {
+    if x < 0 || x as usize >= cols.len() || y < 0 {
+        return true; // wall or floor
+    }
+    filled(cols, x, y)
+}
+
+/// Per-column stack height: `(highest filled y) + 1`, or `0` for an empty column.
+fn column_heights(cols: &[u64]) -> Vec<i32> {
+    cols.iter()
+        .map(|&c| {
+            if c == 0 {
+                0
+            } else {
+                64 - c.leading_zeros() as i32
+            }
+        })
+        .collect()
 }
 
 /// 1-indexed height of the lowest cell of the just-placed piece.
@@ -152,19 +192,17 @@ fn eroded_piece_cells(lock: &LockOutcome) -> i32 {
 
 /// Horizontal filled⇄empty alternations over rows `0..stack_height`, with both
 /// side walls counted as filled (so a gap at the edge of a row still registers).
-fn row_transitions(board: &Board, stack_height: i32) -> i32 {
-    let width = board.width() as isize;
+fn row_transitions(cols: &[u64], stack_height: i32) -> i32 {
+    let width = cols.len() as isize;
     let mut transitions = 0;
     for y in 0..stack_height as isize {
-        // Walk x = -1 (wall) .. width (wall); a transition is an occupancy flip
-        // between adjacent cells.
         let mut prev_filled = true; // left wall
         for x in 0..width {
-            let filled = board.get_cell_kind(x, y).is_some();
-            if filled != prev_filled {
+            let f = filled(cols, x, y);
+            if f != prev_filled {
                 transitions += 1;
             }
-            prev_filled = filled;
+            prev_filled = f;
         }
         if !prev_filled {
             // last interior cell empty -> right wall is filled: one more flip.
@@ -176,16 +214,16 @@ fn row_transitions(board: &Board, stack_height: i32) -> i32 {
 
 /// Vertical filled⇄empty alternations over each column's rows `0..stack_height`,
 /// with the floor (`y = -1`) counted as filled and the open top counted as empty.
-fn column_transitions(board: &Board, heights: &[i32], stack_height: i32) -> i32 {
+fn column_transitions(cols: &[u64], stack_height: i32) -> i32 {
     let mut transitions = 0;
-    for (x, &_height) in heights.iter().enumerate() {
+    for x in 0..cols.len() as isize {
         let mut prev_filled = true; // floor below y = 0
         for y in 0..stack_height as isize {
-            let filled = board.get_cell_kind(x as isize, y).is_some();
-            if filled != prev_filled {
+            let f = filled(cols, x, y);
+            if f != prev_filled {
                 transitions += 1;
             }
-            prev_filled = filled;
+            prev_filled = f;
         }
         // Above the scanned region is empty; if the top scanned cell was filled
         // that is one final flip. (Only possible for the tallest column, where
@@ -202,7 +240,7 @@ fn column_transitions(board: &Board, heights: &[i32], stack_height: i32) -> i32 
 /// A *hole* is an empty cell that lies below the column's top (i.e. has a filled
 /// cell somewhere above it). `hole_depth` sums, per hole, the filled cells stacked
 /// directly above it; `rows_with_holes` counts the distinct rows any hole sits in.
-fn hole_features(board: &Board, heights: &[i32]) -> (i32, i32, i32) {
+fn hole_features(cols: &[u64], heights: &[i32]) -> (i32, i32, i32) {
     let mut holes = 0;
     let mut hole_depth = 0;
     let mut rows_with_holes_mask: Vec<bool> = Vec::new();
@@ -212,7 +250,7 @@ fn hole_features(board: &Board, heights: &[i32]) -> (i32, i32, i32) {
         // hole knows its burial depth in a single pass.
         let mut filled_above = 0;
         for y in (0..height as isize).rev() {
-            if board.get_cell_kind(x as isize, y).is_some() {
+            if filled(cols, x as isize, y) {
                 filled_above += 1;
             } else {
                 holes += 1;
@@ -236,19 +274,15 @@ fn hole_features(board: &Board, heights: &[i32]) -> (i32, i32, i32) {
 ///
 /// Scanning each column top-down, a counter tracks the current run depth: a well
 /// cell increments it and adds the running depth, a non-well cell resets it.
-fn board_wells(board: &Board, stack_height: i32) -> i32 {
-    let width = board.width() as isize;
+fn board_wells(cols: &[u64], stack_height: i32) -> i32 {
+    let width = cols.len() as isize;
     let mut total = 0;
     for x in 0..width {
         let mut depth = 0;
         for y in (0..stack_height as isize).rev() {
-            let empty = board.get_cell_kind(x, y).is_none();
-            // Walls bound a well too, so "blocked on this side" means filled *or*
-            // off the playfield. `get_cell_kind` returns `Wall` past the edges and
-            // `None` for an in-bounds empty cell, so `!is_none()` captures both
-            // "filled cell" and "wall".
-            let left_blocked = !board.get_cell_kind(x - 1, y).is_none();
-            let right_blocked = !board.get_cell_kind(x + 1, y).is_none();
+            let empty = !filled(cols, x, y);
+            let left_blocked = blocked(cols, x - 1, y);
+            let right_blocked = blocked(cols, x + 1, y);
             if empty && left_blocked && right_blocked {
                 depth += 1;
                 total += depth;
@@ -258,6 +292,38 @@ fn board_wells(board: &Board, stack_height: i32) -> i32 {
         }
     }
     total
+}
+
+/// Tetris-well readiness (CC2-style): take the single lowest column as the well, then
+/// count the consecutive rows at/above its height where *every other* column is filled
+/// — i.e. how many lines an I-piece dropped into the well would clear at once.
+///
+/// This is the offense counterpart to [`board_wells`]: that penalizes wells in general
+/// (good for survival), but a Tetris *needs* one deep clean well with the rest filled.
+/// A dedicated term lets the policy reward building toward a Tetris without also
+/// rewarding general bumpiness. Returns `0` unless exactly one column is the lowest and
+/// the rows above its height are complete-except-well.
+fn tetris_well(cols: &[u64], heights: &[i32], stack_height: i32) -> i32 {
+    let width = cols.len();
+    if width == 0 || stack_height == 0 {
+        return 0;
+    }
+    // The well is the lowest column (ties resolve to the lowest index, which then
+    // fails the "every other column filled" test below — so ties score 0, correct:
+    // two equally-low columns are not a single-well Tetris setup).
+    let well = (0..width).min_by_key(|&x| heights[x]).unwrap();
+    let mut depth = 0;
+    let mut y = heights[well] as isize;
+    while y < stack_height as isize {
+        let complete_except_well =
+            (0..width).all(|x| x == well || filled(cols, x as isize, y));
+        if !complete_except_well {
+            break;
+        }
+        depth += 1;
+        y += 1;
+    }
+    depth
 }
 
 #[cfg(test)]
@@ -284,6 +350,11 @@ mod tests {
         board
     }
 
+    /// The column bitboard of a board — the input every feature helper now takes.
+    fn cols_of(board: &Board) -> Vec<u64> {
+        board.column_bits().to_vec()
+    }
+
     /// An empty lock outcome — used when scoring a board with no associated move.
     fn no_move() -> LockOutcome {
         LockOutcome {
@@ -301,6 +372,16 @@ mod tests {
     }
 
     #[test]
+    fn near_full_rows_counts_rows_one_cell_from_clearing() {
+        // 4-wide: two rows missing exactly one cell (combo-ready), one missing three.
+        //   y2: X . X X   (missing col 1)  -> near-full
+        //   y1: X X . X   (missing col 2)  -> near-full
+        //   y0: . X . .   (missing 3)      -> not
+        let board = board_from_ascii(&["X.XX", "XX.X", ".X.."]);
+        assert_eq!(BoardFeatures::extract(&board, &no_move()).near_full_rows, 2);
+    }
+
+    #[test]
     fn column_heights_track_topmost_filled_cell() {
         // Intended shape: col0=3, col1=1, col2 empty, col3=2.
         //   y2: X . . .
@@ -311,7 +392,7 @@ mod tests {
             "X..X", // y=1
             "XX.X", // y=0
         ]);
-        assert_eq!(column_heights(&board), vec![3, 1, 0, 2]);
+        assert_eq!(column_heights(&cols_of(&board)), vec![3, 1, 0, 2]);
     }
 
     #[test]
@@ -323,7 +404,8 @@ mod tests {
             "X.", // y=1
             "..", // y=0
         ]);
-        let (holes, hole_depth, rows_with_holes) = hole_features(&board, &column_heights(&board));
+        let cols = cols_of(&board);
+        let (holes, hole_depth, rows_with_holes) = hole_features(&cols, &column_heights(&cols));
         assert_eq!(holes, 3, "col0 y0 + col1 y1,y0");
         // col0: hole at y0 has 1 filled above (y1). col1: holes at y1 (1 above:
         // y2) and y0 (1 above: y2) -> depth 1 + 1. Total 1 + 2 = 3.
@@ -338,14 +420,14 @@ mod tests {
         // wall(F) X(F) .(E) X(F) .(E) wall(F)
         //   F->F = 0, F->E = 1, E->F = 1, F->E = 1, E->F = 1  => 4
         let board = board_from_ascii(&["X.X."]);
-        assert_eq!(row_transitions(&board, 1), 4);
+        assert_eq!(row_transitions(&cols_of(&board), 1), 4);
     }
 
     #[test]
     fn row_transitions_full_row_has_zero() {
         let board = board_from_ascii(&["XXXX"]);
         // wall(F) F F F F wall(F) -> no flips.
-        assert_eq!(row_transitions(&board, 1), 0);
+        assert_eq!(row_transitions(&cols_of(&board), 1), 0);
     }
 
     #[test]
@@ -356,9 +438,9 @@ mod tests {
         let mut b = Board::new(1, 4);
         b.set(0, 0, CellKind::Some(PieceType::O));
         b.set(0, 2, CellKind::Some(PieceType::O));
-        let heights = column_heights(&b);
-        assert_eq!(heights, vec![3]);
-        assert_eq!(column_transitions(&b, &heights, 3), 3);
+        let cols = cols_of(&b);
+        assert_eq!(column_heights(&cols), vec![3]);
+        assert_eq!(column_transitions(&cols, 3), 3);
     }
 
     #[test]
@@ -370,7 +452,7 @@ mod tests {
             "X.X", // y=1
             "X.X", // y=0
         ]);
-        assert_eq!(board_wells(&board, 3), 6);
+        assert_eq!(board_wells(&cols_of(&board), 3), 6);
     }
 
     #[test]
@@ -382,7 +464,31 @@ mod tests {
             ".X", // y=1
             ".X", // y=0
         ]);
-        assert_eq!(board_wells(&board, 2), 3);
+        assert_eq!(board_wells(&cols_of(&board), 2), 3);
+    }
+
+    #[test]
+    fn tetris_well_counts_clear_ready_rows_over_the_lowest_column() {
+        // Columns 0,1,2 filled to height 3; column 3 (the well) empty. An I-piece in
+        // col 3 would clear all 3 rows ⇒ tetris_well = 3.
+        let board = board_from_ascii(&[
+            "XXX.", // y=2
+            "XXX.", // y=1
+            "XXX.", // y=0
+        ]);
+        let cols = cols_of(&board);
+        assert_eq!(tetris_well(&cols, &column_heights(&cols), 3), 3);
+    }
+
+    #[test]
+    fn tetris_well_zero_when_a_second_column_is_also_low() {
+        // Two empty columns ⇒ not a single-well Tetris setup ⇒ 0.
+        let board = board_from_ascii(&[
+            "XX..", // y=1
+            "XX..", // y=0
+        ]);
+        let cols = cols_of(&board);
+        assert_eq!(tetris_well(&cols, &column_heights(&cols), 2), 0);
     }
 
     #[test]

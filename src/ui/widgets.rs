@@ -17,11 +17,6 @@ use bevy::prelude::*;
 use super::focus::Focusable;
 
 /// Shared palette + sizing. Tuned to read on the dark `ClearColor` background.
-///
-/// Some entries (e.g. `ACCENT`, `BUTTON_PRESSED`) are part of the shared theme
-/// contract for the feature screens and aren't all consumed yet;
-/// `allow(dead_code)` keeps the build warning-free until they are.
-#[allow(dead_code)]
 pub mod theme {
     use bevy::prelude::*;
 

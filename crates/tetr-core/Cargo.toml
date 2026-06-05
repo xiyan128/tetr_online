@@ -17,6 +17,16 @@ itertools = "0.14.0"
 # `getrandom` into the graph, so the wasm consumer (`tetr-embed`) enables its
 # `wasm_js` backend feature. Native and the Bevy game are unaffected.
 rand = "0.10.1"
+# FxHash (rustc's own hasher): fast, deterministic, dependency-light. Used only for
+# the AI search's internal transposition table + movegen visited-set. The std default
+# (SipHash) is cryptographic — pointless for an internal structure, and it was the top
+# profile hotspot. FxHash is bit-identical here: the search keys by equality and never
+# depends on hash values or map iteration order (movegen sorts its output).
+rustc-hash = "2"
+# Stack-allocated small vectors for the search hot path: the column bitboard
+# (`Board::column_bits`, ≤16 wide) and the transposition key's board/queue. Avoids a
+# per-candidate heap allocation — allocation was the top profile hotspot after FxHash.
+smallvec = "1"
 
 [features]
 # Enables the Bevy keyboard-input adapter (`RawKeyboardFrame::from_keyboard`). OFF by

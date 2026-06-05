@@ -63,7 +63,7 @@ fn bench_primitives(c: &mut Criterion) {
 
         group.bench_function(BenchmarkId::new("lock_and_clear", scenario.name()), |b| {
             b.iter_batched(
-                || state.board.clone(),
+                || state.board.to_array2d(),
                 |mut board| black_box(lock_and_clear(&placement.piece, &mut board)),
                 BatchSize::SmallInput,
             );

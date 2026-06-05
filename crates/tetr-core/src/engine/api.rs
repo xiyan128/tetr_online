@@ -139,6 +139,10 @@ pub struct EngineSnapshot {
     pub level: u8,
     pub goal_remaining: usize,
     pub back_to_back_active: bool,
+    /// Consecutive line-clearing placements so far (the combo counter; `0` when no
+    /// combo is active). Lets a search resume from the real in-game combo instead of
+    /// assuming `0`, so it can value continuing a chain.
+    pub combo: u32,
     pub game_over: Option<GameOverStatus>,
 }
 
@@ -239,8 +243,16 @@ impl Engine {
             level: self.score_state.level(),
             goal_remaining: self.score_state.goal_remaining(),
             back_to_back_active: self.score_state.back_to_back_active(),
+            combo: self.score_state.combo(),
             game_over: self.game_over,
         }
+    }
+
+    /// True iff the playfield is empty — the perfect-clear test. Cheap: delegates to
+    /// [`Board::is_empty`], which short-circuits and allocates nothing, so sim loops
+    /// can check it per line clear without building a full [`snapshot`](Self::snapshot).
+    pub fn board_is_empty(&self) -> bool {
+        self.board.is_empty()
     }
 
     /// Test-only seam: paint a single board cell, bypassing the per-frame loop.
@@ -253,6 +265,24 @@ impl Engine {
     #[doc(hidden)]
     pub fn set_cell(&mut self, x: isize, y: isize, cell: CellKind) -> bool {
         self.board.set(x, y, cell)
+    }
+
+    /// Raise the stack by `count` garbage rows (each row full except `hole_col`) —
+    /// the versus-garbage mechanic. Returns `true` if this tops the player out: the
+    /// stack is forced past the ceiling, or the active piece is now buried. On a
+    /// top-out the engine latches [`GameOverStatus::BlockOut`] so the next
+    /// [`step`](Self::step) is a no-op, mirroring the spawn-collision path.
+    pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
+        let overflow = self.board.insert_garbage_lines(count, hole_col);
+        let buried = self
+            .active
+            .as_ref()
+            .map(|active| active.piece().collide_with(&self.board, active.origin()))
+            .unwrap_or(false);
+        if overflow || buried {
+            self.game_over = Some(GameOverStatus::BlockOut);
+        }
+        overflow || buried
     }
 
     /// Test-only seam: install `active` as the current active piece, bypassing

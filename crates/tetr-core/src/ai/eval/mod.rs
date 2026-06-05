@@ -30,13 +30,15 @@
 //! identically. Any randomness the AI needs (tie-breaking, error injection) lives
 //! behind the controller's own seeded RNG, never here.
 
+pub mod cc2;
 pub mod features;
 pub mod weights;
 
 use std::ops::Add;
 
-use crate::engine::{Board, LockOutcome, TSpinKind};
+use crate::engine::{attack_lines, Board, EngineScoreAction, LockOutcome, TSpinKind};
 
+pub use cc2::{Cc2Evaluator, Cc2Weights};
 pub use features::BoardFeatures;
 pub use weights::{BoardWeights, RewardWeights, Weights};
 
@@ -74,6 +76,25 @@ impl Add for Reward {
     }
 }
 
+/// Search-path context for one evaluation: the running chain state *before* the
+/// placement being scored.
+///
+/// The `(lock, board, t_spin)` triple describes a single transition in isolation, so
+/// it cannot express **combo** or **Back-to-Back** — both of which depend on the path
+/// taken to reach the placement, and both of which are major attack multipliers. The
+/// search already tracks them in [`SearchState`](crate::ai::SearchState); this struct
+/// carries them into the evaluator so an attack-aware eval (and the value net) can
+/// value combo / B2B continuation. [`Default`] is the neutral context (no combo, no
+/// B2B chain) used for one-off scoring and tests — under it an evaluator must reduce
+/// to its chain-agnostic behavior.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct EvalContext {
+    /// Combo chain length before this placement (`0` = no active combo).
+    pub combo: u32,
+    /// Whether a Back-to-Back chain was active before this placement.
+    pub b2b: bool,
+}
+
 /// Scores a board placement as a `(Value, Reward)` pair.
 ///
 /// Object-safe (`&dyn Evaluator`) and thread-safe so the planner can run a search
@@ -95,7 +116,40 @@ pub trait Evaluator: Send + Sync {
         lock: &LockOutcome,
         board: &Board,
         t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
     ) -> (Value, Reward);
+
+    /// Score a placement whose resulting board is given as a search
+    /// [`BitBoard`](crate::engine::BitBoard) — the bitboard search's hot path, avoiding
+    /// the `Array2D`. The default reconstructs an `Array2D` and defers to
+    /// [`evaluate`](Self::evaluate) (correct, allocating); a fast evaluator (CC2)
+    /// overrides it to read the columns directly. An override **must** be bit-identical
+    /// to the default.
+    fn evaluate_cols(
+        &self,
+        lock: &LockOutcome,
+        board: &crate::engine::BitBoard,
+        t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
+    ) -> (Value, Reward) {
+        self.evaluate(lock, &board.to_array2d(), t_spin, ctx)
+    }
+
+    /// Score a batch in one shot. `out[i]` scores `inputs[i]` (order preserved).
+    ///
+    /// The default loops [`evaluate`](Self::evaluate); a batched backend (the
+    /// neural value net) overrides this to fold a whole search generation into a
+    /// single forward pass. The override **must** be bit-identical to mapping
+    /// [`evaluate`](Self::evaluate) over the same inputs.
+    fn evaluate_batch(
+        &self,
+        inputs: &[(&LockOutcome, &crate::engine::BitBoard, Option<TSpinKind>, EvalContext)],
+    ) -> Vec<(Value, Reward)> {
+        inputs
+            .iter()
+            .map(|(l, b, t, ctx)| self.evaluate_cols(l, b, *t, *ctx))
+            .collect()
+    }
 }
 
 /// The shipped Tier-1 evaluator: a linear weighted sum of the Dellacherie / BCTS
@@ -125,61 +179,120 @@ impl LinearEvaluator {
     /// Classifies the placement into exactly one clear category from `lock` +
     /// `t_spin`, weights it, then adds the B2B bonus and the perfect-clear bonus.
     ///
-    /// **Note on Back-to-Back:** the engine's running B2B *chain* state is not
-    /// passed to [`Evaluator::evaluate`] (the trait signature is board + lock +
-    /// t-spin). So the B2B bonus here is applied to every B2B-*eligible* clear (a
-    /// Tetris or any full T-spin line clear), rewarding placements that *sustain* a
-    /// chain. Modeling the precise "only when the previous clear was also B2B"
-    /// rule is deferred to the search layer, which carries `b2b` in its
-    /// [`SearchState`](crate::ai::SearchState).
-    fn reward(&self, lock: &LockOutcome, board: &Board, t_spin: Option<TSpinKind>) -> Reward {
-        let w = &self.weights.reward;
-        let lines = lock.cleared_rows.len();
-
-        // The placement falls into exactly one scoring category.
-        let (base, b2b_eligible) = match (t_spin, lines) {
-            (Some(TSpinKind::Mini), 1 | 2) => (w.mini_tspin, true),
-            (Some(TSpinKind::Full), 1) => (w.tspin1, true),
-            (Some(TSpinKind::Full), 2) => (w.tspin2, true),
-            (Some(TSpinKind::Full), 3) => (w.tspin3, true),
-            // A T-spin that cleared no lines scores nothing on its own (the board
-            // Value still reflects the resulting shape).
-            (Some(_), _) => (0.0, false),
-            (None, 1) => (w.clear1, false),
-            (None, 2) => (w.clear2, false),
-            (None, 3) => (w.clear3, false),
-            (None, 4) => (w.clear4, true),
-            (None, _) => (0.0, false), // no lines cleared
-        };
-
-        let mut total = base;
-        if b2b_eligible {
-            total += w.b2b_clear;
-        }
-        if lines > 0 && is_perfect_clear(board) {
-            total += w.perfect_clear;
-        }
-        Reward(total.round() as i32)
+    /// **Two B2B paths:** the *abstract* `b2b_clear` bonus is applied to every
+    /// B2B-*eligible* clear (a Tetris or full/mini T-spin line clear), rewarding
+    /// placements that *can* sustain a chain regardless of history. The *attack* term
+    /// (`w.attack`), by contrast, uses `ctx.b2b` for the precise "only when the
+    /// previous clear was also B2B" continuation rule — that's why the chain context
+    /// now flows in. With `w.attack == 0.0` (the shipped default) only the abstract
+    /// path is active, matching the prior chain-agnostic behavior exactly.
+    fn reward(
+        &self,
+        lock: &LockOutcome,
+        board: &Board,
+        t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
+    ) -> Reward {
+        compute_reward(&self.weights.reward, lock, board, t_spin, ctx)
     }
 }
 
 impl Evaluator for LinearEvaluator {
+    /// `ctx` (combo / B2B chain) feeds the reward's attack term ([`RewardWeights::attack`]):
+    /// the board [`Value`] is chain-independent (a resting position is what it is), but
+    /// the per-move [`Reward`] now values the actual garbage a clear sends under the
+    /// search-path chain. At the default `attack == 0.0` the reward is unchanged.
     fn evaluate(
         &self,
         lock: &LockOutcome,
         board: &Board,
         t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
     ) -> (Value, Reward) {
         let features = BoardFeatures::extract(board, lock);
         let value = Value(self.weights.board.dot(&features));
-        (value, self.reward(lock, board, t_spin))
+        (value, self.reward(lock, board, t_spin, ctx))
     }
 }
 
-/// Whether the board is completely empty (a perfect clear). Cheap: the engine's
-/// `cells()` lists only occupied cells.
+/// The per-move [`Reward`] for a placement under the given [`RewardWeights`].
+///
+/// Shared by [`LinearEvaluator`] and any external evaluator (e.g. a neural value
+/// net in the `tetr-nn` crate) that wants the same principled clear / spin /
+/// Back-to-Back payoff while supplying its own board [`Value`]. This is the seam
+/// that lets a learned evaluator replace *only* the static board score and keep
+/// the engine-faithful reward math. See [`LinearEvaluator::reward`] for the
+/// Back-to-Back modeling note.
+pub fn compute_reward(
+    weights: &RewardWeights,
+    lock: &LockOutcome,
+    board: &Board,
+    t_spin: Option<TSpinKind>,
+    ctx: EvalContext,
+) -> Reward {
+    let w = weights;
+    let lines = lock.cleared_rows.len();
+
+    // The placement falls into exactly one scoring category.
+    let (base, b2b_eligible) = match (t_spin, lines) {
+        (Some(TSpinKind::Mini), 1 | 2) => (w.mini_tspin, true),
+        (Some(TSpinKind::Full), 1) => (w.tspin1, true),
+        (Some(TSpinKind::Full), 2) => (w.tspin2, true),
+        (Some(TSpinKind::Full), 3) => (w.tspin3, true),
+        // A T-spin that cleared no lines scores nothing on its own (the board
+        // Value still reflects the resulting shape).
+        (Some(_), _) => (0.0, false),
+        (None, 1) => (w.clear1, false),
+        (None, 2) => (w.clear2, false),
+        (None, 3) => (w.clear3, false),
+        (None, 4) => (w.clear4, true),
+        (None, _) => (0.0, false), // no lines cleared
+    };
+
+    let perfect = lines > 0 && is_perfect_clear(board);
+
+    let mut total = base;
+    if b2b_eligible {
+        total += w.b2b_clear;
+    }
+    if perfect {
+        total += w.perfect_clear;
+    }
+
+    // Attack-aware term (the APP lever): the garbage this clear actually sends under
+    // the search-path chain — combo count and B2B *continuation* both from `ctx` —
+    // via the engine's guideline table, scaled by `w.attack`. At the shipped default
+    // `w.attack == 0.0` this adds nothing, so the reward stays chain-agnostic and the
+    // survival profile is byte-for-byte unchanged.
+    if lines > 0 {
+        let action = score_action(t_spin, lines);
+        let b2b_continue = ctx.b2b && b2b_eligible;
+        let attack = attack_lines(action, b2b_continue, ctx.combo, perfect);
+        total += w.attack * attack as f32;
+    }
+
+    Reward(total.round() as i32)
+}
+
+/// Map a placement's `(t_spin, lines)` to the [`EngineScoreAction`] the guideline
+/// attack table keys on. A 0-line lock (including a spin that cleared nothing) is
+/// [`NoClear`](EngineScoreAction::NoClear), which sends no attack.
+fn score_action(t_spin: Option<TSpinKind>, lines: usize) -> EngineScoreAction {
+    match (t_spin, lines) {
+        (Some(kind), n) if n > 0 => EngineScoreAction::TSpin { kind, lines: n },
+        (None, 1) => EngineScoreAction::Single,
+        (None, 2) => EngineScoreAction::Double,
+        (None, 3) => EngineScoreAction::Triple,
+        (None, 4) => EngineScoreAction::Tetris,
+        _ => EngineScoreAction::NoClear,
+    }
+}
+
+/// Whether the board is completely empty (a perfect clear). Uses [`Board::is_empty`],
+/// which short-circuits on the first filled cell and allocates nothing — unlike
+/// `cells()`, which builds a `Vec` of every occupied cell — on the reward hot path.
 fn is_perfect_clear(board: &Board) -> bool {
-    board.cells().is_empty()
+    board.is_empty()
 }
 
 #[cfg(test)]
@@ -241,7 +354,7 @@ mod tests {
                 cleared_rows: (0..lines as isize).collect(),
                 top_y_after_lock: None,
             };
-            let (_v, reward) = eval.evaluate(&lock, &board, None);
+            let (_v, reward) = eval.evaluate(&lock, &board, None, EvalContext::default());
             assert!(
                 reward.0 > 0,
                 "survival default must reward a {lines}-line clear, got {reward:?}"
@@ -275,11 +388,13 @@ mod tests {
                 board_wells: -3.0,
                 hole_depth: 0.0,
                 rows_with_holes: 0.0,
+                tetris_well: 0.0,
+                near_full_rows: 0.0,
             },
             reward: RewardWeights::COLD_CLEAR,
         };
         let eval = LinearEvaluator::new(weights);
-        let (value, reward) = eval.evaluate(&no_clear_lock(), &board, None);
+        let (value, reward) = eval.evaluate(&no_clear_lock(), &board, None, EvalContext::default());
         assert_eq!(value, Value(-15));
         assert_eq!(reward, Reward(0), "no lines cleared => no reward");
     }
@@ -295,7 +410,7 @@ mod tests {
         // Not a perfect clear: leave a stray cell on the resulting board.
         let mut board = Board::new(4, 6);
         board.set(0, 0, CellKind::Some(PieceType::O));
-        let (_v, reward) = eval.evaluate(&lock, &board, None);
+        let (_v, reward) = eval.evaluate(&lock, &board, None, EvalContext::default());
         // clear4 (390) + b2b_clear (104) = 494.
         assert_eq!(reward, Reward(494));
     }
@@ -310,7 +425,7 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
-        let (_v, reward) = eval.evaluate(&lock, &board, None);
+        let (_v, reward) = eval.evaluate(&lock, &board, None, EvalContext::default());
         assert_eq!(reward, Reward(-143)); // clear1, no b2b, no PC
     }
 
@@ -324,7 +439,7 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(3, 0, CellKind::Some(PieceType::O)); // not a perfect clear
-        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Full));
+        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Full), EvalContext::default());
         // tspin2 (410) + b2b (104) = 514.
         assert_eq!(reward, Reward(514));
     }
@@ -338,7 +453,7 @@ mod tests {
             top_y_after_lock: None,
         };
         let board = Board::new(4, 6); // empty => perfect clear
-        let (_v, reward) = eval.evaluate(&lock, &board, None);
+        let (_v, reward) = eval.evaluate(&lock, &board, None, EvalContext::default());
         // clear4 (390) + b2b (104) + perfect_clear (999) = 1493.
         assert_eq!(reward, Reward(1493));
     }
@@ -353,9 +468,52 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(3, 0, CellKind::Some(PieceType::O));
-        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Mini));
+        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Mini), EvalContext::default());
         // mini_tspin (-158) + b2b (104) = -54.
         assert_eq!(reward, Reward(-54));
+    }
+
+    #[test]
+    fn attack_term_zero_is_chain_agnostic() {
+        // At the shipped default `attack == 0.0`, the reward must be independent of the
+        // chain context — the property that keeps every shipped bot byte-for-byte
+        // unchanged by the EvalContext wiring.
+        let lock = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0, 1, 2, 3],
+            top_y_after_lock: None,
+        };
+        let mut board = Board::new(4, 6);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        let neutral = compute_reward(&RewardWeights::SURVIVAL, &lock, &board, None, EvalContext::default());
+        let with_chain = compute_reward(
+            &RewardWeights::SURVIVAL,
+            &lock,
+            &board,
+            None,
+            EvalContext { combo: 5, b2b: true },
+        );
+        assert_eq!(neutral, with_chain, "attack=0 ⇒ reward independent of combo/B2B");
+    }
+
+    #[test]
+    fn attack_term_scales_guideline_attack_under_chain() {
+        // A Tetris continuing a B2B chain at combo index 3 sends, by the guideline
+        // table, 4 (Tetris) + 1 (B2B) + 1 (COMBO_TABLE[3]) = 6 lines. The attack term
+        // adds `w.attack * 6` over the otherwise-identical abstract reward.
+        let lock = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0, 1, 2, 3],
+            top_y_after_lock: None,
+        };
+        let mut board = Board::new(4, 6);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        let ctx = EvalContext { combo: 3, b2b: true };
+        let mut with_attack = RewardWeights::SURVIVAL;
+        with_attack.attack = 10.0;
+        let base = compute_reward(&RewardWeights::SURVIVAL, &lock, &board, None, ctx);
+        let scaled = compute_reward(&with_attack, &lock, &board, None, ctx);
+        assert_eq!(scaled.0 - base.0, 60, "delta = w.attack(10) * attack_lines(6)");
     }
 
     #[test]
@@ -365,6 +523,60 @@ mod tests {
         let eval = LinearEvaluator::default();
         let dyn_eval: &dyn Evaluator = &eval;
         let board = Board::new(4, 6);
-        let (_v, _r) = dyn_eval.evaluate(&no_clear_lock(), &board, None);
+        let (_v, _r) = dyn_eval.evaluate(&no_clear_lock(), &board, None, EvalContext::default());
+    }
+
+    #[test]
+    fn default_batch_matches_scalar() {
+        // The default `evaluate_batch` must be bit-identical to mapping
+        // `evaluate` over the same inputs (the seam the beam relies on so that a
+        // depth-1 batched search == the scalar greedy search).
+        let eval = LinearEvaluator::default();
+
+        // Three distinct (LockOutcome, Board, t_spin) cases: a no-clear O lock, a
+        // Tetris on a board with a stray cell, and a full T-spin double.
+        let mut board_a = Board::new(4, 6);
+        board_a.set(0, 0, CellKind::Some(PieceType::O));
+        let lock_a = no_clear_lock();
+        let t_a = None;
+
+        let mut board_b = Board::new(4, 6);
+        board_b.set(0, 0, CellKind::Some(PieceType::O));
+        let lock_b = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0, 1, 2, 3],
+            top_y_after_lock: None,
+        };
+        let t_b = None;
+
+        let mut board_c = Board::new(4, 6);
+        board_c.set(3, 0, CellKind::Some(PieceType::O));
+        let lock_c = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::T))],
+            cleared_rows: vec![0, 1],
+            top_y_after_lock: None,
+        };
+        let t_c = Some(TSpinKind::Full);
+
+        let ctx = EvalContext::default();
+        let bb_a = crate::engine::BitBoard::from_board(&board_a);
+        let bb_b = crate::engine::BitBoard::from_board(&board_b);
+        let bb_c = crate::engine::BitBoard::from_board(&board_c);
+        let inputs: Vec<(&LockOutcome, &crate::engine::BitBoard, Option<TSpinKind>, EvalContext)> = vec![
+            (&lock_a, &bb_a, t_a, ctx),
+            (&lock_b, &bb_b, t_b, ctx),
+            (&lock_c, &bb_c, t_c, ctx),
+        ];
+
+        // `evaluate_batch` is now bitboard-based; it must equal scalar `evaluate` on the
+        // equivalent dense boards — batch==scalar and cols==dense in one assertion.
+        let batched = eval.evaluate_batch(&inputs);
+        let scalar = vec![
+            eval.evaluate(&lock_a, &board_a, t_a, ctx),
+            eval.evaluate(&lock_b, &board_b, t_b, ctx),
+            eval.evaluate(&lock_c, &board_c, t_c, ctx),
+        ];
+
+        assert_eq!(batched, scalar);
     }
 }

@@ -4,7 +4,7 @@
 //! reach from spawn, plus the button sequence to reach each one. This module
 //! enumerates them with a breadth-first search over `(x, y, rotation)` states,
 //! mirroring Cold Clear's movegen (research finding [8]): a frontier + a
-//! [`HashSet`] visited-set, soft-drop *approximated* rather than enumerating every
+//! [`FxHashSet`](rustc_hash::FxHashSet) visited-set, soft-drop *approximated* rather than enumerating every
 //! gravity cell, and — crucially — **all SRS wall kicks delegated to the engine's
 //! own [`Piece::try_rotate_with_kicks`] / [`Piece::try_move`]**. The search never
 //! re-encodes a kick table, so it can never disagree with the real rules (and an
@@ -44,10 +44,13 @@
 //! always yields the same placement list in the same order — a search built on top
 //! stays reproducible.
 
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
+
+use rustc_hash::FxHashSet;
+use smallvec::SmallVec;
 
 use crate::engine::{
-    ActivePiece, Board, MoveDirection, Piece, PieceAction, PieceRotation, PieceType,
+    ActivePiece, MoveDirection, Occupancy, Piece, PieceAction, PieceRotation, PieceType,
     RotationDirection,
 };
 
@@ -84,8 +87,10 @@ pub struct Placement {
     /// engine primitives expect (notably `last_successful_action`, which T-spin
     /// classification reads).
     pub piece: ActivePiece,
-    /// The button sequence from the start pose to this resting pose.
-    pub path: Vec<Move>,
+    /// The button sequence from the start pose to this resting pose. A `SmallVec` so the
+    /// BFS — which clones+extends a path per reachable pose — stays stack-allocated for
+    /// the short paths (≤16 moves) that dominate, avoiding per-pose heap churn.
+    pub path: SmallVec<[Move; 16]>,
     /// Whether reaching this placement required a hold swap (the piece here is the
     /// *held/next* piece, not the one that was active). Always `false` from
     /// [`generate`]; possibly `true` from [`generate_with_hold`].
@@ -131,7 +136,7 @@ fn pose_key(piece: &ActivePiece) -> PoseKey {
 /// SRS to the engine. The returned placements are *resting* poses (ground beneath
 /// them), each with the shortest [`Move`] path found to reach it. The list is in a
 /// deterministic, canonical order.
-pub fn generate(board: &Board, start: &ActivePiece) -> Vec<Placement> {
+pub fn generate<B: Occupancy>(board: &B, start: &ActivePiece) -> Vec<Placement> {
     let mut placements = enumerate(board, start, false);
     sort_placements(&mut placements);
     placements
@@ -149,8 +154,8 @@ pub fn generate(board: &Board, start: &ActivePiece) -> Vec<Placement> {
 /// `spawn_for` supplies the spawn pose of a swapped-in piece — pass a closure
 /// wrapping the board geometry (e.g. from `EngineConfig`); see the unit tests for
 /// the idiom. This keeps `movegen` free of snapshot/config plumbing.
-pub fn generate_with_hold(
-    board: &Board,
+pub fn generate_with_hold<B: Occupancy>(
+    board: &B,
     start: &ActivePiece,
     hold: Option<PieceType>,
     queue_front: Option<PieceType>,
@@ -175,18 +180,18 @@ pub fn generate_with_hold(
 
 /// Core BFS. `used_hold` is stamped onto every emitted placement and, when set,
 /// prefixes each path with [`Move::Hold`].
-fn enumerate(board: &Board, start: &ActivePiece, used_hold: bool) -> Vec<Placement> {
+fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> Vec<Placement> {
     // Normalize the start pose: the search re-derives reachable poses from scratch,
     // so it begins from a clean piece at the start origin/rotation (no inherited
     // lock-down history that could mis-flag a T-spin on the *start* pose).
     let start = ActivePiece::new(start.piece_type(), start.origin());
 
-    let mut visited: HashSet<PoseKey> = HashSet::new();
-    let mut frontier: VecDeque<(ActivePiece, Vec<Move>)> = VecDeque::new();
+    let mut visited: FxHashSet<PoseKey> = FxHashSet::default();
+    let mut frontier: VecDeque<(ActivePiece, SmallVec<[Move; 16]>)> = VecDeque::new();
     let mut placements: Vec<Placement> = Vec::new();
 
     visited.insert(pose_key(&start));
-    frontier.push_back((start, Vec::new()));
+    frontier.push_back((start, SmallVec::new()));
 
     while let Some((piece, path)) = frontier.pop_front() {
         // If this pose rests on ground, it is a candidate final placement.
@@ -221,7 +226,7 @@ fn enumerate(board: &Board, start: &ActivePiece, used_hold: bool) -> Vec<Placeme
 ///
 /// Returns the resulting piece, or `None` if the move is blocked (or a no-op, e.g.
 /// rotating an O piece, or a soft-drop that does not change the resting row).
-fn apply_move(board: &Board, piece: &ActivePiece, mv: Move) -> Option<ActivePiece> {
+fn apply_move<B: Occupancy>(board: &B, piece: &ActivePiece, mv: Move) -> Option<ActivePiece> {
     match mv {
         Move::Left => shift(board, piece, MoveDirection::Left),
         Move::Right => shift(board, piece, MoveDirection::Right),
@@ -234,7 +239,7 @@ fn apply_move(board: &Board, piece: &ActivePiece, mv: Move) -> Option<ActivePiec
 }
 
 /// One lateral cell, via the engine's `try_move`.
-fn shift(board: &Board, piece: &ActivePiece, dir: MoveDirection) -> Option<ActivePiece> {
+fn shift<B: Occupancy>(board: &B, piece: &ActivePiece, dir: MoveDirection) -> Option<ActivePiece> {
     let origin = piece.piece().try_move(board, piece.origin(), dir)?;
     let mut moved = piece.clone();
     moved.move_to(origin, PieceAction::Move);
@@ -245,7 +250,7 @@ fn shift(board: &Board, piece: &ActivePiece, dir: MoveDirection) -> Option<Activ
 ///
 /// Returns `None` for a no-op (kick number `0`, the O piece) or a pose that does
 /// not actually change `(origin, rotation)`, so the BFS does not loop.
-fn rotate(board: &Board, piece: &ActivePiece, dir: RotationDirection) -> Option<ActivePiece> {
+fn rotate<B: Occupancy>(board: &B, piece: &ActivePiece, dir: RotationDirection) -> Option<ActivePiece> {
     let target = match dir {
         RotationDirection::Clockwise => piece.rotation() + PieceRotation::R90,
         RotationDirection::Counterclockwise => piece.rotation() + PieceRotation::R270,
@@ -270,7 +275,7 @@ fn rotate(board: &Board, piece: &ActivePiece, dir: RotationDirection) -> Option<
 ///
 /// Returns `None` if the piece is already resting (no downward movement), so the
 /// BFS treats it as a no-op rather than a self-loop.
-fn soft_drop(board: &Board, piece: &ActivePiece) -> Option<ActivePiece> {
+fn soft_drop<B: Occupancy>(board: &B, piece: &ActivePiece) -> Option<ActivePiece> {
     let mut dropped = piece.clone();
     let mut moved = false;
     while let Some(origin) = dropped
@@ -284,7 +289,7 @@ fn soft_drop(board: &Board, piece: &ActivePiece) -> Option<ActivePiece> {
 }
 
 /// Whether `piece` rests on ground: it cannot move one cell down.
-fn is_resting(board: &Board, piece: &ActivePiece) -> bool {
+fn is_resting<B: Occupancy>(board: &B, piece: &ActivePiece) -> bool {
     piece
         .piece()
         .try_move(board, piece.origin(), MoveDirection::Down)
@@ -312,7 +317,7 @@ pub fn spawn_piece(piece_type: PieceType, width: usize, visible_height: usize) -
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::CellKind;
+    use crate::engine::{Board, CellKind};
 
     /// Absolute occupied cells of a piece at its pose, sorted for comparison.
     fn cells_of(piece: &ActivePiece) -> Vec<(isize, isize)> {
@@ -346,7 +351,7 @@ mod tests {
         let placements = generate(&board, &start);
 
         // O occupies a 2-wide footprint, so 9 distinct horizontal landing spots.
-        let resting_origins: HashSet<isize> = placements.iter().map(|p| p.origin().0).collect();
+        let resting_origins: FxHashSet<isize> = placements.iter().map(|p| p.origin().0).collect();
         assert_eq!(resting_origins.len(), 9, "O should reach all 9 columns");
 
         // Every placement actually rests on the floor (lowest cell at y == 0).
