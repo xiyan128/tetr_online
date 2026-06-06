@@ -169,22 +169,12 @@ impl MarathonOutcome {
     }
 }
 
-/// Play one Marathon game to completion (`MAX_LEVEL`), top-out, or the frame cap.
-///
-/// `make_bot` builds a fresh controller for the given (controller) seed — building
-/// fresh per game keeps games independent and reproducible.
-pub fn play_marathon(
-    make_bot: &dyn Fn(u64) -> Box<dyn PlayerController>,
-    seed: u64,
-    max_frames: u32,
-) -> MarathonOutcome {
-    play_marathon_capped(make_bot, seed, max_frames, u32::MAX)
-}
-
-/// Like [`play_marathon`] but also stops after `max_pieces` placements — the fast
-/// `/autoresearch` metric path. A piece cap turns a full ~930-piece marathon into a
-/// quick proxy while keeping score/sec meaningful as an early-game scoring rate.
-/// Pass `u32::MAX` for the full, uncapped marathon (final validation).
+/// Play one Marathon game to completion (`MAX_LEVEL`), top-out, the frame cap, or
+/// `max_pieces` placements — the fast `/autoresearch` metric path. A piece cap turns
+/// a full ~930-piece marathon into a quick proxy while keeping score/sec meaningful
+/// as an early-game scoring rate. Pass `u32::MAX` for the full, uncapped marathon
+/// (final validation). `make_bot` builds a fresh controller per (controller) seed,
+/// so games stay independent and reproducible.
 pub fn play_marathon_capped(
     make_bot: &dyn Fn(u64) -> Box<dyn PlayerController>,
     seed: u64,
