@@ -271,7 +271,7 @@ pub fn update_score_type_text(
     text.0 = latest
         .0
         .iter()
-        .map(|score_type| score_type.label())
+        .map(ScoreType::label)
         .collect::<Vec<_>>()
         .join("\n");
     let style = callout_style(&latest.0);

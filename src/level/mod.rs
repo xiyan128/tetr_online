@@ -458,7 +458,7 @@ fn emit_audio_cues(
             EngineEvent::HardDropped { .. } => commands.trigger(AudioCue::HardDrop),
             EngineEvent::Held { .. } => commands.trigger(AudioCue::Hold),
             EngineEvent::Locked { lines_cleared, .. } => {
-                commands.trigger(AudioCue::Locked(*lines_cleared))
+                commands.trigger(AudioCue::Locked(*lines_cleared));
             }
             _ => {}
         }

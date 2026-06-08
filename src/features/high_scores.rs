@@ -282,7 +282,7 @@ fn format_time(seconds: f32) -> String {
     let seconds = seconds.max(0.0);
     let minutes = (seconds / 60.0).floor() as u64;
     let secs = seconds - (minutes as f32) * 60.0;
-    format!("{}:{:06.3}", minutes, secs)
+    format!("{minutes}:{secs:06.3}")
 }
 
 // ---------------------------------------------------------------------------
