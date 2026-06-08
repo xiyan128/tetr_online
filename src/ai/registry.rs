@@ -101,7 +101,7 @@ impl ModelRegistry {
     pub fn selected_controller(&self) -> AiController {
         match self.entries.get(self.selected) {
             Some(entry) => (entry.build)(),
-            None => AiController::new(Handicap::default(), DEFAULT_AI_SEED),
+            None => AiController::beatable(),
         }
     }
 }
@@ -112,7 +112,7 @@ impl Default for ModelRegistry {
 
         // Always available: the shipped linear DT-20 / SURVIVAL evaluator (greedy).
         entries.push(ModelEntry::new("Linear - DT-20 (greedy)", || {
-            AiController::new(Handicap::default(), DEFAULT_AI_SEED)
+            AiController::beatable()
         }));
 
         // The Tier-2 beam: deterministic multi-ply search over the SAME linear eval.
@@ -200,7 +200,7 @@ impl Default for ModelRegistry {
                 h.imperfection,
                 DEFAULT_AI_SEED,
             )
-            .unwrap_or_else(|_| AiController::new(Handicap::default(), DEFAULT_AI_SEED))
+            .unwrap_or_else(|_| AiController::beatable())
         }));
 
         // Tier-2 beam over the neural value net — the strongest combination once the
@@ -229,7 +229,7 @@ impl Default for ModelRegistry {
                     );
                     AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
                 }
-                Err(_) => AiController::new(Handicap::default(), DEFAULT_AI_SEED),
+                Err(_) => AiController::beatable(),
             }
         }));
 
