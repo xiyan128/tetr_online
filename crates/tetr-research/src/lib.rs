@@ -443,8 +443,9 @@ pub fn evaluate_downstack(
 // A player loses by topping out. This is Cold Clear 2's home turf — the metric
 // that actually decides "beat CC2", as opposed to one-sided downstacking.
 
-/// Frames a single piece may take before we treat the bot as wedged.
-const MAX_PIECE_FRAMES: u32 = 256;
+/// Frames a single piece may take before we treat the bot as wedged (~4.3s at 60 Hz
+/// — far beyond any real per-piece search, so only a genuinely stuck bot trips it).
+pub(crate) const MAX_PIECE_FRAMES: u32 = 256;
 
 /// Garbage queued against a player: a FIFO of `(lines, hole_col)` batches, one per
 /// un-cancelled opponent attack. Your own clears cancel the oldest batches first;

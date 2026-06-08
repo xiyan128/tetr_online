@@ -178,9 +178,8 @@ impl BitBoard {
     /// Clear full rows and compact the stack downward, **exactly** as the engine's
     /// `clear_lines`: scan the visible field bottom-up, and whenever the current row is
     /// full, drop it (shifting every row above — buffer included — down one) and
-    /// re-examine the same index. Returns the cleared visible-row indices in scan order.
-    pub fn clear_full_rows(&mut self) -> Vec<isize> {
-        let mut cleared = Vec::new();
+    /// re-examine the same index.
+    pub fn clear_full_rows(&mut self) {
         let mut y = 0u32;
         while (y as usize) < self.visible_rows {
             let bit = 1u64 << y;
@@ -192,12 +191,10 @@ impl BitBoard {
                 for col in &mut self.cols[..self.width] {
                     *col = (*col & below_mask) | ((*col >> (y + 1)) << y);
                 }
-                cleared.push(y as isize);
             } else {
                 y += 1;
             }
         }
-        cleared
     }
 
     /// Lock a piece's absolute `cells` onto the board, clear any resulting lines, and

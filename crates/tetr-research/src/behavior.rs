@@ -19,11 +19,8 @@ use tetr_core::player::{drive_engine, PlayerController};
 
 use crate::{
     action_clear_lines, cheese_holes, controller_seed, fold_combo, marathon_config, versus_hole,
-    GarbageQueue,
+    GarbageQueue, MAX_PIECE_FRAMES,
 };
-
-/// Frames to let one piece resolve before treating the game as stalled.
-const MAX_PIECE_FRAMES: u32 = 256;
 
 /// A garbage scenario to measure the bot in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

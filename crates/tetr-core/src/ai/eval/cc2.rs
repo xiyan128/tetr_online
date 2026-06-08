@@ -159,27 +159,21 @@ impl Cc2Evaluator {
             }
         }
 
-        // --- holes ----------------------------------------------------------
-        let holes: u32 = cols
-            .iter()
-            .map(|&c| {
-                let height = 64 - c.leading_zeros();
-                (!c & underneath_mask(height)).count_ones()
-            })
-            .sum();
-        eval += w.holes * holes as f32;
-
-        // --- cell coveredness ----------------------------------------------
+        // --- holes + cell coveredness (one pass; share the underneath mask) ------
+        let mut holes = 0u32;
         let mut coveredness = 0u32;
         for &c in cols {
             let height = 64 - c.leading_zeros();
-            let mut holes = !c & underneath_mask(height);
-            while holes != 0 {
-                let y = holes.trailing_zeros();
+            let hole_mask = !c & underneath_mask(height);
+            holes += hole_mask.count_ones();
+            let mut h = hole_mask;
+            while h != 0 {
+                let y = h.trailing_zeros();
                 coveredness += (height - y).min(w.max_cell_covered_height);
-                holes &= !(1u64 << y);
+                h &= !(1u64 << y);
             }
         }
+        eval += w.holes * holes as f32;
         eval += w.cell_coveredness * coveredness as f32;
 
         // --- tetris well depth ---------------------------------------------
@@ -444,7 +438,7 @@ mod tests {
     }
 
     #[test]
-    fn empty_board_scores_zero_value() {
+    fn empty_board_is_deterministic_and_no_reward() {
         // No cells → no holes, no height, well depth 0, but row_transitions counts
         // the empty edge columns (CC2's exact behaviour). Just assert it runs and is
         // finite / deterministic.
