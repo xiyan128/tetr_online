@@ -83,7 +83,7 @@ impl core::fmt::Display for LoadError {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         match self {
             LoadError::SafeTensors(e) => write!(f, "safetensors parse error: {e}"),
-            LoadError::Shape(m) => write!(f, "weight shape error: {m}"),
+            LoadError::Shape(m) => write!(f, "weight (de)serialization error: {m}"),
         }
     }
 }
@@ -303,8 +303,6 @@ pub struct BurnEvaluator<B: Backend> {
     model: ValueNet<B>,
     device: B::Device,
     reward_weights: RewardWeights,
-    /// Multiplier mapping the net's scalar output onto the integer [`Value`] scale.
-    value_scale: f32,
 }
 
 impl<B: Backend> BurnEvaluator<B> {
@@ -314,15 +312,7 @@ impl<B: Backend> BurnEvaluator<B> {
             model,
             device,
             reward_weights,
-            value_scale: 1.0,
         }
-    }
-
-    /// Set the output→[`Value`] multiplier (defaults to `1.0`, i.e. the net
-    /// regresses the integer value directly).
-    pub fn with_value_scale(mut self, scale: f32) -> Self {
-        self.value_scale = scale;
-        self
     }
 
     /// Load weights from JAX-exported safetensors bytes (e.g. `include_bytes!`)
@@ -352,7 +342,7 @@ impl<B: Backend> Evaluator for BurnEvaluator<B> {
             Tensor::<B, 2>::from_data(TensorData::new(input_vec, [1, NUM_FEATURES]), &self.device);
         let out = self.model.forward(input);
         let raw: f32 = out.into_scalar().elem();
-        let value = Value((raw * self.value_scale).round() as i32);
+        let value = Value(raw.round() as i32);
         let reward = compute_reward(&self.reward_weights, lock, board, t_spin, ctx);
         (value, reward)
     }
@@ -372,13 +362,14 @@ impl<B: Backend> Evaluator for BurnEvaluator<B> {
             return Vec::new();
         }
         let mut flat = Vec::with_capacity(n * NUM_FEATURES);
+        let mut denses: Vec<Board> = Vec::with_capacity(n);
         for (lock, board, _, _) in inputs {
-            // NN feature extraction still consumes a dense `Board`; reconstruct per row.
-            // This IS the NN evaluator's hot loop (the beam's per-generation scoring);
-            // moving extraction onto `columns()` (an `extract_from_cols` seam) is a follow-up
-            // that would drop this `to_array2d`.
+            // NN feature extraction consumes a dense `Board`; reconstruct it once per row
+            // and reuse it for the reward half below. (This is the NN evaluator's hot loop;
+            // an `extract_from_cols` seam over `columns()` would drop the reconstruction.)
             let dense = board.to_array2d();
             flat.extend_from_slice(&features_to_input(&BoardFeatures::extract(&dense, lock)));
+            denses.push(dense);
         }
         let x = Tensor::<B, 2>::from_data(TensorData::new(flat, [n, NUM_FEATURES]), &self.device);
         let out = self.model.forward(x); // [N, 1] — ONE forward
@@ -386,9 +377,10 @@ impl<B: Backend> Evaluator for BurnEvaluator<B> {
         inputs
             .iter()
             .zip(raw)
-            .map(|((lock, board, t, ctx), v)| {
-                let value = Value((v * self.value_scale).round() as i32);
-                let reward = compute_reward(&self.reward_weights, lock, &board.to_array2d(), *t, *ctx);
+            .zip(denses)
+            .map(|(((lock, _, t, ctx), v), dense)| {
+                let value = Value(v.round() as i32);
+                let reward = compute_reward(&self.reward_weights, lock, &dense, *t, *ctx);
                 (value, reward)
             })
             .collect()
