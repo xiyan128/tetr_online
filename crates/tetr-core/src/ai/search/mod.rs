@@ -35,10 +35,12 @@ pub use beam::BeamPlanner;
 pub use best_first::BestFirstPlanner;
 pub use greedy::GreedyPlanner;
 
+use smallvec::SmallVec;
+
 use crate::ai::eval::{EvalContext, Evaluator};
 use crate::ai::movegen::{Move, Placement};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, BitBoard};
+use crate::engine::{classify_t_spin, BitBoard, PieceType};
 
 /// How much work a planner may do in one [`Planner::plan`] call.
 ///
@@ -132,6 +134,45 @@ pub(crate) fn score_placement(
     let lock = board.lock_piece(&placement.piece);
     let (value, reward) = eval.evaluate_cols(&lock, &board, t_spin, ctx);
     (value + reward).0
+}
+
+/// The cheap, exact identity of a search-**root** state — the shared core of the
+/// beam's stale-run detector ([`BeamPlanner`]) and best-first's transposition key
+/// ([`BestFirstPlanner`]), which were near-identical structs before.
+///
+/// Every field is compared by value (the derived [`PartialEq`]); equality is exact, so
+/// two states match only when they are byte-for-byte the same root. The board identity
+/// is the **column bitboard** ([`BitBoard::columns`]) — a complete, allocation-free
+/// fingerprint — *not* `cell_coords()`, so building a key allocates only the two
+/// `SmallVec`s. [`Eq`]/[`Hash`] are derived too so best-first can layer a `root_index`
+/// on top and use the result as a transposition-table key.
+#[derive(Clone, PartialEq, Eq, Hash)]
+pub(crate) struct RootKey {
+    active: PieceType,
+    active_origin: (isize, isize),
+    active_rotation: u8,
+    hold: Option<PieceType>,
+    queue: SmallVec<[PieceType; 8]>,
+    b2b: bool,
+    combo: u32,
+    board: SmallVec<[u64; 16]>,
+}
+
+impl RootKey {
+    /// Snapshot `state`'s root identity (active pose, hold, revealed queue, B2B/combo
+    /// chain, and the column-bitboard board fingerprint).
+    pub(crate) fn of(state: &SearchState) -> Self {
+        Self {
+            active: state.active.piece_type(),
+            active_origin: state.active.origin(),
+            active_rotation: state.active.rotation() as u8,
+            hold: state.hold,
+            queue: state.queue.iter().copied().collect(),
+            b2b: state.b2b,
+            combo: state.combo,
+            board: state.board.columns().into(),
+        }
+    }
 }
 
 /// The result of one [`Planner::plan`] call.

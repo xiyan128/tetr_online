@@ -24,11 +24,9 @@
 //! `budget.max_depth` (or the frontier empties), at which point it returns the
 //! best ply-1 placement. [`SearchPolicy::plan_best`] already drives that loop.
 
-use std::collections::VecDeque;
-
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
+use crate::ai::search::{PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{BitBoard, LockOutcome, PieceType, TSpinKind};
 
@@ -63,41 +61,6 @@ struct BeamNode {
     spec_weight: f32,
 }
 
-/// The cheap identity of the state a [`BeamRun`] was seeded from, used to detect a
-/// stale in-flight run when [`BeamPlanner::plan`] is called for a *new* decision.
-///
-/// Compared by value (no hashing): every field is `PartialEq`, and the comparison
-/// is exact, so a run is reused only when the root state is byte-for-byte the one it
-/// was seeded from.
-#[derive(Clone, PartialEq)]
-struct RootFingerprint {
-    active_type: PieceType,
-    active_origin: (isize, isize),
-    active_rotation: u8,
-    hold: Option<PieceType>,
-    queue: VecDeque<PieceType>,
-    b2b: bool,
-    combo: u32,
-    board: smallvec::SmallVec<[u64; 16]>,
-}
-
-impl RootFingerprint {
-    fn of(state: &SearchState) -> Self {
-        Self {
-            active_type: state.active.piece_type(),
-            active_origin: state.active.origin(),
-            active_rotation: state.active.rotation() as u8,
-            hold: state.hold,
-            queue: state.queue.iter().copied().collect(),
-            b2b: state.b2b,
-            combo: state.combo,
-            // The column bitboard is a complete, allocation-free board identity (the
-            // same key `BestFirstPlanner::StateKey` uses) — no per-poll `cell_coords` Vec.
-            board: state.board.columns().into(),
-        }
-    }
-}
-
 /// The in-flight search carried on the planner between `plan` calls (BEAM.md §4).
 struct BeamRun {
     /// The ply-1 placements, in canonical movegen order. `root_index` indexes this.
@@ -108,8 +71,9 @@ struct BeamRun {
     frontier: Vec<BeamNode>,
     /// Plies expanded so far (root seeding = depth 1).
     depth: u8,
-    /// Identity of the state this run was seeded from, to detect a stale run.
-    root_fingerprint: RootFingerprint,
+    /// Identity of the state this run was seeded from, to detect a stale run (the
+    /// shared [`RootKey`]; compared by value, exact, no hashing).
+    root_key: RootKey,
 }
 
 /// A deterministic, batch-shaped, time-sliced beam planner (BEAM.md §2/§4/§5/§6).
@@ -224,7 +188,7 @@ impl BeamPlanner {
             root_best,
             frontier,
             depth: 1,
-            root_fingerprint: RootFingerprint::of(state),
+            root_key: RootKey::of(state),
         })
     }
 
@@ -389,7 +353,7 @@ impl Planner for BeamPlanner {
         // state than the one the current run was seeded from, restart from scratch so
         // a fresh decision never resumes the previous decision's frontier.
         if let Some(run) = &self.run {
-            if run.root_fingerprint != RootFingerprint::of(state) {
+            if run.root_key != RootKey::of(state) {
                 self.run = None;
             }
         }

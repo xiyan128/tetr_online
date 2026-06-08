@@ -220,8 +220,9 @@ struct BeamRun {
     frontier: Vec<BeamNode>,
     /// Plies expanded so far (root seeding = depth 1).
     depth: u8,
-    /// Identity of the state this run was seeded from, to detect a stale run.
-    root_fingerprint: RootFingerprint,
+    /// Identity of the state this run was seeded from, to detect a stale run
+    /// (the shared `RootKey`, also best-first's transposition-key core).
+    root_key: RootKey,
 }
 ```
 

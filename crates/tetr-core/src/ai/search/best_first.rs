@@ -29,13 +29,12 @@ use std::cmp::Ordering;
 use std::collections::BinaryHeap;
 
 use rustc_hash::FxHashMap;
-use smallvec::SmallVec;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
+use crate::ai::search::{PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, PieceType};
+use crate::engine::classify_t_spin;
 
 
 /// Nodes expanded per `plan` call before yielding (the WASM time-slice unit). The
@@ -44,32 +43,20 @@ const EXPAND_CHUNK: u32 = 1024;
 
 /// Identity of a search state for transposition: same key ⇒ same future, so two paths
 /// reaching it are interchangeable. **Per-root** (`root_index` is part of the key) so a
-/// position shared by two ply-1 moves is kept once *per root* and credited correctly.
+/// position shared by two ply-1 moves is kept once *per root* and credited correctly;
+/// the state identity itself is the shared [`RootKey`] (the beam uses the same fields
+/// for its stale-run check).
 #[derive(Clone, PartialEq, Eq, Hash)]
 struct StateKey {
     root_index: usize,
-    board: SmallVec<[u64; 16]>,
-    active: PieceType,
-    active_origin: (isize, isize),
-    active_rotation: u8,
-    hold: Option<PieceType>,
-    queue: SmallVec<[PieceType; 8]>,
-    b2b: bool,
-    combo: u32,
+    key: RootKey,
 }
 
 impl StateKey {
     fn of(state: &SearchState, root_index: usize) -> Self {
         Self {
             root_index,
-            board: state.board.columns().into(),
-            active: state.active.piece_type(),
-            active_origin: state.active.origin(),
-            active_rotation: state.active.rotation() as u8,
-            hold: state.hold,
-            queue: state.queue.iter().copied().collect(),
-            b2b: state.b2b,
-            combo: state.combo,
+            key: RootKey::of(state),
         }
     }
 }
