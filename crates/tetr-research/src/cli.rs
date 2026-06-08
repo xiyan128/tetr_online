@@ -22,11 +22,6 @@ pub fn env_usize(key: &str, default: usize) -> usize {
     env_or(key, default)
 }
 
-/// [`env_or`] specialized to `f32` (step sizes, jitter magnitudes).
-pub fn env_f32(key: &str, default: f32) -> f32 {
-    env_or(key, default)
-}
-
 /// A tiny deterministic [SplitMix64](https://prng.di.unimi.it/splitmix64.c) PRNG —
 /// the hill-climbers' mutation / jitter source. No `rand` dependency and fully
 /// reproducible from the seed, so a climb replays bit-for-bit.
@@ -65,10 +60,5 @@ impl SplitMix64 {
         z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
         z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
         z ^ (z >> 31)
-    }
-
-    /// The next float in `[0, 1)` (24-bit mantissa resolution).
-    pub fn next_unit(&mut self) -> f32 {
-        (self.next_u64() >> 40) as f32 / (1u64 << 24) as f32
     }
 }

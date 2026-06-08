@@ -140,7 +140,7 @@ impl AiController {
 
     /// A controller around an explicit [`DecisionRunner`], for swapping in an
     /// off-thread / time-sliced runner without changing the controller logic.
-    pub fn with_runner(runner: Box<dyn DecisionRunner>, reaction: Duration) -> Self {
+    pub(crate) fn with_runner(runner: Box<dyn DecisionRunner>, reaction: Duration) -> Self {
         Self {
             runner,
             plan: VecDeque::new(),

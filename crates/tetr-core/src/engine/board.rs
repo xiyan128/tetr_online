@@ -74,17 +74,6 @@ impl Board {
             .any(|cell| cell.cell_kind.is_some())
     }
 
-    pub fn get(&self, x: isize, y: isize) -> Option<&Cell> {
-        if x < 0 || y < 0 || x >= self.width as isize || y >= self.height as isize {
-            return None;
-        }
-
-        self.cells[(y as usize, x as usize)]
-            .cell_kind
-            .is_some()
-            .then(|| &self.cells[(y as usize, x as usize)])
-    }
-
     pub fn get_cell_kind(&self, x: isize, y: isize) -> CellKind {
         if x < 0 || y < 0 || x >= self.width as isize {
             return CellKind::Wall;
@@ -272,10 +261,6 @@ mod tests {
 
         assert!(board.set(3, 4, CellKind::Some(PieceType::T)));
         assert_eq!(board.get_cell_kind(3, 4), CellKind::Some(PieceType::T));
-        assert_eq!(
-            board.get(3, 4).map(Cell::cell_kind),
-            Some(CellKind::Some(PieceType::T))
-        );
     }
 
     #[test]
@@ -313,7 +298,6 @@ mod tests {
 
         assert!(board.set(4, 25, CellKind::Some(PieceType::I)));
         assert_eq!(board.get_cell_kind(4, 25), CellKind::Some(PieceType::I));
-        assert!(board.get(4, 25).is_none());
     }
 
     #[test]

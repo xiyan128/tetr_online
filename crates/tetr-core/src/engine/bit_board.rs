@@ -129,7 +129,7 @@ impl BitBoard {
     }
 
     /// Fill `(x, y)` (no-op if out of bounds).
-    pub fn set(&mut self, x: isize, y: isize) {
+    pub(crate) fn set(&mut self, x: isize, y: isize) {
         if x < 0 || y < 0 || x as usize >= self.width || y as usize >= self.total_rows {
             return; // off the side/floor, or above the backing grid (cell is dropped)
         }
@@ -144,7 +144,7 @@ impl BitBoard {
     /// Highest occupied row across all columns, or `None` if empty. (The skyline the
     /// engine reports as `top_y_after_lock`.) Delegates to [`highest_occupied_y`], the
     /// one impl shared with the engine's `lock_and_clear`.
-    pub fn highest_y(&self) -> Option<isize> {
+    pub(crate) fn highest_y(&self) -> Option<isize> {
         highest_occupied_y(self.columns())
     }
 
@@ -153,7 +153,7 @@ impl BitBoard {
     /// (Note: the engine *reports* over the full range but only *clears* the visible
     /// field — see [`clear_full_rows`](Self::clear_full_rows).) Delegates to the free
     /// [`full_rows`], the one impl shared with the engine's `lock_and_clear`.
-    pub fn full_rows(&self) -> Vec<isize> {
+    pub(crate) fn full_rows(&self) -> Vec<isize> {
         full_rows(self.columns())
     }
 
@@ -161,7 +161,7 @@ impl BitBoard {
     /// `clear_lines`: scan the visible field bottom-up, and whenever the current row is
     /// full, drop it (shifting every row above — buffer included — down one) and
     /// re-examine the same index.
-    pub fn clear_full_rows(&mut self) {
+    pub(crate) fn clear_full_rows(&mut self) {
         let mut y = 0u32;
         while (y as usize) < self.visible_rows {
             let bit = 1u64 << y;
@@ -185,7 +185,7 @@ impl BitBoard {
     /// (the *reported* clears, matching the engine's `full_rows`); the board itself is
     /// mutated by the visible-bounded [`clear_full_rows`](Self::clear_full_rows). Cells
     /// out of bounds are skipped, exactly as `Board::set` does on the engine side.
-    pub fn lock(&mut self, cells: &[(isize, isize)]) -> (Vec<isize>, Option<isize>) {
+    pub(crate) fn lock(&mut self, cells: &[(isize, isize)]) -> (Vec<isize>, Option<isize>) {
         for &(x, y) in cells {
             self.set(x, y);
         }

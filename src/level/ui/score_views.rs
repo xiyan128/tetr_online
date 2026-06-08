@@ -32,16 +32,22 @@ fn make_score_text(scorer: &Scorer) -> String {
     format!("SCORE: {}", scorer.score)
 }
 
-pub fn spawn_score_text(
-    mut commands: Commands,
-    config: Res<LevelConfig>,
-    game_assets: Res<GameAssets>,
+/// Spawn one on-board text readout at board `row`, tagged with `marker` and
+/// despawned on exit from Playing — the shared body behind [`spawn_score_text`]
+/// and [`spawn_line_count_text`].
+fn spawn_readout(
+    commands: &mut Commands,
+    config: &LevelConfig,
+    game_assets: &GameAssets,
+    row: isize,
+    marker: impl Component,
+    text: String,
 ) {
-    let offset = Vec3::new(calc_ui_offset(&config), 0., 0.);
+    let offset = Vec3::new(calc_ui_offset(config), 0., 0.);
 
     commands
         .spawn((
-            Text2d::new(make_score_text(&Scorer::default())),
+            Text2d::new(text),
             TextFont {
                 font: game_assets.font.clone(),
                 font_size: 14.0,
@@ -49,12 +55,27 @@ pub fn spawn_score_text(
             },
             TextColor(Color::WHITE),
             Transform::from_translation(
-                to_translation(config.board_width as isize, 1, config.block_size) + offset,
+                to_translation(config.board_width as isize, row, config.block_size) + offset,
             ),
             Anchor::TOP_LEFT,
         ))
-        .insert(ScoreText)
+        .insert(marker)
         .insert(DespawnOnExit(GameState::Playing));
+}
+
+pub fn spawn_score_text(
+    mut commands: Commands,
+    config: Res<LevelConfig>,
+    game_assets: Res<GameAssets>,
+) {
+    spawn_readout(
+        &mut commands,
+        &config,
+        &game_assets,
+        1,
+        ScoreText,
+        make_score_text(&Scorer::default()),
+    );
 }
 
 pub fn spawn_line_count_text(
@@ -62,24 +83,14 @@ pub fn spawn_line_count_text(
     config: Res<LevelConfig>,
     game_assets: Res<GameAssets>,
 ) {
-    let offset = Vec3::new(calc_ui_offset(&config), 0., 0.);
-
-    commands
-        .spawn((
-            Text2d::new(make_line_count_text(&Scorer::default())),
-            TextFont {
-                font: game_assets.font.clone(),
-                font_size: 14.0,
-                ..default()
-            },
-            TextColor(Color::WHITE),
-            Transform::from_translation(
-                to_translation(config.board_width as isize, 2, config.block_size) + offset,
-            ),
-            Anchor::TOP_LEFT,
-        ))
-        .insert(LineCountText)
-        .insert(DespawnOnExit(GameState::Playing));
+    spawn_readout(
+        &mut commands,
+        &config,
+        &game_assets,
+        2,
+        LineCountText,
+        make_line_count_text(&Scorer::default()),
+    );
 }
 
 pub fn spawn_score_type_text(

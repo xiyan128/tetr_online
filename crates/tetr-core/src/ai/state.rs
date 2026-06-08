@@ -71,16 +71,6 @@ impl BagState {
         self.remaining & Self::bit(piece_type) != 0
     }
 
-    /// How many pieces are still in the bag (`1..=7`; an empty mask reports `7`
-    /// because the bag is refilled before the next draw, so this is never `0`).
-    pub fn remaining_count(self) -> usize {
-        if self.remaining == 0 {
-            crate::engine::PieceType::LEN
-        } else {
-            self.remaining.count_ones() as usize
-        }
-    }
-
     /// Account for `piece_type` having been dealt out of the bag.
     ///
     /// Refills the bag first if it was empty, preserving the seven-bag invariant
@@ -628,16 +618,13 @@ mod tests {
     #[test]
     fn bag_deal_refills_when_empty_and_tracks_membership() {
         let mut bag = BagState::full();
-        assert_eq!(bag.remaining_count(), 7);
         for pt in PieceType::all() {
             assert!(bag.contains(pt));
             bag.deal(pt);
         }
         // A full bag dealt out is empty; the next deal refills it.
-        assert_eq!(bag.remaining_count(), 7); // reports a fresh full bag
         bag.deal(PieceType::I);
         assert!(!bag.contains(PieceType::I));
-        assert_eq!(bag.remaining_count(), 6);
     }
 
     #[test]

@@ -29,10 +29,7 @@ bench = false
 # feature on so the host keeps its keyboard-input adapter
 # (`RawKeyboardFrame::from_keyboard`).
 tetr-core = { path = "crates/tetr-core", features = ["bevy"] }
-array2d = "0.3.2"
 bevy_asset_loader = "0.26.0"
-itertools = "0.14.0"
-rand = "0.10.1"
 # Settings persistence (RON, via serde derives). `ron` is already in the graph
 # transitively through `bevy_asset`; both are size-cheap and let `GameSettings`
 # round-trip through derives instead of a hand-rolled key=value codec.

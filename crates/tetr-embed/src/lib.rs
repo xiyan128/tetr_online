@@ -40,7 +40,7 @@ use core::time::Duration;
 
 use tetr_core::ai::{AiController, Handicap};
 use tetr_core::engine::{
-    Engine, EngineConfig, EngineEvent, EngineSnapshot, PieceType, SnapshotCell,
+    Engine, EngineConfig, EngineEvent, EngineSnapshot, SnapshotCell,
 };
 use tetr_core::player::{drive_engine, KeyboardController, RawKeyboardFrame};
 use wasm_bindgen::prelude::*;
@@ -80,20 +80,15 @@ fn action_bit(action: u8) -> Option<u16> {
     }
 }
 
-/// Stable render index for a piece type (guideline colour order `I,O,T,S,Z,J,L`), so
-/// the JS palette is a 7-entry array indexed by this value. The canonical mapping
-/// lives on the engine type ([`PieceType::render_index`]) so every binding shares it.
-fn piece_index(p: PieceType) -> u8 {
-    p.render_index()
-}
-
 /// Pack cells into a flat `[x, y, pieceIndex, …]` array for the canvas renderer.
+/// The piece index is the engine's guideline colour order (`I,O,T,S,Z,J,L`) via
+/// [`PieceType::render_index`], so the JS palette is a 7-entry array indexed by it.
 fn pack_cells(cells: &[SnapshotCell]) -> Vec<i32> {
     let mut out = Vec::with_capacity(cells.len() * 3);
     for c in cells {
         out.push(c.x as i32);
         out.push(c.y as i32);
-        out.push(piece_index(c.piece_type) as i32);
+        out.push(c.piece_type.render_index() as i32);
     }
     out
 }
@@ -301,12 +296,12 @@ impl Game {
     /// The next-queue piece indices.
     #[must_use]
     pub fn next_queue(&self) -> Vec<u8> {
-        self.snap.next_queue.iter().map(|p| piece_index(*p)).collect()
+        self.snap.next_queue.iter().map(|p| p.render_index()).collect()
     }
 
     /// The held piece index, or `-1` if the hold slot is empty.
     pub fn hold(&self) -> i32 {
-        self.snap.hold.map(|p| piece_index(p) as i32).unwrap_or(-1)
+        self.snap.hold.map(|p| p.render_index() as i32).unwrap_or(-1)
     }
 
     /// The active piece index, or `-1` if there is none.
@@ -314,7 +309,7 @@ impl Game {
         self.snap
             .active
             .as_ref()
-            .map(|a| piece_index(a.piece_type) as i32)
+            .map(|a| a.piece_type.render_index() as i32)
             .unwrap_or(-1)
     }
 

@@ -5064,7 +5064,6 @@ dependencies = [
 name = "tetr-research"
 version = "0.1.0"
 dependencies = [
- "rand 0.10.1",
  "serde",
  "serde_json",
  "tetr-core",
@@ -5074,7 +5073,6 @@ dependencies = [
 name = "tetr_online"
 version = "0.1.0"
 dependencies = [
- "array2d",
  "bevy",
  "bevy-inspector-egui",
  "bevy_asset_loader",
@@ -5083,8 +5081,6 @@ dependencies = [
  "criterion",
  "directories",
  "getrandom 0.4.2",
- "itertools 0.14.0",
- "rand 0.10.1",
  "ron",
  "serde",
  "tetr-core",
