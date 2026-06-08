@@ -37,6 +37,8 @@ pub mod behavior;
 /// Shared env-config + deterministic-RNG helpers for the research `bin/` tools.
 pub mod cli;
 
+use cli::SplitMix64;
+
 /// Fixed simulation rate: one engine step (one `drive_engine` poll) = 1/60 s.
 pub const SIM_HZ: f32 = 60.0;
 
@@ -300,16 +302,8 @@ pub fn evaluate_capped(
 /// Garbage-hole column per row for a seeded cheese board (independent per row =
 /// maximum messiness). Both bots face the identical cheese for a given seed.
 pub fn cheese_holes(seed: u64, rows: usize) -> Vec<usize> {
-    let mut z = seed;
-    (0..rows)
-        .map(|_| {
-            z = z.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            let mut h = z;
-            h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            ((h ^ (h >> 31)) % 10) as usize
-        })
-        .collect()
+    let mut rng = SplitMix64::new(seed);
+    (0..rows).map(|_| (rng.next_u64() % 10) as usize).collect()
 }
 
 /// One cheese-clear game's result.
@@ -506,11 +500,12 @@ impl GarbageQueue {
 
 /// Next seeded garbage-hole column (SplitMix64 over a per-match stream).
 pub fn versus_hole(rng: &mut u64) -> usize {
-    *rng = rng.wrapping_add(0x9E37_79B9_7F4A_7C15);
-    let mut h = *rng;
-    h = (h ^ (h >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-    h = (h ^ (h >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-    ((h ^ (h >> 31)) % 10) as usize
+    // Thread the caller's bare `u64` state through the shared SplitMix64 step: one
+    // `next_u64` advances the word exactly as the inlined fold did, then write it back.
+    let mut gen = SplitMix64::from_raw(*rng);
+    let hole = (gen.next_u64() % 10) as usize;
+    *rng = gen.into_raw();
+    hole
 }
 
 /// Drive one player's bot until it locks a single piece (or tops out / stalls).
@@ -744,13 +739,10 @@ pub fn seed_set(count: usize) -> Vec<u64> {
 /// train / held-out validation seed sets (`seed_set(n)` and `seed_set_from(s, n)`
 /// share no seeds when `s >= n`), so a hillclimb can be checked for overfitting.
 pub fn seed_set_from(start: usize, count: usize) -> Vec<u64> {
+    // Per-index SplitMix64 seeding: `new(i).next_u64()` reproduces the old inline fold
+    // (`new` stores `i`, then `next_u64` folds in the golden increment) bit-for-bit.
     (start as u64..(start + count) as u64)
-        .map(|i| {
-            let mut z = i.wrapping_add(0x9E37_79B9_7F4A_7C15);
-            z = (z ^ (z >> 30)).wrapping_mul(0xBF58_476D_1CE4_E5B9);
-            z = (z ^ (z >> 27)).wrapping_mul(0x94D0_49BB_1331_11EB);
-            z ^ (z >> 31)
-        })
+        .map(|i| SplitMix64::new(i).next_u64())
         .collect()
 }
 

@@ -43,6 +43,21 @@ impl SplitMix64 {
         Self(seed)
     }
 
+    /// Wrap a bare running-state word as a generator — the inverse of
+    /// [`into_raw`](Self::into_raw). Identical to [`new`](Self::new) (both store the
+    /// word as the running state folded forward on the next [`next_u64`](Self::next_u64));
+    /// the distinct name documents intent at call sites that thread a raw `u64` PRNG
+    /// state through `&mut u64` rather than seeding a fresh stream.
+    pub fn from_raw(state: u64) -> Self {
+        Self(state)
+    }
+
+    /// Unwrap the running-state word — the inverse of [`from_raw`](Self::from_raw) — so
+    /// a caller holding a bare `u64` can read the advanced state back after stepping.
+    pub fn into_raw(self) -> u64 {
+        self.0
+    }
+
     /// The next 64-bit output.
     pub fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9E37_79B9_7F4A_7C15);
