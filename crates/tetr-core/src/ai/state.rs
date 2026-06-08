@@ -329,7 +329,7 @@ impl SearchState {
         }
         self.b2b = matches!(
             (t_spin, lines),
-            (Some(TSpinKind::Full), _) | (Some(TSpinKind::Mini), _) | (None, 4)
+            (Some(TSpinKind::Full | TSpinKind::Mini), _) | (None, 4)
         );
     }
 

@@ -240,7 +240,7 @@ impl Cc2Evaluator {
             // SearchState carries the real chain.
             let b2b_eligible = matches!(
                 (t_spin, lines),
-                (Some(TSpinKind::Full), _) | (Some(TSpinKind::Mini), _) | (None, 4)
+                (Some(TSpinKind::Full | TSpinKind::Mini), _) | (None, 4)
             );
             if b2b_eligible {
                 reward += w.back_to_back_clear;

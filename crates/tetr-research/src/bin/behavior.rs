@@ -28,11 +28,9 @@ fn linear_custom_weights() -> Weights {
     let bp = parse_f32_list("BOARD_PARAMS");
     let rp = parse_f32_list("REWARD_PARAMS");
     let board = <[f32; BoardWeights::PARAM_COUNT]>::try_from(bp.as_slice())
-        .map(|a| BoardWeights::from_params(&a))
-        .unwrap_or(BoardWeights::DT20);
+        .map_or(BoardWeights::DT20, |a| BoardWeights::from_params(&a));
     let reward = <[f32; RewardWeights::PARAM_COUNT]>::try_from(rp.as_slice())
-        .map(|a| RewardWeights::from_params(&a))
-        .unwrap_or(RewardWeights::SURVIVAL);
+        .map_or(RewardWeights::SURVIVAL, |a| RewardWeights::from_params(&a));
     Weights { board, reward }
 }
 

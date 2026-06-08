@@ -301,7 +301,7 @@ impl Game {
 
     /// The held piece index, or `-1` if the hold slot is empty.
     pub fn hold(&self) -> i32 {
-        self.snap.hold.map(|p| p.render_index() as i32).unwrap_or(-1)
+        self.snap.hold.map_or(-1, |p| i32::from(p.render_index()))
     }
 
     /// The active piece index, or `-1` if there is none.
@@ -309,8 +309,7 @@ impl Game {
         self.snap
             .active
             .as_ref()
-            .map(|a| a.piece_type.render_index() as i32)
-            .unwrap_or(-1)
+            .map_or(-1, |a| i32::from(a.piece_type.render_index()))
     }
 
     /// How far the active piece is through its lock delay, `0.0..=1.0` (drives the
@@ -319,8 +318,7 @@ impl Game {
         self.snap
             .active
             .as_ref()
-            .map(|a| a.lock_timer_fraction)
-            .unwrap_or(0.0)
+            .map_or(0.0, |a| a.lock_timer_fraction)
     }
 
     /// Current score.

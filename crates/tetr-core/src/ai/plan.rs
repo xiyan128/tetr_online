@@ -143,6 +143,7 @@ fn step_lateral(board: &Board, piece: &mut ActivePiece, dir: MoveDirection) {
 }
 
 /// Direction of an SRS rotation, mirroring [`Move::Cw`] / [`Move::Ccw`].
+#[derive(Clone, Copy)]
 enum RotationDir {
     Cw,
     Ccw,
