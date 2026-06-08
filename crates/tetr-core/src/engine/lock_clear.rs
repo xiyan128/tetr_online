@@ -6,6 +6,7 @@
 //! validators, and garbage solvers can reuse it (ADR-7, roadmap §10).
 
 use crate::engine::active_piece::ActivePiece;
+use crate::engine::bit_board::{full_rows, highest_occupied_y};
 use crate::engine::board::{Board, CellKind};
 
 /// Result of locking a piece onto the board and clearing any resulting full
@@ -69,25 +70,6 @@ pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {
         cleared_rows,
         top_y_after_lock,
     }
-}
-
-/// Indices of completely-filled rows, ascending. A row is full iff every column has
-/// its bit set there, so the bitwise-AND of all column bitboards has exactly the full
-/// rows' bits set. (`fold(!0, &)` over the columns; an empty board ANDs to `0`.)
-fn full_rows(cols: &[u64]) -> Vec<isize> {
-    let full = cols.iter().fold(!0u64, |acc, &c| acc & c);
-    (0..u64::BITS)
-        .filter(|&y| full & (1u64 << y) != 0)
-        .map(|y| y as isize)
-        .collect()
-}
-
-/// Highest occupied row across all columns, or `None` if the board is empty.
-fn highest_occupied_y(cols: &[u64]) -> Option<isize> {
-    cols.iter()
-        .filter(|&&c| c != 0)
-        .map(|&c| (u64::BITS - 1 - c.leading_zeros()) as isize)
-        .max()
 }
 
 #[cfg(test)]

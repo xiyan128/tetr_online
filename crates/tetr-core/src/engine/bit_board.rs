@@ -142,37 +142,19 @@ impl BitBoard {
     }
 
     /// Highest occupied row across all columns, or `None` if empty. (The skyline the
-    /// engine reports as `top_y_after_lock`.)
+    /// engine reports as `top_y_after_lock`.) Delegates to [`highest_occupied_y`], the
+    /// one impl shared with the engine's `lock_and_clear`.
     pub fn highest_y(&self) -> Option<isize> {
-        self.cols[..self.width]
-            .iter()
-            .filter(|&&c| c != 0)
-            .map(|&c| (u64::BITS - 1 - c.leading_zeros()) as isize)
-            .max()
+        highest_occupied_y(self.columns())
     }
 
     /// Indices of completely-filled rows across the whole 64-bit range, ascending — the
-    /// `cleared_rows` the engine *reports* (`lock_clear::full_rows`, buffer included). A
-    /// row is full iff every column's bit is set, so the bitwise-AND of all columns has
-    /// exactly the full rows' bits. (Note: the engine *reports* over the full range but
-    /// only *clears* the visible field — see [`clear_full_rows`](Self::clear_full_rows).)
+    /// `cleared_rows` the engine *reports* (`lock_clear::full_rows`, buffer included).
+    /// (Note: the engine *reports* over the full range but only *clears* the visible
+    /// field — see [`clear_full_rows`](Self::clear_full_rows).) Delegates to the free
+    /// [`full_rows`], the one impl shared with the engine's `lock_and_clear`.
     pub fn full_rows(&self) -> Vec<isize> {
-        // AND-fold every column: a row is full iff its bit is set in all `width` columns.
-        let full = self.cols[..self.width].iter().fold(!0u64, |acc, &c| acc & c);
-        // Hot common case — nothing full (most locks clear no line): skip the per-row
-        // scan and the allocation entirely. `Vec::new()` does not allocate.
-        if full == 0 {
-            return Vec::new();
-        }
-        // Rare: walk only the set bits, full-range (so buffer-zone clears are still
-        // reported — see the `lock_clear` buffer-zone note), cheaper than a 0..64 filter.
-        let mut rows = Vec::new();
-        let mut bits = full;
-        while bits != 0 {
-            rows.push(bits.trailing_zeros() as isize);
-            bits &= bits - 1;
-        }
-        rows
+        full_rows(self.columns())
     }
 
     /// Clear full rows and compact the stack downward, **exactly** as the engine's
@@ -252,6 +234,40 @@ impl BitBoard {
         }
         board
     }
+}
+
+/// Indices of completely-filled rows in a column bitboard, ascending. A row is full
+/// iff every column has its bit set there, so the bitwise-AND of all columns has exactly
+/// the full rows' bits set; the scan spans the full 64-bit range so buffer-zone clears
+/// are reported too (the `lock_clear` buffer-zone note). The **single** implementation
+/// behind [`BitBoard::full_rows`] and the engine's [`lock_and_clear`](super::lock_and_clear),
+/// so the search bitboard and the engine board can never disagree on what cleared.
+pub(crate) fn full_rows(cols: &[u64]) -> Vec<isize> {
+    // AND-fold every column: a row is full iff its bit is set in all columns.
+    let full = cols.iter().fold(!0u64, |acc, &c| acc & c);
+    // Hot common case — nothing full (most locks clear no line): skip the per-row scan
+    // and the allocation entirely. `Vec::new()` does not allocate.
+    if full == 0 {
+        return Vec::new();
+    }
+    // Walk only the set bits (lowest→highest ⇒ ascending), cheaper than a 0..64 filter.
+    let mut rows = Vec::new();
+    let mut bits = full;
+    while bits != 0 {
+        rows.push(bits.trailing_zeros() as isize);
+        bits &= bits - 1;
+    }
+    rows
+}
+
+/// Highest occupied row across a column bitboard, or `None` if every column is empty —
+/// the skyline the engine reports as `top_y_after_lock`. The **single** implementation
+/// behind [`BitBoard::highest_y`] and the engine's [`lock_and_clear`](super::lock_and_clear).
+pub(crate) fn highest_occupied_y(cols: &[u64]) -> Option<isize> {
+    cols.iter()
+        .filter(|&&c| c != 0)
+        .map(|&c| (u64::BITS - 1 - c.leading_zeros()) as isize)
+        .max()
 }
 
 impl Occupancy for BitBoard {
