@@ -274,11 +274,9 @@ impl Engine {
     /// [`step`](Self::step) is a no-op, mirroring the spawn-collision path.
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
         let overflow = self.board.insert_garbage_lines(count, hole_col);
-        let buried = self
-            .active
-            .as_ref()
-            .map(|active| active.piece().collide_with(&self.board, active.origin()))
-            .unwrap_or(false);
+        let buried = self.active.as_ref().is_some_and(|active| {
+            active.piece().collide_with(&self.board, active.origin())
+        });
         if overflow || buried {
             self.game_over = Some(GameOverStatus::BlockOut);
         }

@@ -8,7 +8,7 @@ pub const MIN_LEVEL: u8 = 1;
 pub const MAX_LEVEL: u8 = 15;
 
 pub fn fall_speed_seconds(level: u8) -> f32 {
-    let level = level.clamp(MIN_LEVEL, MAX_LEVEL) as f32;
+    let level = f32::from(level.clamp(MIN_LEVEL, MAX_LEVEL));
     (0.8 - ((level - 1.0) * 0.007)).powf(level - 1.0)
 }
 

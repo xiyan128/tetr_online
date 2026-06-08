@@ -184,7 +184,7 @@ pub(crate) fn hold_placements(state: &SearchState) -> Vec<Placement> {
 /// backed-up score is maximal, with the **first** maximum winning (`>` scan over
 /// `root_best` in canonical order) so the result is deterministic (BEAM.md §4).
 /// `roots` and `root_best` are index-aligned (root `i`'s best back-up is `root_best[i]`).
-pub(crate) fn best_root_plan(roots: &[Placement], root_best: &[i32]) -> Option<PlacementPlan> {
+pub(crate) fn best_root_plan(roots: &[Placement], root_best: &[i32]) -> PlacementPlan {
     let mut best_i = 0usize;
     let mut best_score = root_best[0];
     for (i, &score) in root_best.iter().enumerate().skip(1) {
@@ -193,10 +193,10 @@ pub(crate) fn best_root_plan(roots: &[Placement], root_best: &[i32]) -> Option<P
             best_i = i;
         }
     }
-    Some(PlacementPlan {
+    PlacementPlan {
         placement: roots[best_i].clone(),
         score: best_score,
-    })
+    }
 }
 
 /// The cheap, exact identity of a search-**root** state — the shared core of the

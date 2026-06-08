@@ -180,7 +180,7 @@ impl BestFirstPlanner {
 
     /// Seed the run: the ply-1 root placements become the depth-1 frontier, each its own
     /// `root_index`. `None` if the state has no legal placement (topped out).
-    fn seed(&self, state: &SearchState, eval: &dyn Evaluator) -> Option<Run> {
+    fn seed(state: &SearchState, eval: &dyn Evaluator) -> Option<Run> {
         let roots = hold_placements(state);
         if roots.is_empty() {
             return None;
@@ -240,7 +240,7 @@ impl Planner for BestFirstPlanner {
         }
 
         let mut run = match self.run.take() {
-            None => match self.seed(state, eval) {
+            None => match Self::seed(state, eval) {
                 Some(run) => run,
                 None => return PlannerStep::Done(None), // topped out
             },
@@ -252,7 +252,7 @@ impl Planner for BestFirstPlanner {
         if run.expanded >= self.node_budget || run.frontier.is_empty() {
             let plan = best_root_plan(&run.roots, &run.root_best);
             self.run = None;
-            PlannerStep::Done(plan)
+            PlannerStep::Done(Some(plan))
         } else {
             self.run = Some(run);
             PlannerStep::NeedMoreBudget
@@ -277,7 +277,7 @@ mod tests {
         for _ in 0..100_000 {
             match planner.plan(state, eval, budget) {
                 PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => continue,
+                PlannerStep::NeedMoreBudget => {}
             }
         }
         panic!("planner never finished");

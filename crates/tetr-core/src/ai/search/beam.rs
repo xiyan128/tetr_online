@@ -190,7 +190,7 @@ impl BeamPlanner {
                 // terminal node contributes no children; its `root_best` was already
                 // recorded when it entered the frontier, so the back-up keeps it.
                 if self.speculate {
-                    self.expand_speculative(parent, &mut owners, &mut meta);
+                    Self::expand_speculative(parent, &mut owners, &mut meta);
                 }
                 continue;
             }
@@ -252,7 +252,6 @@ impl BeamPlanner {
     /// No RNG, no expectimax average — every bag-legal piece is enumerated and
     /// beam-width truncation prunes the fan-out, keeping the planner deterministic.
     fn expand_speculative(
-        &self,
         parent: &BeamNode,
         owners: &mut Vec<(LockOutcome, Option<TSpinKind>, EvalContext)>,
         meta: &mut Vec<(usize, Reward, SearchState, f32)>,
@@ -343,7 +342,7 @@ impl Planner for BeamPlanner {
         if run.depth >= budget.max_depth || run.frontier.is_empty() {
             let plan = best_root_plan(&run.roots, &run.root_best);
             self.run = None; // decision complete: the next call re-seeds
-            PlannerStep::Done(plan)
+            PlannerStep::Done(Some(plan))
         } else {
             self.run = Some(run);
             PlannerStep::NeedMoreBudget
@@ -382,7 +381,7 @@ mod tests {
         for _ in 0..10_000 {
             match planner.plan(state, eval, budget) {
                 PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => continue,
+                PlannerStep::NeedMoreBudget => {}
             }
         }
         panic!("planner never finished");

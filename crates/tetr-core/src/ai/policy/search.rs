@@ -88,7 +88,7 @@ impl SearchPolicy {
         for _ in 0..MAX_STEPS {
             match self.planner.plan(obs, self.evaluator.as_ref(), self.budget) {
                 PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => continue,
+                PlannerStep::NeedMoreBudget => {}
             }
         }
         None
@@ -103,7 +103,7 @@ impl SearchPolicy {
     /// the metric the planner optimized. Uses `self.rng` only.
     fn apply_imperfection(&mut self, obs: &Observation, best: PlacementPlan) -> PlacementPlan {
         let rate = self.imperfection.clamp(0.0, 1.0);
-        if rate <= 0.0 || !self.rng.random_bool(rate as f64) {
+        if rate <= 0.0 || !self.rng.random_bool(f64::from(rate)) {
             return best;
         }
 
