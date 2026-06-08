@@ -217,6 +217,55 @@ fn b2b_eligible(spin: &str, lines: usize) -> bool {
     lines > 0 && (matches!(spin, "full" | "mini") || lines == 4)
 }
 
+/// Resolve TBP's implicit hold from the piece CC2 actually `placed`, advancing `queue`
+/// and `hold` to match. TBP sends no explicit hold event: the placed piece is the queue
+/// front (pop it), the held piece (swap the front into hold), or — on a first, empty-hold
+/// swap — the *second* queue piece (park the front in hold; the placed one is what
+/// followed). The asserts catch any queue/hold desync against CC2's own model.
+fn advance_queue_hold(
+    queue: &mut VecDeque<PieceType>,
+    hold: &mut Option<PieceType>,
+    placed: PieceType,
+    seed: u64,
+) {
+    let active = queue[0];
+    if placed == active {
+        queue.pop_front();
+    } else if let Some(h) = *hold {
+        assert_eq!(placed, h, "hold-swap piece mismatch (seed {seed})");
+        *hold = Some(queue.pop_front().unwrap());
+    } else {
+        let to_hold = queue.pop_front().unwrap();
+        let next = queue.pop_front().unwrap();
+        assert_eq!(placed, next, "empty-hold placed piece mismatch (seed {seed})");
+        *hold = Some(to_hold);
+    }
+}
+
+/// Score one CC2 clear into attack lines, advancing the `combo` / `b2b` chain. `lines`
+/// is the rows the placement cleared (0 ⇒ no clear: the combo breaks and no attack is
+/// sent). The B2B eligibility is computed **once** and reused for both the bonus gate
+/// (against the *incoming* `b2b`) and the new chain state. Returns the attack sent.
+fn score_cc2_clear(
+    sim: &Sim,
+    spin: &str,
+    lines: usize,
+    combo: &mut u32,
+    b2b: &mut bool,
+) -> u32 {
+    if lines == 0 {
+        *combo = 0;
+        return 0;
+    }
+    let eligible = b2b_eligible(spin, lines);
+    let bonus = *b2b && eligible;
+    let pc = sim.is_empty();
+    let atk = attack_lines(action_for(spin, lines), bonus, *combo, pc);
+    *combo += 1;
+    *b2b = eligible;
+    atk
+}
+
 /// Play CC2 over one seeded game of `pieces` placements; return total attack.
 fn run_one(bin: &str, seed: u64, pieces: usize, think: Duration) -> std::io::Result<u32> {
     let mut gen = PieceGenerator::with_seed(seed);
@@ -240,30 +289,11 @@ fn run_one(bin: &str, seed: u64, pieces: usize, think: Duration) -> std::io::Res
         let placed = piece_from_letter(&mv.location.piece);
 
         // Resolve hold from the placed piece (TBP infers hold this way).
-        let active = queue[0];
-        if placed == active {
-            queue.pop_front();
-        } else if let Some(h) = hold {
-            assert_eq!(placed, h, "hold-swap piece mismatch (seed {seed})");
-            hold = Some(queue.pop_front().unwrap());
-        } else {
-            let to_hold = queue.pop_front().unwrap();
-            let next = queue.pop_front().unwrap();
-            assert_eq!(placed, next, "empty-hold placed piece mismatch (seed {seed})");
-            hold = Some(to_hold);
-        }
+        advance_queue_hold(&mut queue, &mut hold, placed, seed);
 
         // Apply CC2's placement + score the clear with our attack table.
         let lines = sim.place_and_clear(&cc2_cells(&mv)) as usize;
-        if lines == 0 {
-            combo = 0;
-        } else {
-            let bonus = b2b && b2b_eligible(&mv.spin, lines);
-            let pc = sim.is_empty();
-            total_attack += attack_lines(action_for(&mv.spin, lines), bonus, combo, pc);
-            combo += 1;
-            b2b = b2b_eligible(&mv.spin, lines);
-        }
+        total_attack += score_cc2_clear(&sim, &mv.spin, lines, &mut combo, &mut b2b);
 
         // Reveal the next piece (one per move keeps our queue in sync with CC2's).
         let revealed = gen.next().unwrap();
@@ -303,18 +333,7 @@ fn run_downstack(
         };
         let placed = piece_from_letter(&mv.location.piece);
 
-        let active = queue[0];
-        if placed == active {
-            queue.pop_front();
-        } else if let Some(h) = hold {
-            assert_eq!(placed, h, "hold-swap piece mismatch (seed {seed})");
-            hold = Some(queue.pop_front().unwrap());
-        } else {
-            let to_hold = queue.pop_front().unwrap();
-            let next = queue.pop_front().unwrap();
-            assert_eq!(placed, next, "empty-hold placed piece mismatch (seed {seed})");
-            hold = Some(to_hold);
-        }
+        advance_queue_hold(&mut queue, &mut hold, placed, seed);
 
         cleared_total += sim.place_and_clear(&cc2_cells(&mv));
         pieces += 1;
@@ -399,30 +418,10 @@ fn run_versus(
                 };
                 cc2_plies += 1;
                 let placed = piece_from_letter(&mv.location.piece);
-                let active = queue[0];
-                if placed == active {
-                    queue.pop_front();
-                } else if let Some(h) = hold {
-                    assert_eq!(placed, h, "hold-swap mismatch (seed {seed})");
-                    hold = Some(queue.pop_front().unwrap());
-                } else {
-                    let to_hold = queue.pop_front().unwrap();
-                    let next = queue.pop_front().unwrap();
-                    assert_eq!(placed, next, "empty-hold mismatch (seed {seed})");
-                    hold = Some(to_hold);
-                }
+                advance_queue_hold(&mut queue, &mut hold, placed, seed);
 
                 let lines = sim.place_and_clear(&cc2_cells(&mv)) as usize;
-                let mut atk = 0u32;
-                if lines == 0 {
-                    cc2_combo = 0;
-                } else {
-                    let bonus = cc2_b2b && b2b_eligible(&mv.spin, lines);
-                    let pc = sim.is_empty();
-                    atk = attack_lines(action_for(&mv.spin, lines), bonus, cc2_combo, pc);
-                    cc2_combo += 1;
-                    cc2_b2b = b2b_eligible(&mv.spin, lines);
-                }
+                let atk = score_cc2_clear(&sim, &mv.spin, lines, &mut cc2_combo, &mut cc2_b2b);
 
                 let leftover = cc2_q.cancel(atk);
                 if leftover > 0 {
