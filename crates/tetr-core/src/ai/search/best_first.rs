@@ -32,9 +32,8 @@ use rustc_hash::FxHashMap;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
+use crate::ai::search::{score_child, PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
 use crate::ai::state::SearchState;
-use crate::engine::classify_t_spin;
 
 
 /// Nodes expanded per `plan` call before yielding (the WASM time-slice unit). The
@@ -143,8 +142,9 @@ impl BestFirstPlanner {
     }
 
     /// Generate + score every child of `parent` (one per placement), in canonical
-    /// order: `(child_state, score, acc_reward)`. Mirrors the beam's per-child scoring
-    /// (classify the T-spin pre-lock, `commit_placement`, `value + acc`).
+    /// order: `(child_state, score, acc_reward)`. Each child is built + scored by the
+    /// shared [`score_child`] (fork → classify pre-lock → `commit_placement` →
+    /// `evaluate_cols`); `acc` folds this move's reward into the path total.
     fn children(
         parent: &SearchState,
         parent_acc: Reward,
@@ -158,10 +158,7 @@ impl BestFirstPlanner {
         Self::placements(parent)
             .into_iter()
             .map(|placement| {
-                let mut child = parent.clone();
-                let t_spin = classify_t_spin(&placement.piece, &child.board);
-                let lock = child.commit_placement(&placement);
-                let (value, reward) = eval.evaluate_cols(&lock, &child.board, t_spin, ctx);
+                let (child, value, reward) = score_child(parent, &placement, eval, ctx);
                 let acc = parent_acc + reward;
                 let score = (value + acc).0;
                 (child, score, acc)

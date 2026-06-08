@@ -26,7 +26,7 @@
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
+use crate::ai::search::{commit_child, PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{BitBoard, LockOutcome, PieceType, TSpinKind};
 
@@ -145,11 +145,10 @@ impl BeamPlanner {
             b2b: state.b2b,
         };
         for placement in &roots {
-            let mut child = state.clone();
-            // Classify the T-spin against the PRE-lock board, exactly as
-            // `score_placement` does, before `commit_placement` mutates the board.
-            let t_spin = crate::engine::classify_t_spin(&placement.piece, &child.board);
-            let lock = child.commit_placement(placement);
+            // Build each root child through the shared fork → classify pre-lock →
+            // commit helper; the whole generation is scored together below in one
+            // `evaluate_batch` (so the per-child path here stops at commit, not eval).
+            let (child, lock, t_spin) = commit_child(state, placement);
             owners.push((lock, t_spin, root_ctx));
             children.push(child);
         }
@@ -222,9 +221,7 @@ impl BeamPlanner {
                 b2b: parent.state.b2b,
             };
             for placement in Self::placements(&parent.state) {
-                let mut child = parent.state.clone();
-                let t_spin = crate::engine::classify_t_spin(&placement.piece, &child.board);
-                let lock = child.commit_placement(&placement);
+                let (child, lock, t_spin) = commit_child(&parent.state, &placement);
                 owners.push((lock, t_spin, parent_ctx));
                 meta.push((parent.root_index, parent.acc_reward, child, parent.spec_weight));
             }

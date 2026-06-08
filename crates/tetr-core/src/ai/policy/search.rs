@@ -160,7 +160,7 @@ fn score_candidates(obs: &Observation, eval: &dyn Evaluator) -> Vec<PlacementPla
                 combo: obs.combo,
                 b2b: obs.b2b,
             };
-            let score = score_placement(&obs.board, &placement, eval, ctx);
+            let score = score_placement(obs, &placement, eval, ctx);
             PlacementPlan { placement, score }
         })
         .collect()

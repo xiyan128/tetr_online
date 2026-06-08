@@ -101,7 +101,7 @@ impl Planner for GreedyPlanner {
                     combo: state.combo,
                     b2b: state.b2b,
                 };
-                let score = score_placement(&state.board, &placement, eval, ctx);
+                let score = score_placement(state, &placement, eval, ctx);
                 match best {
                     Some(plan) if score <= plan.score => Some(plan),
                     _ => Some(PlacementPlan { placement, score }),

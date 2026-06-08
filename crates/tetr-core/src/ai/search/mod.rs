@@ -37,10 +37,10 @@ pub use greedy::GreedyPlanner;
 
 use smallvec::SmallVec;
 
-use crate::ai::eval::{EvalContext, Evaluator};
+use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::{Move, Placement};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, BitBoard, PieceType};
+use crate::engine::{classify_t_spin, LockOutcome, PieceType, TSpinKind};
 
 /// How much work a planner may do in one [`Planner::plan`] call.
 ///
@@ -112,27 +112,56 @@ impl PlacementPlan {
     }
 }
 
-/// Score one placement exactly as the engine's lock path would: classify the
-/// T-spin against the pre-lock `board`, lock the placement's piece into a clone,
-/// then evaluate the resulting board + lock outcome. Returns `Value + Reward` as a
-/// single `i32` (higher is better).
+/// Fork `parent`, classify the T-spin against the PRE-lock board (engine order), and
+/// commit `placement` into the clone via [`SearchState::commit_placement`] — **the** one
+/// place the per-child "fork → classify → commit" ritual lives. Returns the advanced
+/// child plus the lock's `(LockOutcome, t_spin)`, which the scoring callers feed to the
+/// evaluator (singly via [`score_child`], or batched by the beam).
 ///
-/// This is the **one** place per-placement scoring lives. Both the greedy planner
-/// ([`GreedyPlanner`]) and the imperfection sampler in `policy::search` score through it,
-/// so the two can never silently disagree on what a placement is worth (the
-/// DRY/SRP fix the SOLID review flagged).
+/// The classify-against-the-pre-lock-board-**then**-commit order is load-bearing — it
+/// mirrors the engine's own lock path (`api.rs::lock_active_piece`) — so keep it exact.
+pub(crate) fn commit_child(
+    parent: &SearchState,
+    placement: &Placement,
+) -> (SearchState, LockOutcome, Option<TSpinKind>) {
+    let mut child = parent.clone();
+    let t_spin = classify_t_spin(&placement.piece, &child.board);
+    let lock = child.commit_placement(placement);
+    (child, lock, t_spin)
+}
+
+/// Score one child placement: [`commit_child`], then evaluate the resulting board + lock
+/// in a single [`Evaluator::evaluate_cols`] call. Returns the advanced child and its
+/// `(Value, Reward)`.
+///
+/// This is the **one** place single-placement scoring lives: the greedy planner (via
+/// [`score_placement`]), the imperfection sampler in `policy::search` (likewise), and
+/// best-first's `children` all route through it, so they can never silently disagree on
+/// what a placement is worth (the DRY/SRP fix the SOLID review flagged). The beam instead
+/// builds its children with [`commit_child`] and scores a whole generation in one
+/// [`Evaluator::evaluate_batch`] — the seam the neural value net needs.
+pub(crate) fn score_child(
+    parent: &SearchState,
+    placement: &Placement,
+    eval: &dyn Evaluator,
+    ctx: EvalContext,
+) -> (SearchState, Value, Reward) {
+    let (child, lock, t_spin) = commit_child(parent, placement);
+    let (value, reward) = eval.evaluate_cols(&lock, &child.board, t_spin, ctx);
+    (child, value, reward)
+}
+
+/// Score one placement as the engine's lock path would, returning `Value + Reward` as a
+/// single `i32` (higher is better) — a thin [`score_child`] wrapper for the two callers
+/// that rank by the scalar and discard the child state: the greedy planner
+/// ([`GreedyPlanner`]) and the imperfection sampler in `policy::search`.
 pub(crate) fn score_placement(
-    board: &BitBoard,
+    parent: &SearchState,
     placement: &Placement,
     eval: &dyn Evaluator,
     ctx: EvalContext,
 ) -> i32 {
-    // Classify the T-spin against the board *before* the lock mutates it (engine
-    // order), then lock into a copy and evaluate the result.
-    let mut board = *board;
-    let t_spin = classify_t_spin(&placement.piece, &board);
-    let lock = board.lock_piece(&placement.piece);
-    let (value, reward) = eval.evaluate_cols(&lock, &board, t_spin, ctx);
+    let (_, value, reward) = score_child(parent, placement, eval, ctx);
     (value + reward).0
 }
 
@@ -142,10 +171,10 @@ pub(crate) fn score_placement(
 ///
 /// Every field is compared by value (the derived [`PartialEq`]); equality is exact, so
 /// two states match only when they are byte-for-byte the same root. The board identity
-/// is the **column bitboard** ([`BitBoard::columns`]) — a complete, allocation-free
-/// fingerprint — *not* `cell_coords()`, so building a key allocates only the two
-/// `SmallVec`s. [`Eq`]/[`Hash`] are derived too so best-first can layer a `root_index`
-/// on top and use the result as a transposition-table key.
+/// is the **column bitboard** (`columns()`) — a complete, allocation-free fingerprint —
+/// *not* `cell_coords()`, so building a key allocates only the two `SmallVec`s.
+/// [`Eq`]/[`Hash`] are derived too so best-first can layer a `root_index` on top and use
+/// the result as a transposition-table key.
 #[derive(Clone, PartialEq, Eq, Hash)]
 pub(crate) struct RootKey {
     active: PieceType,
