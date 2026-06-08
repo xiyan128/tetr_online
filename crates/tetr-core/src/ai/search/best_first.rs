@@ -126,7 +126,7 @@ struct Run {
     /// Nodes expanded so far this decision (against the node budget).
     expanded: u32,
     next_order: u64,
-    /// State identity this run was seeded from (root_index 0 placeholder), to detect a
+    /// State identity this run was seeded from (a `usize::MAX` root_index sentinel), to detect a
     /// stale in-flight run when `plan` is called for a new decision.
     fingerprint: StateKey,
 }

@@ -24,7 +24,8 @@
 //!
 //! # Weights
 //!
-//! Weights are trained in JAX and exported to **safetensors** with tensor names
+//! Weights load from **safetensors** (produced by the `distill` bin — the current
+//! asset — or the JAX trainer) with tensor names
 //! matching this module (`l1.weight`, `l1.bias`, `l2.weight`, `l2.bias`,
 //! `head.weight`, `head.bias`). [`ValueNet::from_safetensors`] parses them with
 //! the pure-Rust `safetensors` crate and constructs the [`Linear`] params
@@ -373,8 +374,8 @@ impl<B: Backend> Evaluator for BurnEvaluator<B> {
         let mut flat = Vec::with_capacity(n * NUM_FEATURES);
         for (lock, board, _, _) in inputs {
             // NN feature extraction still consumes a dense `Board`; reconstruct per row.
-            // Not the strike's hot loop (Cc2 + best-first scores via `evaluate_cols` on
-            // the bitboard) — moving extraction onto `columns()` is a clean follow-up
+            // This IS the NN evaluator's hot loop (the beam's per-generation scoring);
+            // moving extraction onto `columns()` (an `extract_from_cols` seam) is a follow-up
             // that would drop this `to_array2d`.
             let dense = board.to_array2d();
             flat.extend_from_slice(&features_to_input(&BoardFeatures::extract(&dense, lock)));

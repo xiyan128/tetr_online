@@ -116,7 +116,7 @@ impl PlacementPlan {
 /// single `i32` (higher is better).
 ///
 /// This is the **one** place per-placement scoring lives. Both the greedy planner
-/// ([`GreedyPlanner`]) and the controller's error-injection rescan score through it,
+/// ([`GreedyPlanner`]) and the imperfection sampler in `policy::search` score through it,
 /// so the two can never silently disagree on what a placement is worth (the
 /// DRY/SRP fix the SOLID review flagged).
 pub(crate) fn score_placement(

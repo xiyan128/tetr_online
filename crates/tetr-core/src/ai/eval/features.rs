@@ -16,10 +16,10 @@
 //! The algorithms are unchanged — only the cell-access primitive — so the pinned
 //! feature tests below still hold exactly.
 //!
-//! # Feature catalog (finding [1], [2])
+//! # Feature catalog
 //!
-//! [`BoardFeatures`] ships Dellacherie's canonical **six** plus the BCTS **two**, and
-//! a Tetris-well offense term:
+//! [`BoardFeatures`] ships Dellacherie's canonical **six** plus the BCTS **two**, a
+//! Tetris-well offense term, and a combo-readiness term:
 //!
 //! | feature              | meaning                                                        |
 //! |----------------------|----------------------------------------------------------------|
@@ -32,6 +32,7 @@
 //! | `hole_depth`         | BCTS: filled cells stacked directly above each hole            |
 //! | `rows_with_holes`    | BCTS: distinct rows containing ≥1 hole                          |
 //! | `tetris_well`        | rows ready to clear via an I-piece in the single lowest column |
+//! | `near_full_rows`     | rows filled to exactly width−1 (combo-readiness)               |
 //!
 //! # Coordinate conventions
 //!

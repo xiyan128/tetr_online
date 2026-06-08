@@ -11,12 +11,11 @@
 //! The board **Value** (holes, cell coveredness, tetris-well depth, height tiers,
 //! row transitions, T-slot cutouts) is ported verbatim from CC2's column-bitboard
 //! math. The per-move **Reward** (clears, spins, B2B, perfect clear, wasted-T) is
-//! ported faithfully. Three terms need search-path context our [`Evaluator`] trait
-//! does not pass, and are omitted with a note at each site:
+//! ported faithfully. `combo_attack` and `has_back_to_back` are now wired through
+//! [`EvalContext`] (the running combo / B2B chain) and applied at their sites. One
+//! term is still omitted:
 //!
-//! - `combo_attack` — needs the running combo (not in the trait, nor `SearchState`),
-//! - `softdrop` — needs the soft-drop distance of the placement,
-//! - `has_back_to_back` — a board-Value term needing the running B2B chain.
+//! - `softdrop` — needs the soft-drop distance of the placement.
 //!
 //! B2B *reward* uses the same "credit every B2B-eligible clear" approximation as
 //! [`LinearEvaluator`](super::LinearEvaluator) (the true chain lives in the search's

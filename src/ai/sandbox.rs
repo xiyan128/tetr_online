@@ -108,8 +108,9 @@ pub fn sandbox_active(sandbox: Option<Res<AiSandbox>>) -> bool {
     sandbox.is_some_and(|s| s.active())
 }
 
-/// Insert the sandbox's [`AiController`] for this session (beatable default
-/// difficulty + the default AI seed). Runs on entering a gameplay session while
+/// Insert the [`AiController`] for the model the player selected (from the
+/// `ModelRegistry`), falling back to the shipped `beatable()` default when no
+/// registry is present (headless tests). Runs on entering a gameplay session while
 /// the sandbox flag is set.
 ///
 /// Exclusive (`&mut World`) because a non-send resource cannot be inserted through

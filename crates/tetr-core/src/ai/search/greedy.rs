@@ -17,9 +17,9 @@
 //! then locks (`api.rs::lock_active_piece`). The planner does exactly the same so
 //! its scoring can never disagree with the real rules:
 //!
-//! 1. clone the board (cheap; [`Board`] is `Clone`),
+//! 1. clone the state (cheap; the board is a `Copy` `BitBoard`),
 //! 2. [`classify_t_spin`] the placement against that pre-lock board,
-//! 3. [`lock_and_clear`] the placement's piece into the clone,
+//! 3. lock the placement's piece into the clone (`BitBoard::lock_piece`),
 //! 4. [`Evaluator::evaluate`] the resulting board + lock + t-spin → `(Value, Reward)`,
 //! 5. rank by `Value + Reward`.
 //!

@@ -8,7 +8,7 @@
 //! remainder, and the Back-to-Back flag. A [`SearchState`] is built from an
 //! [`EngineSnapshot`] via [`SearchState::from_snapshot`] and advanced one
 //! placement at a time by [`SearchState::commit`], which locks the active piece
-//! through the engine's own [`lock_and_clear`] primitive so the simulated board
+//! via `BitBoard::lock_piece` (the bitboard mirror of `lock_and_clear`) so the board
 //! can never disagree with the real rules.
 //!
 //! # Bag reconstruction
@@ -185,7 +185,7 @@ impl SearchState {
 
     /// Lock the active piece at its current pose and advance to the next piece.
     ///
-    /// Locks through the engine's own [`lock_and_clear`] (so the cleared rows and
+    /// Locks via `BitBoard::lock_piece` (so the cleared rows and
     /// resulting board match the real rules exactly), then deals the next piece:
     /// the front of the revealed queue becomes the new active piece (spawned at
     /// its guideline origin), and the bag is advanced for it. When the revealed
@@ -239,7 +239,7 @@ impl SearchState {
     ///
     /// Regardless of the swap, the placement's piece is classified against the
     /// pre-lock board (engine order, matching [`Engine`](crate::engine::Engine)'s
-    /// own lock path) and locked through [`lock_and_clear`]; the Back-to-Back flag
+    /// own lock path) and locked via `BitBoard::lock_piece`; the Back-to-Back flag
     /// is then transitioned and the *next queued* piece is spawned (the only
     /// [`BagState::deal`] this method performs).
     ///
@@ -292,7 +292,7 @@ impl SearchState {
     /// T-spin (Mini or Full) or a Tetris (four lines) — and breaks it on any other
     /// clear; a placement that clears no lines preserves the chain. This mirrors the
     /// engine's Back-to-Back rule and is kept in sync with the `b2b_eligible`
-    /// categories in `eval::compute_reward` (`mod.rs:171-184`).
+    /// categories in the `b2b_eligible` arms of `eval::compute_reward`.
     fn update_b2b(&mut self, outcome: &LockOutcome, t_spin: Option<TSpinKind>) {
         let lines = outcome.cleared_rows.len();
         if lines == 0 {

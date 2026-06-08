@@ -78,7 +78,7 @@ pub enum Move {
 /// A reachable final resting pose for the active piece.
 ///
 /// Carries the landed [`ActivePiece`] (so the caller can lock it with
-/// [`lock_and_clear`](crate::engine::lock_and_clear) and classify a T-spin with
+/// the search's `BitBoard::lock_piece` and classify a T-spin with
 /// [`classify_t_spin`](crate::engine::classify_t_spin)) and the [`Move`] path that
 /// reaches it from spawn.
 #[derive(Clone, Debug)]

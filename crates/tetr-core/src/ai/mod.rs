@@ -14,7 +14,7 @@
 //! randomness the AI needs (tie-breaking, error injection) lives behind an
 //! AI-owned seeded [`StdRng`](rand::rngs::StdRng) in the [`controller`], never the
 //! engine's. The core simulates placements by reusing the engine's own board
-//! primitives ([`lock_and_clear`](crate::engine::lock_and_clear)), so it can never
+//! logic (`BitBoard` mirrors the engine's collision + lock/clear bit-for-bit), so it can never
 //! disagree with the real rules.
 //!
 //! # Layers

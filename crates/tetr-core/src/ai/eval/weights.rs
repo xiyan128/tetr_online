@@ -121,7 +121,8 @@ impl BoardWeights {
 
     /// The weights as a flat vector in [`BoardFeatures`](super::features::BoardFeatures)
     /// order, for hillclimbing: `[landing_height, eroded_piece_cells, row_transitions,
-    /// column_transitions, holes, board_wells, hole_depth, rows_with_holes]`.
+    /// column_transitions, holes, board_wells, hole_depth, rows_with_holes,
+    /// tetris_well, near_full_rows]`.
     pub fn params(&self) -> [f32; Self::PARAM_COUNT] {
         [
             self.landing_height,

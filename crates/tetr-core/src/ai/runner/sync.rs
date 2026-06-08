@@ -5,8 +5,8 @@
 //! [`poll`](super::DecisionRunner::poll) returns it. The Tier-1 greedy policy is
 //! microseconds per decision, so there is nothing to gain from threads or
 //! time-slicing yet — and a synchronous runner keeps the whole AI path trivially
-//! deterministic and unit-testable. The off-thread (`native.rs`) and
-//! cooperative-WASM (`web.rs`) runners drop in behind the same
+//! deterministic and unit-testable. A future off-thread (native worker thread) or
+//! cooperative-WASM time-slice runner would drop in behind the same
 //! [`DecisionRunner`](super::DecisionRunner) trait when a Tier-2 beam (or a heavy
 //! neural forward) makes the decision frame-expensive.
 //!
