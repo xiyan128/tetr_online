@@ -39,10 +39,7 @@ pub use goals::{
     breaks_back_to_back, fixed_goal_for_level, goal_for_level, qualifies_for_back_to_back,
     variable_goal_for_level, variable_goal_units, GoalProgress, GoalSystem,
 };
-pub use gravity::{
-    fall_duration, fall_speed_seconds, soft_drop_duration, soft_drop_speed_seconds, MAX_LEVEL,
-    MIN_LEVEL,
-};
+pub use gravity::{fall_speed_seconds, soft_drop_speed_seconds, MAX_LEVEL, MIN_LEVEL};
 pub use lock_clear::{lock_and_clear, LockOutcome};
 pub use lock_down::{
     apply_grounded_move_or_rotation, LockDownMode, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS,

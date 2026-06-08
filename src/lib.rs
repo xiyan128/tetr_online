@@ -44,9 +44,9 @@ pub mod variant;
 pub(crate) mod vfx;
 
 pub use crate::engine::{
-    apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_duration,
+    apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin,
     fall_speed_seconds, fixed_goal_for_level, goal_for_level, is_block_out, is_lock_out,
-    is_top_out, qualifies_for_back_to_back, soft_drop_duration, soft_drop_speed_seconds,
+    is_top_out, qualifies_for_back_to_back, soft_drop_speed_seconds,
     t_spin_corners, variable_goal_for_level, variable_goal_units, ActivePiece, ActivePieceSnapshot,
     Engine, EngineConfig, EngineEvent, EngineScoreAction, EngineSnapshot, GameOverStatus,
     GoalProgress, GoalSystem, InputFrame, LockDownMode, PieceAction, PieceRotation, PieceType,

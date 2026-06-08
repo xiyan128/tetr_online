@@ -19,10 +19,9 @@ frontier. `ms/piece` is only meaningful on an **unloaded machine** (no concurren
 |---|---|
 | `behavior` | **The APP/behavior suite.** Run any bot across the garbage scenarios. Start here. |
 | `metric` | Fast single-config metric (one number out) for the `/autoresearch` loop. |
-| `bench-marathon` | Marathon scoring speed (downstack throughput) for the baseline / a net. |
+| `bench-marathon` | Marathon scoring speed for the greedy baseline vs the multi-ply beam (depths 1–3). |
 | `cc2-baseline` | Cold Clear 2's APP via the **TBP referee** (needs `CC2_BIN`). |
 | `cc2-native` | CC2's **ported** evaluator head-to-head in our fair native arena. |
-| `distill` | Rust bootstrap trainer: fit the value net to the DT-20 linear eval. |
 
 ## Key env knobs (the `behavior` bin)
 

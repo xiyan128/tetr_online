@@ -2,10 +2,7 @@
 //!
 //! Implements the guideline fall-speed curve as seconds-per-row, with soft drop
 //! fixed at 20x normal speed. Levels outside [`MIN_LEVEL`]..=[`MAX_LEVEL`] are
-//! clamped. Both the raw `f32` seconds and ready-to-use [`Duration`]s are
-//! exposed so the timing layer can pick whichever it needs.
-
-use std::time::Duration;
+//! clamped.
 
 pub const MIN_LEVEL: u8 = 1;
 pub const MAX_LEVEL: u8 = 15;
@@ -17,14 +14,6 @@ pub fn fall_speed_seconds(level: u8) -> f32 {
 
 pub fn soft_drop_speed_seconds(level: u8) -> f32 {
     fall_speed_seconds(level) / 20.0
-}
-
-pub fn fall_duration(level: u8) -> Duration {
-    Duration::from_secs_f32(fall_speed_seconds(level))
-}
-
-pub fn soft_drop_duration(level: u8) -> Duration {
-    Duration::from_secs_f32(soft_drop_speed_seconds(level))
 }
 
 #[cfg(test)]
