@@ -1,24 +1,24 @@
 //! Headless **marathon scoring-speed** evaluation for the Tetris bot.
 //!
-//! Bevy-free: depends only on `tetr-core` (engine + AI seam) and `tetr-nn` (the
-//! neural value net), so it compiles and runs fast enough for an iterative
-//! hill-climb loop. The metric is **score per simulated second** in Marathon mode
+//! Bevy-free: depends only on `tetr-core` (engine + AI seam), so it compiles and
+//! runs fast enough for an iterative hill-climb loop. The metric is **score per
+//! simulated second** in Marathon mode
 //! (`GoalSystem::Variable`, end at `MAX_LEVEL`), measured at `Handicap::perfect()`
 //! so it reflects *policy quality*, not the in-game reaction handicap.
 //!
 //! Determinism: a game is a pure function of `(bot factory, seed)` — the engine's
-//! 7-bag and the policy RNG are both seeded, and the CPU (ndarray) NN backend is
-//! deterministic. Re-running an evaluation reproduces every number.
+//! 7-bag and the policy RNG are both seeded. Re-running an evaluation reproduces
+//! every number.
 
 use std::time::Duration;
 
 use std::collections::VecDeque;
 
 use tetr_core::ai::eval::{
-    Cc2Evaluator, Cc2Weights, Evaluator, LinearEvaluator, RewardWeights, Weights,
+    Cc2Evaluator, Cc2Weights, Evaluator, LinearEvaluator, Weights,
 };
 use tetr_core::ai::{
-    AiController, BeamPlanner, BestFirstPlanner, GreedyPlanner, Handicap, Policy, SearchBudget,
+    AiController, BeamPlanner, BestFirstPlanner, Handicap, Policy, SearchBudget,
     SearchPolicy,
 };
 use tetr_core::engine::{
@@ -26,7 +26,6 @@ use tetr_core::engine::{
     PieceType, MAX_LEVEL,
 };
 use tetr_core::player::{drive_engine, PlayerController};
-use tetr_nn::{BurnEvaluator, Cpu, ValueNetConfig};
 
 /// TBP client for baselining Cold Clear 2 as a subprocess. See [`cc2`].
 pub mod cc2;
@@ -871,60 +870,6 @@ pub fn beam_cc2_weights_bot(
     weights: Cc2Weights,
 ) -> Box<dyn PlayerController> {
     beam_bot(seed, beam_width, max_depth, Box::new(Cc2Evaluator::new(weights)))
-}
-
-/// The neural bot: greedy search over the tetr-nn value net (CPU backend),
-/// reusing the SURVIVAL reward profile so it differs from the baseline *only* in
-/// the learned board Value. No imperfection / reaction delay — measures policy
-/// quality. Panics if the weights blob fails to parse.
-pub fn nn_bot(model_bytes: &[u8], seed: u64) -> Box<dyn PlayerController> {
-    let device = Default::default();
-    let eval = BurnEvaluator::<Cpu>::from_safetensors(
-        model_bytes,
-        &ValueNetConfig::default(),
-        device,
-        RewardWeights::SURVIVAL,
-    )
-    .expect("failed to load tetr-nn value net from safetensors");
-
-    let policy = SearchPolicy::new(
-        Box::new(GreedyPlanner::new()),
-        Box::new(eval),
-        SearchBudget::greedy(),
-        0.0, // no imperfection — measure policy quality
-        seed,
-    );
-    Box::new(AiController::with_policy(
-        Box::new(policy) as Box<dyn Policy>,
-        Duration::ZERO,
-    ))
-}
-
-/// The Tier-3 contender: a deterministic [`BeamPlanner`] over the **tetr-nn value
-/// net** (CPU backend, SURVIVAL reward). This is the full stack — multi-ply beam
-/// search with a learned static board Value — and the head of the 3-way bench.
-///
-/// The beam batches every generation's children through `Evaluator::evaluate_batch`,
-/// which [`BurnEvaluator`] overrides to run **one** forward pass per generation, so
-/// the NN is a pure backend swap: identical planner, only the evaluator changes from
-/// [`beam_linear_bot`]'s `LinearEvaluator` to the net. `beam_width` truncates each
-/// generation; `max_depth` sets the lookahead plies. No imperfection / reaction
-/// delay — measures policy quality. Panics if the weights blob fails to parse.
-pub fn beam_nn_bot(
-    model_bytes: &[u8],
-    seed: u64,
-    beam_width: usize,
-    max_depth: u8,
-) -> Box<dyn PlayerController> {
-    let eval = BurnEvaluator::<Cpu>::from_safetensors(
-        model_bytes,
-        &ValueNetConfig::default(),
-        Default::default(),
-        RewardWeights::SURVIVAL,
-    )
-    .expect("failed to load tetr-nn value net from safetensors");
-
-    beam_bot(seed, beam_width, max_depth, Box::new(eval))
 }
 
 #[cfg(test)]

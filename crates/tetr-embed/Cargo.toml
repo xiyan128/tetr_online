@@ -14,16 +14,6 @@ tetr-core = { path = "../tetr-core" }
 # Pinned to the installed wasm-bindgen CLI (0.2.118) — the runtime crate and the CLI
 # must match exactly. Already at 0.2.118 in the workspace lockfile.
 wasm-bindgen = "0.2.118"
-# Optional neural value-net policy. OFF by default so the shipped wasm stays lean
-# (default build = the linear bot). `--features nn` swaps the embedded AI to the
-# tetr-nn value net (CPU/ndarray — deterministic + wasm-safe; in-browser WebGPU is
-# intentionally NOT used, see tetr-nn docs). Requires a trained
-# `crates/tetr-nn/assets/value_net.safetensors` (produce with the distiller).
-tetr-nn = { path = "../tetr-nn", optional = true }
-
-[features]
-# Use the neural value net for the embedded AI instead of the linear evaluator.
-nn = ["dep:tetr-nn"]
 
 # wasm-only deps: the panic hook for readable browser stacks, and the getrandom
 # `wasm_js` backend. The engine/AI only ever *seed* their RNG (no entropy draw), but

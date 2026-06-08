@@ -109,31 +109,10 @@ fn event_tag(e: &EngineEvent) -> Option<u8> {
     }
 }
 
-/// Build the AI controller for a fresh game.
-///
-/// With the `nn` feature, the embedded AI is driven by the `tetr-nn` neural value
-/// net (CPU backend) loaded from the weights baked into the wasm — falling back to
-/// the linear bot if those weights fail to parse. Without it, the linear bot. The
-/// handicap (reaction delay + imperfection) is honored either way, so swapping the
-/// policy never changes the embed's "click to take over" / beatability contract.
+/// Build the AI controller for a fresh game — the linear DT-20 bot at the given
+/// handicap (reaction delay + imperfection), which defines the embed's "click to
+/// take over" / beatability contract.
 fn make_ai(handicap: Handicap, seed: u32) -> AiController {
-    #[cfg(feature = "nn")]
-    {
-        const MODEL: &[u8] = include_bytes!(concat!(
-            env!("CARGO_MANIFEST_DIR"),
-            "/../tetr-nn/assets/value_net.safetensors"
-        ));
-        if let Ok(ai) = tetr_nn::nn_ai_controller(
-            MODEL,
-            tetr_core::ai::eval::RewardWeights::SURVIVAL,
-            handicap.reaction,
-            handicap.imperfection,
-            ai_seed(seed),
-        ) {
-            return ai;
-        }
-        // Weights failed to parse — degrade to the linear bot rather than abort.
-    }
     AiController::new(handicap, ai_seed(seed))
 }
 

@@ -10,11 +10,6 @@ publish = false
 
 [dependencies]
 tetr-core = { path = "../tetr-core" }
-# Default (ndarray/CPU) backend — deterministic, matches the in-browser path.
-tetr-nn = { path = "../tetr-nn" }
-# Direct Burn dep with autodiff for the bootstrap distiller. NATIVE-ONLY: the
-# wasm game build never pulls tetr-research, so autodiff stays off the size budget.
-burn = { version = "0.21", default-features = false, features = ["ndarray", "std", "autodiff"] }
 rand = "0.10"
 # TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON).
 serde = { version = "1", features = ["derive"] }
@@ -51,9 +46,3 @@ path = "src/bin/cc2_baseline.rs"
 [[bin]]
 name = "cc2-native"
 path = "src/bin/cc2_native.rs"
-
-# Bootstrap distiller: train the value net to match the DT-20 linear evaluator and
-# export safetensors. Run: cargo run --release -p tetr-research --bin distill
-[[bin]]
-name = "distill"
-path = "src/bin/distill.rs"

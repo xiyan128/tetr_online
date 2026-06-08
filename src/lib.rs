@@ -130,9 +130,9 @@ impl Plugin for GamePlugin {
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
-            // The Watch-AI model registry (always has the linear model; the `nn`
-            // feature adds the tetr-nn value net). Read by the model-select screen
-            // and the sandbox.
+            // The Watch-AI model registry (linear DT-20 + ported CC2 models on
+            // greedy / beam / best-first). Read by the model-select screen and the
+            // sandbox.
             .init_resource::<crate::ai::ModelRegistry>()
             // Runtime visual-FX toggles (all-on; the dev panel flips them live).
             .init_resource::<crate::vfx::VfxToggles>()

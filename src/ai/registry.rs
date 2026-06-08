@@ -1,16 +1,16 @@
 //! The AI model registry: the catalog of "brains" the Watch-AI sandbox can run.
 //!
 //! Each [`ModelEntry`] names a bot and knows how to build a fresh [`AiController`]
-//! for it. The shipped catalog always includes the linear DT-20 evaluator; with
-//! the `nn` cargo feature it also includes the tetr-nn neural value net (weights
-//! baked into the binary). **Adding a model is one entry in [`ModelRegistry::default`].**
+//! for it. The shipped catalog spans the linear DT-20 evaluator and the ported
+//! Cold Clear 2 attack evaluator, on greedy / beam / best-first search.
+//! **Adding a model is one entry in [`ModelRegistry::default`].**
 //!
 //! The picker screen ([`crate::screens`]) renders [`labels`](ModelRegistry::labels)
 //! and writes the selection; the sandbox ([`crate::ai::sandbox`]) builds
 //! [`selected_controller`](ModelRegistry::selected_controller) when a Watch-AI
 //! session starts. Difficulty is the shared `beatable()` handicap for every entry —
 //! only the *model* (the planner + board evaluator) differs, so picks compare
-//! like-for-like: greedy vs beam, linear eval vs neural value net.
+//! like-for-like: greedy vs beam, linear eval vs ported CC2 eval.
 
 use bevy::prelude::*;
 
@@ -181,56 +181,6 @@ impl Default for ModelRegistry {
                 DEFAULT_AI_SEED,
             );
             AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
-        }));
-
-        // With the `nn` feature: the tetr-nn neural value net (CPU backend), weights
-        // baked in via `include_bytes!`. Degrades to the linear bot if the blob
-        // fails to parse, so a stale/missing model never aborts the game.
-        #[cfg(feature = "nn")]
-        entries.push(ModelEntry::new("Value Net v1 (distilled)", || {
-            const MODEL: &[u8] = include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/crates/tetr-nn/assets/value_net.safetensors"
-            ));
-            let h = Handicap::default();
-            tetr_nn::nn_ai_controller(
-                MODEL,
-                tetr_core::ai::eval::RewardWeights::SURVIVAL,
-                h.reaction,
-                h.imperfection,
-                DEFAULT_AI_SEED,
-            )
-            .unwrap_or_else(|_| AiController::beatable())
-        }));
-
-        // Tier-2 beam over the neural value net — the strongest combination once the
-        // net is trained past parity. Falls back to the greedy linear bot if the
-        // baked-in weights fail to parse.
-        #[cfg(feature = "nn")]
-        entries.push(ModelEntry::new("Beam + Value Net (Tier-2)", || {
-            const MODEL: &[u8] = include_bytes!(concat!(
-                env!("CARGO_MANIFEST_DIR"),
-                "/crates/tetr-nn/assets/value_net.safetensors"
-            ));
-            let h = Handicap::default();
-            match tetr_nn::BurnEvaluator::<tetr_nn::Cpu>::from_safetensors(
-                MODEL,
-                &tetr_nn::ValueNetConfig::default(),
-                Default::default(),
-                tetr_core::ai::eval::RewardWeights::SURVIVAL,
-            ) {
-                Ok(eval) => {
-                    let policy = SearchPolicy::new(
-                        Box::new(BeamPlanner::new(BEAM_WIDTH)),
-                        Box::new(eval),
-                        SearchBudget::beam(BEAM_DEPTH),
-                        h.imperfection,
-                        DEFAULT_AI_SEED,
-                    );
-                    AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
-                }
-                Err(_) => AiController::beatable(),
-            }
         }));
 
         Self {

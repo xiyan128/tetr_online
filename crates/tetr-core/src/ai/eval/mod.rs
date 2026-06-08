@@ -217,9 +217,9 @@ impl Evaluator for LinearEvaluator {
 
 /// The per-move [`Reward`] for a placement under the given [`RewardWeights`].
 ///
-/// Shared by [`LinearEvaluator`] and any external evaluator (e.g. a neural value
-/// net in the `tetr-nn` crate) that wants the same principled clear / spin /
-/// Back-to-Back payoff while supplying its own board [`Value`]. This is the seam
+/// Shared by [`LinearEvaluator`] and any external evaluator (e.g. a learned value
+/// net) that wants the same principled clear / spin / Back-to-Back payoff while
+/// supplying its own board [`Value`]. This is the seam
 /// that lets a learned evaluator replace *only* the static board score and keep
 /// the engine-faithful reward math. See [`LinearEvaluator::reward`] for the
 /// Back-to-Back modeling note.
