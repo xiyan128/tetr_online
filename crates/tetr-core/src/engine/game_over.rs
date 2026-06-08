@@ -16,8 +16,7 @@ pub fn is_block_out(piece: &Piece, board: &Board, spawn_origin: (isize, isize)) 
 
 pub fn is_lock_out(piece: &Piece, origin: (isize, isize), visible_height: usize) -> bool {
     piece
-        .board()
-        .cell_coords()
+        .cells()
         .into_iter()
         .all(|(_, y)| y + origin.1 >= visible_height as isize)
 }

@@ -172,29 +172,6 @@ impl LinearEvaluator {
     pub fn weights(&self) -> &Weights {
         &self.weights
     }
-
-    /// The per-move [`Reward`] for a placement: the weighted line-clear / spin /
-    /// Back-to-Back payoff.
-    ///
-    /// Classifies the placement into exactly one clear category from `lock` +
-    /// `t_spin`, weights it, then adds the B2B bonus and the perfect-clear bonus.
-    ///
-    /// **Two B2B paths:** the *abstract* `b2b_clear` bonus is applied to every
-    /// B2B-*eligible* clear (a Tetris or full/mini T-spin line clear), rewarding
-    /// placements that *can* sustain a chain regardless of history. The *attack* term
-    /// (`w.attack`), by contrast, uses `ctx.b2b` for the precise "only when the
-    /// previous clear was also B2B" continuation rule — that's why the chain context
-    /// now flows in. With `w.attack == 0.0` (the shipped default) only the abstract
-    /// path is active, matching the prior chain-agnostic behavior exactly.
-    fn reward(
-        &self,
-        lock: &LockOutcome,
-        board: &Board,
-        t_spin: Option<TSpinKind>,
-        ctx: EvalContext,
-    ) -> Reward {
-        compute_reward(&self.weights.reward, lock, board, t_spin, ctx)
-    }
 }
 
 impl Evaluator for LinearEvaluator {
@@ -211,7 +188,7 @@ impl Evaluator for LinearEvaluator {
     ) -> (Value, Reward) {
         let features = BoardFeatures::extract(board, lock);
         let value = Value(self.weights.board.dot(&features));
-        (value, self.reward(lock, board, t_spin, ctx))
+        (value, compute_reward(&self.weights.reward, lock, board, t_spin, ctx))
     }
 }
 
@@ -219,10 +196,20 @@ impl Evaluator for LinearEvaluator {
 ///
 /// Shared by [`LinearEvaluator`] and any external evaluator (e.g. a learned value
 /// net) that wants the same principled clear / spin / Back-to-Back payoff while
-/// supplying its own board [`Value`]. This is the seam
-/// that lets a learned evaluator replace *only* the static board score and keep
-/// the engine-faithful reward math. See [`LinearEvaluator::reward`] for the
-/// Back-to-Back modeling note.
+/// supplying its own board [`Value`]. This is the seam that lets a learned
+/// evaluator replace *only* the static board score and keep the engine-faithful
+/// reward math.
+///
+/// Classifies the placement into exactly one clear category from `lock` + `t_spin`,
+/// weights it, then adds the B2B bonus and the perfect-clear bonus.
+///
+/// **Two B2B paths:** the *abstract* `b2b_clear` bonus is applied to every
+/// B2B-*eligible* clear (a Tetris or full/mini T-spin line clear), rewarding
+/// placements that *can* sustain a chain regardless of history. The *attack* term
+/// (`w.attack`), by contrast, uses `ctx.b2b` for the precise "only when the
+/// previous clear was also B2B" continuation rule — that's why the chain context
+/// now flows in. With `w.attack == 0.0` (the shipped default) only the abstract
+/// path is active, matching the prior chain-agnostic behavior exactly.
 pub fn compute_reward(
     weights: &RewardWeights,
     lock: &LockOutcome,
@@ -249,7 +236,7 @@ pub fn compute_reward(
         (None, _) => (0.0, false), // no lines cleared
     };
 
-    let perfect = lines > 0 && is_perfect_clear(board);
+    let perfect = lines > 0 && board.is_empty();
 
     let mut total = base;
     if b2b_eligible {
@@ -272,13 +259,6 @@ pub fn compute_reward(
     }
 
     Reward(total.round() as i32)
-}
-
-/// Whether the board is completely empty (a perfect clear). Uses [`Board::is_empty`],
-/// which short-circuits on the first filled cell and allocates nothing — unlike
-/// `cells()`, which builds a `Vec` of every occupied cell — on the reward hot path.
-fn is_perfect_clear(board: &Board) -> bool {
-    board.is_empty()
 }
 
 #[cfg(test)]

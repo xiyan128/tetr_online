@@ -87,10 +87,6 @@ impl ActivePiece {
         self.landed
     }
 
-    pub fn lowest_y_reached(&self) -> isize {
-        self.lowest_y_reached
-    }
-
     pub fn grounded_move_rotate_count_since_lowest(&self) -> u8 {
         self.grounded_move_rotate_count_since_lowest
     }
@@ -209,7 +205,6 @@ mod tests {
         assert_eq!(active.piece_type(), PieceType::T);
         assert_eq!(active.rotation(), PieceRotation::R0);
         assert_eq!(active.origin(), (3, 19));
-        assert_eq!(active.lowest_y_reached(), 19);
         assert_eq!(active.last_successful_action(), PieceAction::Spawn);
         assert_eq!(active.last_rotation_direction(), None);
         assert_eq!(active.last_rotation_kick_number(), None);
@@ -227,7 +222,6 @@ mod tests {
 
         active.move_to((3, 18), PieceAction::Fall);
 
-        assert_eq!(active.lowest_y_reached(), 18);
         assert_eq!(active.grounded_move_rotate_count_since_lowest(), 0);
         assert_eq!(active.last_successful_action(), PieceAction::Fall);
     }
