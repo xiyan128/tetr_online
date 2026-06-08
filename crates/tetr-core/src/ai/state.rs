@@ -249,6 +249,48 @@ impl SearchState {
     /// [`commit`]: SearchState::commit
     /// [`commit_with_next`]: SearchState::commit_with_next
     pub fn commit_placement(&mut self, placement: &Placement) -> LockOutcome {
+        let outcome = self.apply_placement(placement);
+        if let Some(next) = self.deal_from_queue() {
+            self.spawn(next); // the ONLY deal — next ply's active
+        }
+        outcome
+    }
+
+    /// Like [`commit_placement`], but deals `next` as the new active piece instead of
+    /// pulling from the revealed queue — the **hold-aware** analogue of
+    /// [`commit_with_next`] (which locks `self.active` and cannot model a swap).
+    ///
+    /// This is the speculative-lookahead transition past the visible queue: it performs
+    /// the same `used_hold` swap (including the empty-hold queue-funding rule) and the
+    /// same pre-lock T-spin classify as [`commit_placement`] — they share
+    /// [`apply_placement`](Self::apply_placement) — then spawns the supplied speculative
+    /// `next` rather than the (exhausted) queue front. In the beam's speculation the
+    /// queue is already empty *and* movegen only offers `used_hold` when hold is
+    /// occupied, so the empty-hold funding pop never fires; sharing the transition keeps
+    /// the swap rule in one place instead of re-open-coded at the call site.
+    ///
+    /// Returns the [`LockOutcome`] from the lock for the evaluator's reward half.
+    ///
+    /// [`commit_placement`]: SearchState::commit_placement
+    /// [`commit_with_next`]: SearchState::commit_with_next
+    pub fn commit_placement_with_next(
+        &mut self,
+        placement: &Placement,
+        next: crate::engine::PieceType,
+    ) -> LockOutcome {
+        let outcome = self.apply_placement(placement);
+        self.spawn(next); // the ONLY deal — the speculative next ply's active
+        outcome
+    }
+
+    /// The hold-aware lock shared by [`commit_placement`](Self::commit_placement) and
+    /// [`commit_placement_with_next`](Self::commit_placement_with_next): honour a
+    /// `used_hold` swap (funding an empty hold from the queue front — the engine's
+    /// empty-hold rule), classify the T-spin against the PRE-lock board (engine order),
+    /// lock `placement.piece`, then transition the Back-to-Back and combo chains. Does
+    /// **not** deal the next active piece — the caller supplies it (from the queue, or
+    /// speculatively).
+    fn apply_placement(&mut self, placement: &Placement) -> LockOutcome {
         if placement.used_hold {
             let displaced = self.active.piece_type();
             if self.hold.is_none() {
@@ -267,9 +309,6 @@ impl SearchState {
         let outcome = self.board.lock_piece(&placement.piece);
         self.update_b2b(&outcome, t_spin);
         self.update_combo(&outcome);
-        if let Some(next) = self.deal_from_queue() {
-            self.spawn(next); // the ONLY deal — next ply's active
-        }
         outcome
     }
 

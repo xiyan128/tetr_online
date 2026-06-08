@@ -329,19 +329,13 @@ impl BeamPlanner {
                 // Classify against the pre-lock board, like the concrete path.
                 let t_spin =
                     crate::engine::classify_t_spin(&placement.piece, &child.board);
-                // Mirror `commit_placement`'s hold swap, but supply the speculative
-                // next piece explicitly (the queue is empty, so `commit_placement`
-                // could not advance the active). An empty-queue node only offers
-                // `used_hold` placements when hold is occupied (movegen's
-                // `hold.or(queue_front)`), so no queue-funding pop is ever needed.
-                if placement.used_hold {
-                    let displaced = child.active.piece_type();
-                    child.hold = Some(displaced);
-                }
-                child.active = placement.piece.clone();
-                // `commit_with_next` locks `self.active` (now the placement's resting
-                // piece) and deals `next_piece` as the new active.
-                let lock = child.commit_with_next(next_piece);
+                // The hold-aware speculative transition: the same `used_hold` swap as
+                // the concrete path, but dealing `next_piece` (the visible queue is
+                // exhausted at a speculative node) as the new active rather than the
+                // queue front. An empty-queue node only offers `used_hold` placements
+                // when hold is occupied (movegen's `hold.or(queue_front)`), so the
+                // shared transition's empty-hold funding pop never fires here.
+                let lock = child.commit_placement_with_next(placement, next_piece);
                 owners.push((lock, t_spin, parent_ctx));
                 meta.push((parent.root_index, parent.acc_reward, child, child_weight));
             }
