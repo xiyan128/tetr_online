@@ -32,9 +32,6 @@ use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{BitBoard, LockOutcome, PieceType, TSpinKind};
 
-/// A sane default beam width — wide enough to keep several survivable lines alive
-/// per ply without the per-generation fan-out exploding.
-const DEFAULT_BEAM_WIDTH: usize = 16;
 
 /// Multiplicative pessimism applied to a speculative branch's *reward* contribution
 /// per speculative ply (BEAM.md §5): we cannot rely on a piece we have not seen, so
@@ -384,12 +381,6 @@ impl BeamPlanner {
             placement: run.roots[best_i].clone(),
             score: best_score,
         })
-    }
-}
-
-impl Default for BeamPlanner {
-    fn default() -> Self {
-        Self::new(DEFAULT_BEAM_WIDTH)
     }
 }
 

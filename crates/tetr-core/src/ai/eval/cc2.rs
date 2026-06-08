@@ -136,10 +136,6 @@ impl Cc2Evaluator {
         Self { weights }
     }
 
-    pub fn weights(&self) -> &Cc2Weights {
-        &self.weights
-    }
-
     /// CC2's board-Value terms over the column bitboard (post-clear board).
     fn board_value(&self, cols: &[u64]) -> f32 {
         let w = &self.weights;

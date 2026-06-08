@@ -37,10 +37,6 @@ use crate::ai::search::{PlacementPlan, Planner, PlannerStep, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{classify_t_spin, PieceType};
 
-/// Default total node-expansion budget per decision (across `plan` calls). Roughly an
-/// order of magnitude more reachable positions than a width-16 depth-6 beam, spent
-/// best-first rather than uniformly.
-pub const DEFAULT_NODE_BUDGET: u32 = 4000;
 
 /// Nodes expanded per `plan` call before yielding (the WASM time-slice unit). The
 /// blocking [`SearchPolicy::plan_best`](crate::ai::SearchPolicy) loops until `Done`.
@@ -268,12 +264,6 @@ impl BestFirstPlanner {
             placement: run.roots[best_i].clone(),
             score: best_score,
         })
-    }
-}
-
-impl Default for BestFirstPlanner {
-    fn default() -> Self {
-        Self::new(DEFAULT_NODE_BUDGET)
     }
 }
 
