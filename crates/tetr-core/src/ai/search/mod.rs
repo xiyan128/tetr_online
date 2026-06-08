@@ -38,7 +38,7 @@ pub use greedy::GreedyPlanner;
 use smallvec::SmallVec;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
-use crate::ai::movegen::{Move, Placement};
+use crate::ai::movegen::{generate_with_hold, spawn_piece, Move, Placement};
 use crate::ai::state::SearchState;
 use crate::engine::{classify_t_spin, LockOutcome, PieceType, TSpinKind};
 
@@ -163,6 +163,40 @@ pub(crate) fn score_placement(
 ) -> i32 {
     let (_, value, reward) = score_child(parent, placement, eval, ctx);
     (value + reward).0
+}
+
+/// Hold-aware enumeration of `state`'s active-piece placements in canonical movegen
+/// order — the single seam the greedy, beam, and best-first planners share. The
+/// movegen BFS re-derives reachable poses, so a hold swap only needs an on-board
+/// spawn, which the board's own `(width, height)` always provides.
+pub(crate) fn hold_placements(state: &SearchState) -> Vec<Placement> {
+    let (w, h) = (state.board.width(), state.board.height());
+    generate_with_hold(
+        &state.board,
+        &state.active,
+        state.hold,
+        state.queue.first().copied(),
+        move |pt| spawn_piece(pt, w, h),
+    )
+}
+
+/// The final decision shared by both multi-ply planners: the ply-1 placement whose
+/// backed-up score is maximal, with the **first** maximum winning (`>` scan over
+/// `root_best` in canonical order) so the result is deterministic (BEAM.md §4).
+/// `roots` and `root_best` are index-aligned (root `i`'s best back-up is `root_best[i]`).
+pub(crate) fn best_root_plan(roots: &[Placement], root_best: &[i32]) -> Option<PlacementPlan> {
+    let mut best_i = 0usize;
+    let mut best_score = root_best[0];
+    for (i, &score) in root_best.iter().enumerate().skip(1) {
+        if score > best_score {
+            best_score = score;
+            best_i = i;
+        }
+    }
+    Some(PlacementPlan {
+        placement: roots[best_i].clone(),
+        score: best_score,
+    })
 }
 
 /// The cheap, exact identity of a search-**root** state — the shared core of the

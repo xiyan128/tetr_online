@@ -31,8 +31,10 @@ use std::collections::BinaryHeap;
 use rustc_hash::FxHashMap;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
-use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{score_child, PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
+use crate::ai::movegen::Placement;
+use crate::ai::search::{
+    best_root_plan, hold_placements, score_child, Planner, PlannerStep, RootKey, SearchBudget,
+};
 use crate::ai::state::SearchState;
 
 
@@ -128,19 +130,6 @@ impl BestFirstPlanner {
         }
     }
 
-    /// Hold-aware placements of `state`'s active piece, canonical movegen order (the
-    /// same seam the beam and greedy planners use).
-    fn placements(state: &SearchState) -> Vec<Placement> {
-        let (w, h) = (state.board.width(), state.board.height());
-        movegen::generate_with_hold(
-            &state.board,
-            &state.active,
-            state.hold,
-            state.queue.first().copied(),
-            move |pt| movegen::spawn_piece(pt, w, h),
-        )
-    }
-
     /// Generate + score every child of `parent` (one per placement), in canonical
     /// order: `(child_state, score, acc_reward)`. Each child is built + scored by the
     /// shared [`score_child`] (fork → classify pre-lock → `commit_placement` →
@@ -155,7 +144,7 @@ impl BestFirstPlanner {
             combo: parent.combo,
             b2b: parent.b2b,
         };
-        Self::placements(parent)
+        hold_placements(parent)
             .into_iter()
             .map(|placement| {
                 let (child, value, reward) = score_child(parent, &placement, eval, ctx);
@@ -192,7 +181,7 @@ impl BestFirstPlanner {
     /// Seed the run: the ply-1 root placements become the depth-1 frontier, each its own
     /// `root_index`. `None` if the state has no legal placement (topped out).
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator) -> Option<Run> {
-        let roots = Self::placements(state);
+        let roots = hold_placements(state);
         if roots.is_empty() {
             return None;
         }
@@ -234,21 +223,6 @@ impl BestFirstPlanner {
         }
     }
 
-    /// The decision: the ply-1 root with the maximal backed-up score (first max wins).
-    fn best_plan(run: &Run) -> Option<PlacementPlan> {
-        let mut best_i = 0usize;
-        let mut best_score = run.root_best[0];
-        for (i, &score) in run.root_best.iter().enumerate().skip(1) {
-            if score > best_score {
-                best_score = score;
-                best_i = i;
-            }
-        }
-        Some(PlacementPlan {
-            placement: run.roots[best_i].clone(),
-            score: best_score,
-        })
-    }
 }
 
 impl Planner for BestFirstPlanner {
@@ -276,7 +250,7 @@ impl Planner for BestFirstPlanner {
         self.expand_chunk(&mut run, eval, budget.max_depth);
 
         if run.expanded >= self.node_budget || run.frontier.is_empty() {
-            let plan = Self::best_plan(&run);
+            let plan = best_root_plan(&run.roots, &run.root_best);
             self.run = None;
             PlannerStep::Done(plan)
         } else {
@@ -290,7 +264,7 @@ impl Planner for BestFirstPlanner {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::ai::search::GreedyPlanner;
+    use crate::ai::search::{GreedyPlanner, PlacementPlan};
     use crate::engine::{Engine, EngineConfig, InputFrame};
 
     /// Drive a planner to a single `Done` plan (mirrors `SearchPolicy::plan_best`).

@@ -25,8 +25,10 @@
 //! best ply-1 placement. [`SearchPolicy::plan_best`] already drives that loop.
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
-use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{commit_child, PlacementPlan, Planner, PlannerStep, RootKey, SearchBudget};
+use crate::ai::movegen::Placement;
+use crate::ai::search::{
+    best_root_plan, commit_child, hold_placements, Planner, PlannerStep, RootKey, SearchBudget,
+};
 use crate::ai::state::SearchState;
 use crate::engine::{BitBoard, LockOutcome, PieceType, TSpinKind};
 
@@ -104,31 +106,11 @@ impl BeamPlanner {
         self
     }
 
-    /// Geometry a freshly swapped-in / speculative piece spawns against. The movegen
-    /// BFS re-derives reachable poses from the start, so the board's own dimensions
-    /// always give an on-board start (mirrors `greedy.rs::board_geometry`).
-    fn geometry(state: &SearchState) -> (usize, usize) {
-        (state.board.width(), state.board.height())
-    }
-
-    /// Enumerate the hold-aware placements of `state`'s active piece in canonical
-    /// movegen order (the same seam greedy uses).
-    fn placements(state: &SearchState) -> Vec<Placement> {
-        let (w, h) = Self::geometry(state);
-        movegen::generate_with_hold(
-            &state.board,
-            &state.active,
-            state.hold,
-            state.queue.first().copied(),
-            move |pt| movegen::spawn_piece(pt, w, h),
-        )
-    }
-
     /// Seed the run: expand depth 1 (the root frontier), score it as one batch, and
     /// build the initial frontier. Returns the seeded [`BeamRun`], or `None` when the
     /// state has no legal placement (topped out).
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator) -> Option<BeamRun> {
-        let roots = Self::placements(state);
+        let roots = hold_placements(state);
         if roots.is_empty() {
             return None;
         }
@@ -220,7 +202,7 @@ impl BeamPlanner {
                 combo: parent.state.combo,
                 b2b: parent.state.b2b,
             };
-            for placement in Self::placements(&parent.state) {
+            for placement in hold_placements(&parent.state) {
                 let (child, lock, t_spin) = commit_child(&parent.state, &placement);
                 owners.push((lock, t_spin, parent_ctx));
                 meta.push((parent.root_index, parent.acc_reward, child, parent.spec_weight));
@@ -275,7 +257,7 @@ impl BeamPlanner {
         owners: &mut Vec<(LockOutcome, Option<TSpinKind>, EvalContext)>,
         meta: &mut Vec<(usize, Reward, SearchState, f32)>,
     ) {
-        let placements = Self::placements(&parent.state);
+        let placements = hold_placements(&parent.state);
         let child_weight = parent.spec_weight * SPEC_DECAY;
         let parent_ctx = EvalContext {
             combo: parent.state.combo,
@@ -320,23 +302,6 @@ impl BeamPlanner {
         eval.evaluate_batch(&inputs)
     }
 
-    /// The final decision: the ply-1 placement whose back-up score is maximal, with
-    /// the **first** maximum winning (`>` scan over `root_best` in canonical order)
-    /// so the result is deterministic (BEAM.md §4).
-    fn best_plan(run: &BeamRun) -> Option<PlacementPlan> {
-        let mut best_i = 0usize;
-        let mut best_score = run.root_best[0];
-        for (i, &score) in run.root_best.iter().enumerate().skip(1) {
-            if score > best_score {
-                best_score = score;
-                best_i = i;
-            }
-        }
-        Some(PlacementPlan {
-            placement: run.roots[best_i].clone(),
-            score: best_score,
-        })
-    }
 }
 
 impl Planner for BeamPlanner {
@@ -376,7 +341,7 @@ impl Planner for BeamPlanner {
         // score each ply-1 root ever achieved, so the decision is correct even if a
         // root's descendants were all pruned (BEAM.md §4).
         if run.depth >= budget.max_depth || run.frontier.is_empty() {
-            let plan = Self::best_plan(&run);
+            let plan = best_root_plan(&run.roots, &run.root_best);
             self.run = None; // decision complete: the next call re-seeds
             PlannerStep::Done(plan)
         } else {
@@ -395,6 +360,8 @@ fn sort_desc_by_score(nodes: &mut [BeamNode]) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ai::movegen;
+    use crate::ai::search::PlacementPlan;
     use crate::ai::eval::LinearEvaluator;
     use crate::ai::search::GreedyPlanner;
     use crate::engine::{Board, CellKind, Engine, EngineConfig, InputFrame};
@@ -495,7 +462,7 @@ mod tests {
         // Movegen still emits placements if the spawn pose itself rests; to force the
         // empty case we assert on the actual movegen output and only require the beam
         // to mirror it. If placements exist, the beam must return Some; if not, None.
-        let placements = BeamPlanner::placements(&state);
+        let placements = hold_placements(&state);
         let mut beam = BeamPlanner::new(16);
         let plan = drive(&mut beam, &state, &linear(), SearchBudget::beam(2));
         assert_eq!(plan.is_some(), !placements.is_empty());
@@ -517,7 +484,7 @@ mod tests {
         // O on a 2x2 board has nowhere to go; movegen yields no resting poses.
         let active = movegen::spawn_piece(PieceType::O, 2, 2);
         let state = SearchState::for_test(board, active, None, VecDeque::new());
-        if BeamPlanner::placements(&state).is_empty() {
+        if hold_placements(&state).is_empty() {
             let mut beam = BeamPlanner::new(8);
             assert!(matches!(
                 beam.plan(&state, &linear(), SearchBudget::beam(2)),
@@ -584,7 +551,7 @@ mod tests {
         let mut beam = BeamPlanner::new(16);
         let plan = drive(&mut beam, &state, &linear(), SearchBudget::beam(3)).unwrap();
 
-        let legal = BeamPlanner::placements(&state);
+        let legal = hold_placements(&state);
         let matches = legal.iter().any(|p| {
             p.origin() == plan.placement.origin()
                 && p.rotation() == plan.placement.rotation()

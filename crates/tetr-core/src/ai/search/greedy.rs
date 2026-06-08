@@ -28,7 +28,9 @@
 
 use crate::ai::eval::{EvalContext, Evaluator};
 use crate::ai::movegen::{self, Placement};
-use crate::ai::search::{score_placement, PlacementPlan, Planner, PlannerStep, SearchBudget};
+use crate::ai::search::{
+    hold_placements, score_placement, PlacementPlan, Planner, PlannerStep, SearchBudget,
+};
 use crate::ai::state::SearchState;
 
 /// The greedy one-piece planner. Stateless; holds no search state between calls
@@ -55,18 +57,10 @@ impl GreedyPlanner {
         }
     }
 
-    /// Enumerate the candidate placements for `state`, with or without the hold
-    /// swap. Centralises the geometry the `spawn_for` closure needs.
+    /// Enumerate the candidate placements for `state`, with or without the hold swap.
     fn candidates(&self, state: &SearchState) -> Vec<Placement> {
         if self.consider_hold {
-            let (width, visible) = board_geometry(state);
-            movegen::generate_with_hold(
-                &state.board,
-                &state.active,
-                state.hold,
-                state.queue.first().copied(),
-                move |piece_type| movegen::spawn_piece(piece_type, width, visible),
-            )
+            hold_placements(state)
         } else {
             movegen::generate(&state.board, &state.active)
         }
@@ -110,17 +104,6 @@ impl Planner for GreedyPlanner {
 
         PlannerStep::Done(best)
     }
-}
-
-/// The `(width, visible_height)` a freshly swapped-in piece spawns against.
-///
-/// A hold swap's piece only needs a spawn pose the movegen BFS can expand from; the
-/// BFS normalizes the start and re-derives reachable poses, so the exact spawn
-/// origin does not affect which placements come back. The board's own dimensions
-/// always yield an on-board start, so we use them directly rather than threading the
-/// engine's hidden top-margin geometry through the search state.
-fn board_geometry(state: &SearchState) -> (usize, usize) {
-    (state.board.width(), state.board.height())
 }
 
 #[cfg(test)]
