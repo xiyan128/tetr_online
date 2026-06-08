@@ -265,27 +265,13 @@ pub fn compute_reward(
     // `w.attack == 0.0` this adds nothing, so the reward stays chain-agnostic and the
     // survival profile is byte-for-byte unchanged.
     if lines > 0 {
-        let action = score_action(t_spin, lines);
+        let action = EngineScoreAction::from_lock_result(t_spin, lines);
         let b2b_continue = ctx.b2b && b2b_eligible;
         let attack = attack_lines(action, b2b_continue, ctx.combo, perfect);
         total += w.attack * attack as f32;
     }
 
     Reward(total.round() as i32)
-}
-
-/// Map a placement's `(t_spin, lines)` to the [`EngineScoreAction`] the guideline
-/// attack table keys on. A 0-line lock (including a spin that cleared nothing) is
-/// [`NoClear`](EngineScoreAction::NoClear), which sends no attack.
-fn score_action(t_spin: Option<TSpinKind>, lines: usize) -> EngineScoreAction {
-    match (t_spin, lines) {
-        (Some(kind), n) if n > 0 => EngineScoreAction::TSpin { kind, lines: n },
-        (None, 1) => EngineScoreAction::Single,
-        (None, 2) => EngineScoreAction::Double,
-        (None, 3) => EngineScoreAction::Triple,
-        (None, 4) => EngineScoreAction::Tetris,
-        _ => EngineScoreAction::NoClear,
-    }
 }
 
 /// Whether the board is completely empty (a perfect clear). Uses [`Board::is_empty`],

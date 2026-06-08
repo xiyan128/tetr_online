@@ -62,10 +62,7 @@ fn print_delta(label: &str, s: &MarathonStats, baseline: &MarathonStats) {
 }
 
 fn main() {
-    let num_seeds = std::env::var("BENCH_SEEDS")
-        .ok()
-        .and_then(|s| s.parse::<usize>().ok())
-        .unwrap_or(DEFAULT_NUM_SEEDS);
+    let num_seeds = tetr_research::cli::env_usize("BENCH_SEEDS", DEFAULT_NUM_SEEDS);
     let seeds = seed_set(num_seeds);
     println!(
         "Marathon scoring-speed benchmark — {} seeds, perfect handicap, deterministic",
