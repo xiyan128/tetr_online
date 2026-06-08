@@ -111,7 +111,7 @@ pub enum MoveDirection {
     Down,
 }
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Piece {
     piece_type: PieceType,
     rotation: PieceRotation,
