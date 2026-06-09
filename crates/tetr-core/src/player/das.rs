@@ -1,7 +1,7 @@
 //! Player-side DAS (Delayed Auto Shift) state machine.
 //!
-//! This is the seconds-based port of the renderer's old `DasState` (formerly in
-//! `src/level/common.rs`). It is deliberately Bevy-free and engine-free so it can
+//! This is the seconds-based port of the renderer's `DasState`. It is deliberately
+//! Bevy-free and engine-free so it can
 //! be driven directly in headless unit tests: feed it a held direction plus the
 //! frame `dt` and it returns whether a one-cell move pulse fires this frame.
 //!

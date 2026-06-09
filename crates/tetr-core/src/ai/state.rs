@@ -304,9 +304,9 @@ impl SearchState {
 
     /// Pop the next revealed piece from the front of the queue (or `None` if the
     /// queue is exhausted). `SmallVec` has no `pop_front`; this is the empty-safe
-    /// `remove(0)`. The shift is O(len) but len ≤ preview depth and — crucially —
-    /// **allocation-free**, which is the whole point: it keeps the per-child
-    /// `SearchState` clone off the heap (the board is already `Copy`).
+    /// `remove(0)`. The shift is O(len) but len ≤ preview depth and allocation-free,
+    /// so the per-child `SearchState` clone stays off the heap (the board is already
+    /// `Copy`).
     fn deal_from_queue(&mut self) -> Option<crate::engine::PieceType> {
         if self.queue.is_empty() {
             None

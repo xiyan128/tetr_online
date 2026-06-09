@@ -53,8 +53,8 @@ impl Occupancy for Board {
 
 /// A fixed-size, `Copy` occupancy board: `cols[x]` has bit `y` set iff `(x, y)` is filled.
 ///
-/// Cloning is a flat copy — no heap, no allocator traffic — which is the whole point on
-/// the search's fork-per-placement hot path.
+/// Cloning is a flat copy — no heap, no allocator traffic — so the search's
+/// fork-per-placement hot path stays allocation-free.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BitBoard {
     cols: [u64; MAX_WIDTH],

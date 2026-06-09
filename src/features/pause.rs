@@ -303,7 +303,7 @@ mod tests {
         assert!(cells_before > 0, "setup: a piece should be locked");
 
         // Pause, then resume — via the PauseState SUB-state, not a GameState
-        // transition. The whole point of the fix: `Playing` never exits.
+        // transition — so `Playing` never exits.
         set_pause(&mut app, PauseState::Paused);
         set_pause(&mut app, PauseState::Running);
 

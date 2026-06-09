@@ -92,9 +92,9 @@ pub(crate) struct ClearInfo {
 }
 
 /// Fold one engine event into the running `combo`, returning the clear it produced (if
-/// any). **THE single home for combo/attack accounting:** combo advances on line
-/// clears only — a hard drop emits its own `ScoreAwarded` that must NOT bump it (the
-/// combo-bug fix that used to live in four copies) — and resets on a clear-less lock.
+/// any). The single home for combo/attack accounting: combo advances on line clears
+/// only — a hard drop emits its own `ScoreAwarded` that must NOT bump it — and resets
+/// on a clear-less lock.
 /// Callers still do their own piece counting / top-out / stats from the same event.
 pub(crate) fn fold_combo(event: &EngineEvent, engine: &Engine, combo: &mut u32) -> Option<ClearInfo> {
     match event {
