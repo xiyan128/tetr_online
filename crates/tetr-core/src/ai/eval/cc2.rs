@@ -515,4 +515,48 @@ mod tests {
         let (v, _r) = dyn_eval.evaluate(&no_clear_lock(PieceType::O), &board, None, EvalContext::default());
         assert!(v.0.abs() < 1_000_000, "value stays in a sane range: {v:?}");
     }
+
+    #[test]
+    fn combo_attack_scales_with_chain() {
+        // The CC2 reward adds combo_attack * floor((combo - 1) / 2) to a clearing
+        // placement, using the search-path combo the planners supply via EvalContext.
+        // So combo 0/1/2 add nothing and the reward steps up at combo 3, 5, ... (the
+        // staircase is floor((combo-1)/2), NOT floor(combo/2)). This is the only place
+        // EvalContext.combo reaches the shipped CC2 evaluator, and was previously
+        // untested (every other cc2 test uses EvalContext::default()).
+        let eval = Cc2Evaluator::default();
+        let mut board = Board::new(10, 20);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        let clear = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0],
+            top_y_after_lock: None,
+        };
+        let reward = |combo: u32| eval.evaluate(&clear, &board, None, EvalContext { combo, b2b: false }).1 .0;
+
+        // floor((combo - 1) / 2) == 0 for combo 0, 1, 2 (and combo 0 must not underflow
+        // the u32 subtraction).
+        assert_eq!(reward(0), reward(1), "combo 0 and 1 add the same combo attack (0)");
+        assert_eq!(reward(1), reward(2), "combo 2 still adds 0 -- floor((combo-1)/2), not combo/2");
+        // Steps up at 3 (floor(2/2) = 1), flat at 4, steps again at 5 (floor(4/2) = 2).
+        assert!(reward(3) > reward(2), "combo 3 adds the first combo-attack step");
+        assert_eq!(reward(3), reward(4), "the staircase is flat between odd combos");
+        assert!(reward(5) > reward(3), "combo 5 adds a second step");
+    }
+
+    #[test]
+    fn back_to_back_adds_to_value() {
+        // ctx.b2b adds has_back_to_back to the static Value (not the Reward); combo does
+        // not affect Value. Both are the planner-supplied chain reaching CC2 -- the
+        // ctx.b2b branch was never taken under test before.
+        let eval = Cc2Evaluator::default();
+        let mut board = Board::new(10, 20);
+        board.set(0, 0, CellKind::Some(PieceType::O));
+        let lock = no_clear_lock(PieceType::O);
+        let value = |ctx| eval.evaluate(&lock, &board, None, ctx).0 .0;
+
+        let base = value(EvalContext { combo: 0, b2b: false });
+        assert!(value(EvalContext { combo: 0, b2b: true }) > base, "b2b raises Value");
+        assert_eq!(value(EvalContext { combo: 5, b2b: false }), base, "combo does not affect Value");
+    }
 }

@@ -860,6 +860,29 @@ mod tests {
         assert!(s.b2b, "T-spin double sets b2b");
     }
 
+    #[test]
+    fn update_combo_transitions() {
+        // The mirror of `update_b2b_transitions` for the combo chain the search feeds
+        // to the evaluator: a clear-less lock holds/resets combo to 0, consecutive
+        // clears escalate it, and a clear-less lock breaks it back to 0.
+        let mut s = crafted_state(PieceType::T, None, &[PieceType::I]);
+        assert_eq!(s.combo, 0, "a fresh state has no combo");
+
+        s.update_combo(&lock_with_rows(&[]));
+        assert_eq!(s.combo, 0, "a clear-less lock keeps combo at 0");
+
+        s.update_combo(&lock_with_rows(&[0]));
+        assert_eq!(s.combo, 1, "the first clear advances combo to 1");
+        s.update_combo(&lock_with_rows(&[0, 1]));
+        assert_eq!(s.combo, 2, "a consecutive clear advances combo to 2");
+
+        s.update_combo(&lock_with_rows(&[]));
+        assert_eq!(s.combo, 0, "a clear-less lock breaks the combo back to 0");
+
+        s.update_combo(&lock_with_rows(&[0]));
+        assert_eq!(s.combo, 1, "a fresh clear restarts the combo at 1");
+    }
+
     /// A minimal [`LockOutcome`] carrying only the cleared rows (the field
     /// `update_b2b` reads); the other fields are irrelevant to the b2b transition.
     fn lock_with_rows(rows: &[isize]) -> LockOutcome {
