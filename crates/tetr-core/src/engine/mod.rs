@@ -32,7 +32,7 @@ pub use api::{
 };
 pub use attack::{attack_lines, COMBO_TABLE, PERFECT_CLEAR_ATTACK};
 pub use bit_board::{BitBoard, Occupancy};
-pub use board::{Board, Cell, CellKind};
+pub use board::{Board, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
 pub use generator::PieceGenerator;
 pub use goals::{

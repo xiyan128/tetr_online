@@ -7,7 +7,7 @@
 //! that turn engine coordinates into world-space sprites.
 
 use crate::assets::GameAssets;
-use crate::engine::{Cell, CellKind, LockDownMode, PieceType};
+use crate::engine::{LockDownMode, PieceType};
 use bevy::color::Alpha;
 #[cfg(feature = "bloom")]
 use bevy::color::LinearRgba;
@@ -158,27 +158,25 @@ pub fn camera_center(config: &LevelConfig) -> Vec3 {
     )
 }
 
-/// Build a render block at a single board/ghost/preview cell. Reused verbatim
-/// from the pre-migration renderer; the only difference is callers now feed it
-/// cells derived from `SnapshotCell`s instead of from a parallel `Board`.
+/// Build a render block (mino, ghost, or background tile) at board coordinate
+/// `(x, y)`. `piece_type` colours the mino kinds (Falling/Preview/Static) and is
+/// ignored by Ghost and Background.
 pub fn spawn_free_block(
     commands: &mut Commands,
     config: &LevelConfig,
     texture_assets: &Res<GameAssets>,
-    cell: &Cell,
+    x: isize,
+    y: isize,
+    piece_type: Option<PieceType>,
     block_kind: BlockKind,
 ) -> Entity {
-    let (x, y) = cell.coords();
-
     let color = match block_kind {
         BlockKind::Falling | BlockKind::Preview | BlockKind::Static => {
-            // Invariant: Falling/Preview/Static blocks are only ever spawned from
-            // cells carrying a piece type — `spawn_snapshot_block` builds them with
-            // `CellKind::Some(..)`, and the previewer feeds avatar-board minos
-            // (also always `Some`). Only `Background` uses `CellKind::None`, and it
-            // takes the arm below. So this match never sees a `None`/`Wall` cell.
-            let CellKind::Some(piece_type) = cell.cell_kind() else {
-                unreachable!("Falling/Preview/Static block spawned from a cell with no piece type");
+            // These kinds always carry a piece type: the reconcilers feed snapshot
+            // minos and the previewer feeds avatar minos, both `Some`. Ghost and
+            // Background take the arms below and ignore `piece_type`.
+            let Some(piece_type) = piece_type else {
+                unreachable!("Falling/Preview/Static block spawned without a piece type");
             };
             mino_render_color(piece_type)
         }
@@ -242,8 +240,8 @@ pub fn spawn_snapshot_block(
     piece_type: PieceType,
     block_kind: BlockKind,
 ) -> Entity {
-    let cell = Cell::new(x, y, crate::engine::CellKind::Some(piece_type));
-    let entity = spawn_free_block(commands, config, texture_assets, &cell, block_kind);
+    let entity =
+        spawn_free_block(commands, config, texture_assets, x, y, Some(piece_type), block_kind);
     commands
         .entity(entity)
         .insert(DespawnOnExit(GameState::Playing));

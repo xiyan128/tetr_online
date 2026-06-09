@@ -168,24 +168,20 @@ impl Piece {
         }
     }
 
-    /// A margin-less board holding this piece in its canonical spawn rotation, used
-    /// by the host to render piece previews (hold / next). `pub` because its only
-    /// caller, the Bevy game's previewer, lives in a separate crate now that the core
-    /// is extracted — a `pub(crate)` would stop at this crate's boundary.
-    pub fn avatar_board(&self) -> Board {
-        let shape = Self::get_avatar_shape(self.piece_type);
-        // get width and height of the avatar board
-        // those are the max x and y values of the shape
-        let (width, height) = shape.iter().fold((0, 0), |(max_x, max_y), (x, y)| {
-            (max_x.max(*x), max_y.max(*y))
-        });
-        let mut board = Board::new(width as usize + 1, height as usize + 1);
+    /// The four mino coordinates of this piece in its canonical preview (spawn)
+    /// rotation, tightly bounded to the origin. The host renders hold / next previews
+    /// from these plus the piece type, without touching the engine's board types.
+    pub fn avatar_cells(&self) -> [(isize, isize); 4] {
+        Self::get_avatar_shape(self.piece_type)
+    }
 
-        for (x, y) in shape {
-            board.set(x, y, CellKind::Some(self.piece_type));
-        }
-
-        board
+    /// The `(width, height)` bounding box of [`avatar_cells`](Self::avatar_cells) — the
+    /// preview's layout size.
+    pub fn avatar_dims(&self) -> (usize, usize) {
+        let (max_x, max_y) = Self::get_avatar_shape(self.piece_type)
+            .iter()
+            .fold((0, 0), |(mx, my), &(x, y)| (mx.max(x), my.max(y)));
+        (max_x as usize + 1, max_y as usize + 1)
     }
 
     pub(crate) fn piece_type(&self) -> PieceType {
@@ -420,18 +416,14 @@ mod tests {
     }
 
     #[test]
-    fn avatar_boards_are_tightly_bounded() {
+    fn avatar_cells_are_tightly_bounded() {
         for piece_type in PieceType::all() {
-            let piece = Piece::new(piece_type);
-            let avatar = piece.avatar_board();
+            let cells = Piece::new(piece_type).avatar_cells();
 
-            assert_eq!(avatar.cells().len(), 4);
-            assert!(avatar
-                .cells()
-                .iter()
-                .all(|cell| cell.x() >= 0 && cell.y() >= 0));
-            assert!(avatar.cells().iter().any(|cell| cell.x() == 0));
-            assert!(avatar.cells().iter().any(|cell| cell.y() == 0));
+            assert_eq!(cells.len(), 4);
+            assert!(cells.iter().all(|&(x, y)| x >= 0 && y >= 0));
+            assert!(cells.iter().any(|&(x, _)| x == 0));
+            assert!(cells.iter().any(|&(_, y)| y == 0));
         }
     }
 

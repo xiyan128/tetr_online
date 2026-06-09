@@ -11,7 +11,7 @@
 
 use bevy::prelude::*;
 
-use crate::engine::{Board, Cell, CellKind, Engine, EngineEvent, GameOverStatus};
+use crate::engine::{Engine, EngineEvent, GameOverStatus};
 use common::*;
 use engine_bridge::*;
 
@@ -189,9 +189,9 @@ fn level_setup(
         &config,
     ))));
 
-    // Background grid: a 10×height static field of dark cells, drawn once. This
-    // is purely decorative scaffolding; gameplay minos are reconciled on top.
-    let board = Board::with_top_margin(config.board_width, config.board_height, 20);
+    // Background grid: a width×height static field of dark cells over the visible
+    // playfield, drawn once. Purely decorative scaffolding; gameplay minos are
+    // reconciled on top.
     let field = commands
         .spawn((
             GameField,
@@ -201,15 +201,18 @@ fn level_setup(
         ))
         .id();
     let mut block_ids = Vec::new();
-    for (x, y) in board.coords() {
-        let cell = Cell::new(x, y, CellKind::None);
-        block_ids.push(spawn_free_block(
-            &mut commands,
-            &config,
-            &texture_assets,
-            &cell,
-            BlockKind::Background,
-        ));
+    for x in 0..config.board_width as isize {
+        for y in 0..config.board_height as isize {
+            block_ids.push(spawn_free_block(
+                &mut commands,
+                &config,
+                &texture_assets,
+                x,
+                y,
+                None,
+                BlockKind::Background,
+            ));
+        }
     }
     commands.entity(field).add_children(&block_ids);
 

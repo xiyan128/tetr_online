@@ -161,23 +161,23 @@ fn spawn_holder_piece(
 ) -> (Vec2, Entity) {
     let piece = Piece::from(piece_type);
 
-    let avatar_board = piece.avatar_board();
-
     let preview_block_size = config.block_size * config.preview_scale;
     let preview_config = LevelConfig {
         block_size: preview_block_size,
         ..Default::default()
     };
 
-    let block_ids: Vec<Entity> = avatar_board
-        .cells()
+    let block_ids: Vec<Entity> = piece
+        .avatar_cells()
         .iter()
-        .map(|&cell| {
+        .map(|&(x, y)| {
             spawn_free_block(
                 commands,
                 &preview_config,
                 game_assets,
-                cell,
+                x,
+                y,
+                Some(piece_type),
                 BlockKind::Preview,
             )
         })
@@ -189,9 +189,9 @@ fn spawn_holder_piece(
         _ => 1.0,
     }; // slightly scale the preview to fit the board
 
-    let preview_board_size = Vec2::new(avatar_board.width() as f32, avatar_board.height() as f32)
-        * preview_block_size
-        * scale;
+    let (avatar_w, avatar_h) = piece.avatar_dims();
+    let preview_board_size =
+        Vec2::new(avatar_w as f32, avatar_h as f32) * preview_block_size * scale;
 
     let piece_entity = commands
         .spawn((

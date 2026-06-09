@@ -53,11 +53,11 @@ impl Board {
         self.cells.column_len()
     }
 
-    pub fn rows(&self) -> Vec<Vec<Cell>> {
+    pub(crate) fn rows(&self) -> Vec<Vec<Cell>> {
         self.cells.as_rows()[..self.height].to_vec()
     }
 
-    pub fn cells(&self) -> Vec<&Cell> {
+    pub(crate) fn cells(&self) -> Vec<&Cell> {
         self.cells
             .elements_row_major_iter()
             .filter(|cell| cell.cell_kind.is_some())
@@ -115,13 +115,13 @@ impl Board {
         cols
     }
 
-    pub fn row_cells(&self, row: usize) -> impl Iterator<Item = &Cell> {
+    pub(crate) fn row_cells(&self, row: usize) -> impl Iterator<Item = &Cell> {
         self.cells()
             .into_iter()
             .filter(move |cell| cell.y == row as isize)
     }
 
-    pub fn clear_line(&mut self, y: usize) -> Vec<Cell> {
+    pub(crate) fn clear_line(&mut self, y: usize) -> Vec<Cell> {
         let mut cleared = Vec::new();
 
         for x in 0..self.width {
@@ -408,7 +408,7 @@ impl CellKind {
 // i.e. a `Vec<Cell>`) clones via memcpy rather than per-element — this is on the
 // search's hot path, which clones a board per candidate placement.
 #[derive(Debug, Clone, Copy)]
-pub struct Cell {
+pub(crate) struct Cell {
     // unique index
     pub(crate) x: isize,
     y: isize,
@@ -449,16 +449,6 @@ impl Default for Cell {
 impl Cell {
     pub fn new(x: isize, y: isize, cell_kind: CellKind) -> Self {
         Self { x, y, cell_kind }
-    }
-
-    #[cfg(test)]
-    pub fn x(&self) -> isize {
-        self.x
-    }
-
-    #[cfg(test)]
-    pub fn y(&self) -> isize {
-        self.y
     }
 
     pub fn coords(&self) -> (isize, isize) {
