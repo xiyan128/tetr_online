@@ -145,11 +145,18 @@ impl Board {
         cleared
     }
 
+    /// Remove every completely-filled row across the **full backing matrix** (visible
+    /// field + hidden buffer) and compact the stack downward, returning the count
+    /// removed. Scanning the whole matrix — not just the visible field — is the
+    /// guideline rule: a row that fills entirely in the buffer zone clears like any
+    /// other. The scan re-examines the same index after each clear, so a row that drops
+    /// into a just-cleared slot is itself checked.
     pub fn clear_lines(&mut self) -> usize {
         let mut cleared = 0;
         let mut y = 0;
+        let backing = self.backing_rows();
 
-        while y < self.height {
+        while y < backing {
             if self.row_cells(y).count() == self.width {
                 self.clear_line(y);
                 cleared += 1;
@@ -384,6 +391,23 @@ mod tests {
         assert_eq!(board.clear_lines(), 2);
         assert_eq!(board.get_cell_kind(2, 0), CellKind::Some(PieceType::T));
         assert_eq!(board.cells().len(), 1);
+    }
+
+    #[test]
+    fn clear_lines_clears_a_full_buffer_row() {
+        // Guideline whole-matrix rule: a row that fills entirely in the buffer zone
+        // (y >= visible height) clears and counts like any visible row. Regression guard
+        // for the clear/score conflation — the physical clear must remove exactly what
+        // the scored count (full_rows) reports.
+        let mut board = Board::with_top_margin(4, 4, 4); // visible 4, buffer 4 => 8 backing
+        fill_row(&mut board, 5, PieceType::I); // a full row, entirely in the buffer
+        assert!(board.set(0, 6, CellKind::Some(PieceType::T))); // a lone sentinel above it
+
+        assert_eq!(board.clear_lines(), 1, "the full buffer row clears and is counted");
+
+        assert_eq!(board.get_cell_kind(0, 5), CellKind::Some(PieceType::T), "sentinel fell one row");
+        assert_eq!(board.get_cell_kind(0, 6), CellKind::None);
+        assert_eq!(board.cells().len(), 1, "only the sentinel remains");
     }
 }
 

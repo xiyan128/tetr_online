@@ -21,12 +21,13 @@
 //! asserted by `bit_board_matches_engine_*` differential tests on randomized boards:
 //! out-of-bounds (walls/floor) and occupied cells block identically, and a line clear
 //! removes the same rows and compacts to the same occupancy. In particular the clear
-//! reproduces two subtle engine behaviours the differential test pinned down:
-//! - it clears only rows in the **visible** field (`clear_lines` loops `y < height`);
-//!   a full row sitting in the buffer is shifted by clears below it but never itself
-//!   removed, and
+//! reproduces two engine behaviours the differential test pins down:
+//! - it clears every completely-filled row across the **full backing matrix** (visible
+//!   field + buffer) — `clear_full_rows` loops `y < total_rows`, mirroring the engine's
+//!   `clear_lines` over `backing_rows()` — so a full buffer row is removed, not left
+//!   floating, and
 //! - it clears **iteratively, re-scanning** the same row index after each clear, so a
-//!   buffer row that shifts down into the visible field is then cleared too.
+//!   row that shifts down into a just-cleared slot is itself examined.
 
 use super::{ActivePiece, Board, CellKind, LockOutcome, PieceType};
 use smallvec::SmallVec;
@@ -59,8 +60,9 @@ impl Occupancy for Board {
 pub struct BitBoard {
     cols: [u64; MAX_WIDTH],
     width: usize,
-    /// Visible field height — the zone the engine actually clears (`clear_lines` loops
-    /// `y < height`). Rows at or above this are buffer: shifted by clears, never cleared.
+    /// Visible field height — mirrors `Board::height` for spawn coords and the game-over
+    /// skyline. Rows at or above this are the hidden buffer; clears span the full matrix
+    /// (`total_rows`), not just here.
     visible_rows: usize,
     /// Total backing rows (visible + buffer). A cell cannot be placed at or above this —
     /// a lock overhanging the top of the grid drops those cells, matching `Board::set`.
@@ -149,21 +151,21 @@ impl BitBoard {
     }
 
     /// Indices of completely-filled rows across the whole 64-bit range, ascending — the
-    /// `cleared_rows` the engine *reports* (`lock_clear::full_rows`, buffer included).
-    /// (Note: the engine *reports* over the full range but only *clears* the visible
-    /// field — see [`clear_full_rows`](Self::clear_full_rows).) Delegates to the free
-    /// [`full_rows`], the one impl shared with the engine's `lock_and_clear`.
+    /// `cleared_rows` the engine reports (`lock_clear::full_rows`, buffer included).
+    /// These are exactly the rows [`clear_full_rows`](Self::clear_full_rows) removes —
+    /// report and clear coincide. Delegates to the free [`full_rows`], the one impl
+    /// shared with the engine's `lock_and_clear`.
     pub(crate) fn full_rows(&self) -> Vec<isize> {
         full_rows(self.columns())
     }
 
     /// Clear full rows and compact the stack downward, **exactly** as the engine's
-    /// `clear_lines`: scan the visible field bottom-up, and whenever the current row is
-    /// full, drop it (shifting every row above — buffer included — down one) and
-    /// re-examine the same index.
+    /// `clear_lines`: scan the full backing range (visible field + buffer) bottom-up,
+    /// and whenever the current row is full, drop it (shifting every row above down one)
+    /// and re-examine the same index.
     pub(crate) fn clear_full_rows(&mut self) {
         let mut y = 0u32;
-        while (y as usize) < self.visible_rows {
+        while (y as usize) < self.total_rows {
             let bit = 1u64 << y;
             if self.cols[..self.width].iter().all(|&c| c & bit != 0) {
                 // Row `y` is full: remove it and shift everything above down by one
@@ -181,9 +183,9 @@ impl BitBoard {
 
     /// Lock a piece's absolute `cells` onto the board, clear any resulting lines, and
     /// report `(cleared_rows, skyline)` — the bitboard analogue of the engine's
-    /// [`lock_and_clear`](super::lock_and_clear). `cleared_rows` spans the full range
-    /// (the *reported* clears, matching the engine's `full_rows`); the board itself is
-    /// mutated by the visible-bounded [`clear_full_rows`](Self::clear_full_rows). Cells
+    /// [`lock_and_clear`](super::lock_and_clear). `cleared_rows` spans the full backing
+    /// range (matching the engine's `full_rows`), and the board is mutated by
+    /// [`clear_full_rows`](Self::clear_full_rows), which removes exactly those rows. Cells
     /// out of bounds are skipped, exactly as `Board::set` does on the engine side.
     pub(crate) fn lock(&mut self, cells: &[(isize, isize)]) -> (Vec<isize>, Option<isize>) {
         for &(x, y) in cells {
@@ -377,8 +379,8 @@ mod tests {
             let (mut board, mut bb) = random_pair(&mut rng, fill);
 
             // Clearing must leave the identical occupancy as the engine's `clear_lines`
-            // (the compaction == the engine's iterative, visible-bounded per-row drop)
-            // and the same skyline afterward.
+            // (the compaction == the engine's iterative, full-matrix per-row drop) and
+            // the same skyline afterward.
             bb.clear_full_rows();
             board.clear_lines();
             let engine_after = BitBoard::from_board(&board);
@@ -389,14 +391,33 @@ mod tests {
 
     #[test]
     fn full_rows_reports_buffer_rows_too() {
-        // The *reported* full rows span the whole range (matching `lock_clear::full_rows`),
-        // even though the *clear* is visible-bounded — both behaviours are intentional.
+        // The reported full rows span the whole range (matching `lock_clear::full_rows`);
+        // `clear_full_rows` removes exactly these, so report and clear coincide.
         let mut bb = BitBoard::empty(4, 20, 40);
         for x in 0..4 {
             bb.set(x, 0); // a full visible row
             bb.set(x, 25); // a full buffer row
         }
         assert_eq!(bb.full_rows(), vec![0, 25]);
+    }
+
+    #[test]
+    fn clear_full_rows_clears_buffer_rows() {
+        // The search-side mirror of `clear_lines_clears_a_full_buffer_row`. The randomized
+        // differential test only proves engine == bitboard, so pin the full-matrix clear
+        // directly: a full buffer row must be removed, not left floating.
+        let mut bb = BitBoard::empty(4, 20, 40);
+        for x in 0..4 {
+            bb.set(x, 0); // a full visible row
+            bb.set(x, 25); // a full buffer row
+        }
+        bb.set(0, 30); // a lone sentinel above both full rows
+
+        bb.clear_full_rows();
+
+        assert!(bb.full_rows().is_empty(), "both full rows (visible and buffer) are gone");
+        assert!(bb.occupied(0, 28), "the sentinel fell by the two cleared rows (30 -> 28)");
+        assert!(!bb.occupied(0, 29) && !bb.occupied(0, 30), "nothing left above it");
     }
 
     #[test]
