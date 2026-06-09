@@ -30,7 +30,7 @@ use crate::ai::search::{
     best_root_plan, commit_child, hold_placements, Planner, PlannerStep, RootKey, SearchBudget,
 };
 use crate::ai::state::SearchState;
-use crate::engine::{BitBoard, LockOutcome, PieceType, TSpinKind};
+use crate::engine::{BitBoard, ColumnView, LockOutcome, PieceType, TSpinKind};
 
 
 /// Multiplicative pessimism applied to a speculative branch's *reward* contribution
@@ -293,10 +293,10 @@ impl BeamPlanner {
         owners: &[(LockOutcome, Option<TSpinKind>, EvalContext)],
         boards: &[&BitBoard],
     ) -> Vec<(Value, Reward)> {
-        let inputs: Vec<(&LockOutcome, &BitBoard, Option<TSpinKind>, EvalContext)> = owners
+        let inputs: Vec<(&LockOutcome, ColumnView, Option<TSpinKind>, EvalContext)> = owners
             .iter()
             .zip(boards)
-            .map(|((l, t, ctx), b)| (l, *b, *t, *ctx))
+            .map(|((l, t, ctx), b)| (l, b.view(), *t, *ctx))
             .collect();
         eval.evaluate_batch(&inputs)
     }

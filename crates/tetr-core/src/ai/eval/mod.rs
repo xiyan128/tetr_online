@@ -119,20 +119,21 @@ pub trait Evaluator: Send + Sync {
         ctx: EvalContext,
     ) -> (Value, Reward);
 
-    /// Score a placement whose resulting board is given as a search
-    /// [`BitBoard`](crate::engine::BitBoard) — the bitboard search's hot path, avoiding
-    /// the `Array2D`. The default reconstructs an `Array2D` and defers to
-    /// [`evaluate`](Self::evaluate) (correct, allocating); a fast evaluator (CC2)
-    /// overrides it to read the columns directly. An override **must** be bit-identical
-    /// to the default.
+    /// Score a placement whose resulting board is given as a [`ColumnView`] — the
+    /// bitboard search's hot path, avoiding the `Array2D`. The default reconstructs a
+    /// dense [`Board`] and defers to [`evaluate`](Self::evaluate) (correct, allocating);
+    /// a fast evaluator (CC2) overrides it to read the columns directly. An override
+    /// **must** be bit-identical to the default.
+    ///
+    /// [`ColumnView`]: crate::engine::ColumnView
     fn evaluate_cols(
         &self,
         lock: &LockOutcome,
-        board: &crate::engine::BitBoard,
+        board: crate::engine::ColumnView,
         t_spin: Option<TSpinKind>,
         ctx: EvalContext,
     ) -> (Value, Reward) {
-        self.evaluate(lock, &board.to_array2d(), t_spin, ctx)
+        self.evaluate(lock, &board.to_board(), t_spin, ctx)
     }
 
     /// Score a batch in one shot. `out[i]` scores `inputs[i]` (order preserved).
@@ -143,11 +144,11 @@ pub trait Evaluator: Send + Sync {
     /// [`evaluate`](Self::evaluate) over the same inputs.
     fn evaluate_batch(
         &self,
-        inputs: &[(&LockOutcome, &crate::engine::BitBoard, Option<TSpinKind>, EvalContext)],
+        inputs: &[(&LockOutcome, crate::engine::ColumnView, Option<TSpinKind>, EvalContext)],
     ) -> Vec<(Value, Reward)> {
         inputs
             .iter()
-            .map(|(l, b, t, ctx)| self.evaluate_cols(l, b, *t, *ctx))
+            .map(|(l, b, t, ctx)| self.evaluate_cols(l, *b, *t, *ctx))
             .collect()
     }
 }
@@ -528,10 +529,10 @@ mod tests {
         let bb_a = crate::engine::BitBoard::from_board(&board_a);
         let bb_b = crate::engine::BitBoard::from_board(&board_b);
         let bb_c = crate::engine::BitBoard::from_board(&board_c);
-        let inputs: Vec<(&LockOutcome, &crate::engine::BitBoard, Option<TSpinKind>, EvalContext)> = vec![
-            (&lock_a, &bb_a, t_a, ctx),
-            (&lock_b, &bb_b, t_b, ctx),
-            (&lock_c, &bb_c, t_c, ctx),
+        let inputs: Vec<(&LockOutcome, crate::engine::ColumnView, Option<TSpinKind>, EvalContext)> = vec![
+            (&lock_a, bb_a.view(), t_a, ctx),
+            (&lock_b, bb_b.view(), t_b, ctx),
+            (&lock_c, bb_c.view(), t_c, ctx),
         ];
 
         // `evaluate_batch` is now bitboard-based; it must equal scalar `evaluate` on the

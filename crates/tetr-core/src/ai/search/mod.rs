@@ -147,7 +147,7 @@ pub(crate) fn score_child(
     ctx: EvalContext,
 ) -> (SearchState, Value, Reward) {
     let (child, lock, t_spin) = commit_child(parent, placement);
-    let (value, reward) = eval.evaluate_cols(&lock, &child.board, t_spin, ctx);
+    let (value, reward) = eval.evaluate_cols(&lock, child.board.view(), t_spin, ctx);
     (child, value, reward)
 }
 

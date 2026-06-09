@@ -306,7 +306,7 @@ impl Evaluator for Cc2Evaluator {
     fn evaluate_cols(
         &self,
         lock: &LockOutcome,
-        board: &crate::engine::BitBoard,
+        board: crate::engine::ColumnView,
         t_spin: Option<TSpinKind>,
         ctx: EvalContext,
     ) -> (Value, Reward) {

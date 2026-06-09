@@ -234,6 +234,39 @@ impl BitBoard {
         }
         board
     }
+
+    /// A read-only [`ColumnView`] of this board — the evaluator-facing handle that
+    /// keeps the evaluator seam from naming the concrete search board.
+    pub fn view(&self) -> ColumnView<'_> {
+        ColumnView { board: self }
+    }
+}
+
+/// A representation-neutral, read-only column view of a board: the evaluator's input.
+/// It exposes only the column bitset, emptiness, and a dense-[`Board`] reconstruction
+/// for the fallback path, so the evaluator depends on this small surface rather than on
+/// the concrete [`BitBoard`] and its full API.
+#[derive(Clone, Copy)]
+pub struct ColumnView<'a> {
+    board: &'a BitBoard,
+}
+
+impl ColumnView<'_> {
+    /// The column bitset: `columns()[x]` has bit `y` set iff `(x, y)` is filled.
+    pub fn columns(&self) -> &[u64] {
+        self.board.columns()
+    }
+
+    /// True iff no cell is filled.
+    pub fn is_empty(&self) -> bool {
+        self.board.is_empty()
+    }
+
+    /// Reconstruct a dense engine [`Board`] with this occupancy — the fallback for
+    /// evaluators that score the dense board (allocating; the fast path uses `columns`).
+    pub fn to_board(&self) -> Board {
+        self.board.to_array2d()
+    }
 }
 
 /// Indices of completely-filled rows in a column bitboard, ascending. A row is full

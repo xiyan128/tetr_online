@@ -106,6 +106,9 @@ pub struct SearchState {
     /// The playfield occupancy (incl. the hidden spawn buffer). A `Copy`, zero-alloc
     /// [`BitBoard`]: the search forks it per candidate placement, so bit-AND collision,
     /// bit-op locking, and identity `columns()` are the heart of the performance strike.
+    /// The evaluator seam reads it only as a [`ColumnView`](crate::engine::ColumnView)
+    /// (via [`BitBoard::view`]); the search internals and the criterion benches drive the
+    /// concrete board directly.
     pub board: BitBoard,
     /// The piece currently in play, at its current pose.
     pub active: ActivePiece,
