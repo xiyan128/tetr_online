@@ -169,11 +169,15 @@ impl BitBoard {
             let bit = 1u64 << y;
             if self.cols[..self.width].iter().all(|&c| c & bit != 0) {
                 // Row `y` is full: remove it and shift everything above down by one
-                // (the `>> (y+1)) << y` carries buffer rows down too). Do NOT advance
-                // `y` — the row that fell into `y` must be re-examined.
+                // (carrying buffer rows down too). Do NOT advance `y` — the row that fell
+                // into `y` must be re-examined. `checked_shr` keeps the top row safe:
+                // at `y == 63` (reachable only at the `total_rows == 64` ceiling) nothing
+                // sits above it, so the carried-down part is 0 rather than a `>> 64`
+                // overflow — matching the engine `Board`, which clears the top row fine.
                 let below_mask = bit - 1;
                 for col in &mut self.cols[..self.width] {
-                    *col = (*col & below_mask) | ((*col >> (y + 1)) << y);
+                    let above = (*col).checked_shr(y + 1).unwrap_or(0);
+                    *col = (*col & below_mask) | (above << y);
                 }
             } else {
                 y += 1;
@@ -418,6 +422,20 @@ mod tests {
         assert!(bb.full_rows().is_empty(), "both full rows (visible and buffer) are gone");
         assert!(bb.occupied(0, 28), "the sentinel fell by the two cleared rows (30 -> 28)");
         assert!(!bb.occupied(0, 29) && !bb.occupied(0, 30), "nothing left above it");
+    }
+
+    #[test]
+    fn clear_full_rows_handles_the_top_row_at_the_64_row_ceiling() {
+        // ENG-3 guard: at the `total_rows == 64` clamp ceiling the clear loop reaches
+        // y == 63, where the carry-down shift would be `>> 64`. `checked_shr` keeps it
+        // safe (nothing sits above the top row), matching the engine Board.
+        let mut bb = BitBoard::empty(4, 20, 64);
+        for x in 0..4 {
+            bb.set(x, 63); // a full row at the very top of the matrix
+        }
+        bb.clear_full_rows(); // must not panic
+        assert!(bb.full_rows().is_empty(), "the top row cleared");
+        assert!((0..4).all(|x| !bb.occupied(x, 63)), "nothing left at the top");
     }
 
     #[test]
