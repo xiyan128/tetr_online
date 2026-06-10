@@ -25,9 +25,17 @@
 //! acceptance bar above noise (re-evaluate the incumbent or SPRT per
 //! candidate), and a periodic held-out check during the climb.
 //!
-//! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train), VAL_SEEDS (32),
+//! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
+//!      when rotating), VAL_SEEDS (32), ROTATE (1), ACCEPT_MARGIN (25),
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
 //!      SIGMA (0.15), CLIMB_SEED (1).
+//!
+//! ROTATE=1 (the default, the v2 regularization): every iteration draws a
+//! FRESH disjoint seed block and evaluates BOTH the incumbent and the proposal
+//! on it (paired within the iteration, never reused across iterations — the
+//! overfitting channel from the first run is structurally gone), accepting
+//! only when the proposal beats the incumbent by ACCEPT_MARGIN on that fresh
+//! block. ROTATE=0 reproduces the v1 fixed-seed climb.
 
 use std::time::Instant;
 
@@ -105,11 +113,15 @@ fn main() {
         format.max_plies
     );
 
+    let rotate = env_usize("ROTATE", 1) == 1;
+    let accept_margin = env_usize("ACCEPT_MARGIN", 25) as f64;
+    let block = train_seeds.len();
+
     let start = Instant::now();
     let mut best_params = Cc2Weights::attack_tuned().board_params();
     let mut best = objective(&best_params, width, depth, &train_seeds, format);
     eprintln!(
-        "iter 0 | baseline objective {best:+.1} | {:.0}s/eval",
+        "iter 0 | baseline objective {best:+.1} | {:.0}s/eval | rotate {rotate} margin {accept_margin}",
         start.elapsed().as_secs_f32()
     );
 
@@ -125,24 +137,50 @@ fn main() {
             let scale = (p.abs() as f64 + 0.02) * sigma;
             *p += (scale * gauss(&mut rng)) as f32;
         }
-        let score = objective(&proposal, width, depth, &train_seeds, format);
-        let accepted = score > best;
+
+        let accepted;
+        if rotate {
+            // Fresh disjoint block this iteration; incumbent and proposal race
+            // on it head-to-head (paired CRN within the iteration, no reuse
+            // across iterations — seed overfitting is structurally impossible).
+            let block_seeds = seed_set_from(8192 + (iter as usize) * block, block);
+            let incumbent_score = objective(&best_params, width, depth, &block_seeds, format);
+            let proposal_score = objective(&proposal, width, depth, &block_seeds, format);
+            accepted = proposal_score > incumbent_score + accept_margin;
+            if accepted {
+                eprintln!(
+                    "iter {iter} | ACCEPT {proposal_score:+.1} vs {incumbent_score:+.1} | sigma {sigma:.3} | params {:?}",
+                    proposal
+                );
+            } else {
+                eprintln!(
+                    "iter {iter} | reject {proposal_score:+.1} vs {incumbent_score:+.1} | sigma {sigma:.3}"
+                );
+            }
+        } else {
+            let score = objective(&proposal, width, depth, &train_seeds, format);
+            accepted = score > best;
+            if accepted {
+                best = score;
+                eprintln!(
+                    "iter {iter} | ACCEPT {score:+.1} | sigma {sigma:.3} | params {:?}",
+                    proposal
+                );
+            } else {
+                eprintln!("iter {iter} | reject {score:+.1} (best {best:+.1}) | sigma {sigma:.3}");
+            }
+        }
+
         if accepted {
             accepts += 1;
-            best = score;
             best_params = proposal;
             // One-fifth-style adaptation: widen on success, narrow on failure.
             sigma = (sigma * 1.3).min(0.5);
-            eprintln!(
-                "iter {iter} | ACCEPT {score:+.1} | sigma {sigma:.3} | params {:?}",
-                best_params
-            );
         } else {
             sigma = (sigma * 0.95).max(0.02);
-            eprintln!("iter {iter} | reject {score:+.1} (best {best:+.1}) | sigma {sigma:.3}");
         }
     }
-    eprintln!("climb done: {iter} iters, {accepts} accepts, train objective {best:+.1}");
+    eprintln!("climb done: {iter} iters, {accepts} accepts");
     println!(
         "best_params {}",
         best_params
