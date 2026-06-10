@@ -88,11 +88,24 @@ pub fn label_text(text: impl Into<String>, font: Handle<Font>) -> impl Bundle {
 /// identify which row was selected, e.g.
 /// `commands.spawn(menu_button(0, "Play", font)).insert(MyAction::Play);`.
 pub fn menu_button(index: usize, label: impl Into<String>, font: Handle<Font>) -> impl Bundle {
+    menu_button_sized(index, label, font, 220.0)
+}
+
+/// [`menu_button`] with an explicit row width, for screens whose labels outgrow
+/// the default 220 px (the pixel font runs ~15 px per glyph at the button size,
+/// so the default fits ~13 characters). One line per row is the contract — a
+/// label that wraps has outgrown its screen's width budget.
+pub fn menu_button_sized(
+    index: usize,
+    label: impl Into<String>,
+    font: Handle<Font>,
+    width: f32,
+) -> impl Bundle {
     (
         Button,
         Focusable::new(index),
         Node {
-            width: px(220),
+            width: px(width),
             height: px(34),
             margin: UiRect::all(px(4)),
             justify_content: JustifyContent::Center,
