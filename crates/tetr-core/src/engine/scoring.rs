@@ -83,6 +83,14 @@ impl EngineScoreAction {
                 kind: TSpinKind::Mini,
                 lines: 1,
             } => 200,
+            // T-Spin Mini Double: 400 (guideline; continues the 100-per-goal-unit
+            // pattern — TSMD awards 4 variable-goal units). Kept consistent with
+            // the attack table (1 line) and B2B qualification: the Mini-Double is
+            // a real clear in every rule table, not just some of them.
+            Self::TSpin {
+                kind: TSpinKind::Mini,
+                lines: 2,
+            } => 400,
             Self::TSpin {
                 kind: TSpinKind::Full,
                 lines: 0,
@@ -267,6 +275,26 @@ pub(crate) struct ScoreAward {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn mini_double_scores_400_and_sustains_back_to_back() {
+        // The unified Mini-Double row: 400 x level base score, B2B-qualifying.
+        let mut s = ScoreState::new(GoalSystem::Fixed, 1);
+
+        let first = s
+            .lock_result(GoalSystem::Fixed, Some(TSpinKind::Mini), 2)
+            .expect("a mini double scores");
+        assert_eq!(first.score, 400, "TSMD base = 400 x level 1");
+        assert!(!first.back_to_back_bonus, "first qualifying clear starts the chain");
+        assert!(s.back_to_back_active());
+
+        // A second mini double continues the chain: 400 + 50% = 600.
+        let second = s
+            .lock_result(GoalSystem::Fixed, Some(TSpinKind::Mini), 2)
+            .expect("a chained mini double scores");
+        assert_eq!(second.score, 600, "B2B mini double = 400 + 400/2");
+        assert!(second.back_to_back_bonus);
+    }
 
     #[test]
     fn combo_advances_on_clears_and_resets_on_clearless_lock() {

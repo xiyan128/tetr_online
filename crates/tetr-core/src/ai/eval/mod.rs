@@ -296,9 +296,10 @@ fn reward_for(
     if lines > 0 {
         let action = EngineScoreAction::from_lock_result(t_spin, lines);
         // Continuation uses the ENGINE's qualifying rule (`qualifies_for_back_to_back`,
-        // the same predicate `ScoreState::lock_result` applies), not the looser
-        // `b2b_eligible` bonus table above — the two differ on a mini double, and this
-        // term claims engine-exact attack.
+        // the same predicate `ScoreState::lock_result` applies) rather than the local
+        // `b2b_eligible` bonus table above. Since the Mini-Double row was unified
+        // across the rule tables the two happen to coincide, but the engine predicate
+        // stays the source of truth here — this term claims engine-exact attack.
         let b2b_continue = ctx.b2b && qualifies_for_back_to_back(t_spin, lines);
         let attack = attack_lines(action, b2b_continue, ctx.combo, perfect);
         total += w.attack * attack as f32;
@@ -561,11 +562,12 @@ mod tests {
     }
 
     #[test]
-    fn mini_double_attack_does_not_continue_b2b() {
-        // The attack term's continuation rule is the ENGINE's `qualifies_for_back_to_back`
-        // (only the mini SINGLE qualifies), not the looser abstract bonus table — so a
-        // mini t-spin double under an active chain must price its attack exactly as it
-        // would with no chain.
+    fn mini_double_attack_continues_b2b_like_the_engine() {
+        // The attack term's continuation rule is the ENGINE's
+        // `qualifies_for_back_to_back`. With the Mini-Double row unified across the
+        // rule tables, a mini t-spin double under an active chain prices the +1 B2B
+        // attack line — guideline attack: mini double 1 + B2B 1 = 2 vs 1 unchained,
+        // so at w.attack = 10 the chained reward is exactly +10 higher.
         let lock = LockOutcome {
             cells_locked: vec![(0, 0, CellKind::Some(PieceType::T))],
             cleared_rows: vec![0, 1],
@@ -578,7 +580,11 @@ mod tests {
         let spin = Some(TSpinKind::Mini);
         let chained = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: true });
         let fresh = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: false });
-        assert_eq!(chained, fresh, "a mini double neither continues nor prices a B2B");
+        assert_eq!(
+            chained.0 - fresh.0,
+            10,
+            "a chained mini double prices exactly one extra attack line"
+        );
     }
 
     #[test]

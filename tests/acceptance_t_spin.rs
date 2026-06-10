@@ -334,3 +334,69 @@ fn zero_line_t_spin_preserves_existing_b2b() {
     // ...and crucially the existing back-to-back chain is NOT broken.
     assert!(snapshot.back_to_back_active);
 }
+
+/// Scenario 8: a T-Spin Mini DOUBLE is a real scored clear — 400 × level — and
+/// it starts a Back-to-Back chain, consistent with the attack table treating it
+/// as a clear. (The Mini-Double row is unified across scoring, variable-goal
+/// units, B2B qualification, and attack; it must never be "a clear in some
+/// tables but not others".)
+///
+/// Geometry (10-wide board, right wall): a T at R270 (nub left) hugging the
+/// wall, origin (8, 0) — cells (9,0),(9,1),(9,2),(8,1), center (9,1). Corners:
+/// SE (10,0) and NE (10,2) are wall (blocked), SW (8,0) is pre-filled, NW (8,2)
+/// is open — three corners, back pair + one front ⇒ Mini (the Full pattern
+/// needs both front corners). Rows 0 and 1 complete on lock ⇒ a Mini Double.
+#[test]
+fn mini_t_spin_double_scores_400_and_starts_back_to_back() {
+    let mut engine = Engine::new(EngineConfig::default(), 0);
+    // Row 0 full except the T's (9,0); includes the SW corner (8,0).
+    for x in 0..=8 {
+        engine.set_cell(x, 0, CellKind::Some(PieceType::O));
+    }
+    // Row 1 full except the T's (8,1) and (9,1).
+    for x in 0..=7 {
+        engine.set_cell(x, 1, CellKind::Some(PieceType::O));
+    }
+
+    // The T arrives by rotation (the T-Spin precondition), resting at R270.
+    let mut mini_double = ActivePiece::new(PieceType::T, (8, 0));
+    mini_double.rotate_to(
+        PieceRotation::R270,
+        (8, 0),
+        RotationDirection::Clockwise,
+        1,
+        false,
+    );
+
+    let events = engine.lock_active_for_test(mini_double);
+    assert!(
+        matches!(
+            events.as_slice(),
+            [
+                EngineEvent::Locked {
+                    piece_type: PieceType::T,
+                    lines_cleared: 2,
+                },
+                EngineEvent::ScoreAwarded {
+                    action: EngineScoreAction::TSpin {
+                        kind: TSpinKind::Mini,
+                        lines: 2,
+                    },
+                    score: 400, // 400 × level 1
+                    total_score: 400,
+                    back_to_back_bonus: false, // first qualifying clear: starts, not continues
+                },
+                EngineEvent::Spawned { .. },
+            ]
+        ),
+        "expected a Mini Double worth 400 starting a B2B chain, got {events:?}",
+    );
+
+    let snapshot = engine.snapshot();
+    assert_eq!(snapshot.score, 400);
+    assert_eq!(snapshot.lines, 2);
+    assert!(
+        snapshot.back_to_back_active,
+        "a Mini Double is a qualifying clear: the B2B chain must now be live",
+    );
+}

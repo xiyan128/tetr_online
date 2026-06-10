@@ -340,9 +340,9 @@ impl SearchState {
     /// Delegates to the engine's own predicates — the exact transition
     /// `ScoreState::lock_result` performs — so the search's chain can never drift
     /// from what the engine will do when the move is actually played: a qualifying
-    /// clear (Tetris, full T-spin, mini T-spin *single*) sets the chain, a plain
-    /// 1-3 line clear breaks it, and anything else (no clear, or a non-qualifying
-    /// spin clear such as a mini double) preserves it.
+    /// clear (a Tetris, or any T-spin line clear, Mini included) sets the chain, a
+    /// plain 1-3 line clear breaks it, and anything else (a no-clear lock or a
+    /// zero-line spin) preserves it.
     fn update_b2b(&mut self, outcome: &LockOutcome, t_spin: Option<TSpinKind>) {
         let lines = outcome.cleared_rows.len();
         if qualifies_for_back_to_back(t_spin, lines) {
@@ -913,20 +913,23 @@ mod tests {
         s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Full));
         assert!(s.b2b, "T-spin double sets b2b");
 
-        // A mini T-spin single qualifies...
+        // Mini T-spin LINE clears qualify — single and double alike, now that the
+        // Mini-Double row is unified across the rule tables (score 400, 4 goal
+        // units, attack 1, B2B-qualifying).
         s.b2b = false;
         s.update_b2b(&lock_with_rows(&[0]), Some(TSpinKind::Mini));
         assert!(s.b2b, "mini single sets b2b");
-
-        // ...but a mini DOUBLE neither qualifies nor breaks (the engine rule:
-        // `qualifies_for_back_to_back` lists only the mini single) — the chain is
-        // preserved as-is, never started by it.
         s.b2b = false;
         s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Mini));
-        assert!(!s.b2b, "mini double does not start a chain");
+        assert!(s.b2b, "mini double sets b2b");
+
+        // A zero-line mini neither starts nor breaks a chain.
+        s.b2b = false;
+        s.update_b2b(&lock_with_rows(&[]), Some(TSpinKind::Mini));
+        assert!(!s.b2b, "zero-line mini does not start a chain");
         s.b2b = true;
-        s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Mini));
-        assert!(s.b2b, "mini double preserves an active chain");
+        s.update_b2b(&lock_with_rows(&[]), Some(TSpinKind::Mini));
+        assert!(s.b2b, "zero-line mini preserves an active chain");
     }
 
     #[test]

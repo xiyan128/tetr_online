@@ -112,6 +112,7 @@ pub fn variable_goal_units(t_spin: Option<TSpinKind>, lines: usize, back_to_back
         (None, 4) => 8,
         (Some(TSpinKind::Mini), 0) => 1,
         (Some(TSpinKind::Mini), 1) => 2,
+        (Some(TSpinKind::Mini), 2) => 4, // Mini Double: score 400 => 4 units (the score/100 pattern)
         (Some(TSpinKind::Full), 0) => 4,
         (Some(TSpinKind::Full), 1) => 8,
         (Some(TSpinKind::Full), 2) => 12,
@@ -127,9 +128,11 @@ pub fn variable_goal_units(t_spin: Option<TSpinKind>, lines: usize, back_to_back
 }
 
 pub fn qualifies_for_back_to_back(t_spin: Option<TSpinKind>, lines: usize) -> bool {
+    // Back-to-Back: a Tetris or ANY T-spin line clear (Mini Single/Double included,
+    // per the guideline's "difficult clears" rule).
     matches!(
         (t_spin, lines),
-        (None, 4) | (Some(TSpinKind::Mini), 1) | (Some(TSpinKind::Full), 1..=3)
+        (None, 4) | (Some(TSpinKind::Mini), 1..=2) | (Some(TSpinKind::Full), 1..=3)
     )
 }
 
@@ -167,6 +170,7 @@ mod tests {
         assert_eq!(variable_goal_units(None, 4, false), 8);
         assert_eq!(variable_goal_units(Some(TSpinKind::Mini), 0, false), 1);
         assert_eq!(variable_goal_units(Some(TSpinKind::Mini), 1, false), 2);
+        assert_eq!(variable_goal_units(Some(TSpinKind::Mini), 2, false), 4);
         assert_eq!(variable_goal_units(Some(TSpinKind::Full), 0, false), 4);
         assert_eq!(variable_goal_units(Some(TSpinKind::Full), 1, false), 8);
         assert_eq!(variable_goal_units(Some(TSpinKind::Full), 2, false), 12);
@@ -179,6 +183,27 @@ mod tests {
         assert_eq!(variable_goal_units(Some(TSpinKind::Full), 2, true), 18);
         assert_eq!(variable_goal_units(Some(TSpinKind::Full), 0, true), 4);
         assert_eq!(variable_goal_units(None, 2, true), 3);
+        assert_eq!(variable_goal_units(Some(TSpinKind::Mini), 2, true), 6); // 4 + 4/2
+    }
+
+    #[test]
+    fn every_t_spin_line_clear_qualifies_for_back_to_back() {
+        // The guideline "difficult clears" rule: Tetris + every T-spin LINE clear
+        // (Mini Double included — the row the tables used to disagree on).
+        assert!(qualifies_for_back_to_back(None, 4));
+        assert!(qualifies_for_back_to_back(Some(TSpinKind::Mini), 1));
+        assert!(qualifies_for_back_to_back(Some(TSpinKind::Mini), 2));
+        assert!(qualifies_for_back_to_back(Some(TSpinKind::Full), 1));
+        assert!(qualifies_for_back_to_back(Some(TSpinKind::Full), 3));
+        // Zero-line spins and plain 1-3 line clears do not qualify.
+        assert!(!qualifies_for_back_to_back(Some(TSpinKind::Mini), 0));
+        assert!(!qualifies_for_back_to_back(Some(TSpinKind::Full), 0));
+        assert!(!qualifies_for_back_to_back(None, 1));
+        assert!(!qualifies_for_back_to_back(None, 3));
+        // And plain small clears BREAK the chain while spins/no-clears preserve it.
+        assert!(breaks_back_to_back(None, 2));
+        assert!(!breaks_back_to_back(Some(TSpinKind::Mini), 2));
+        assert!(!breaks_back_to_back(None, 0));
     }
 
     #[test]
