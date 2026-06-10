@@ -137,6 +137,16 @@ struct PieceSignature {
     piece_type: PieceType,
     /// Number of locked cells on the board (changes on any lock/clear).
     locked_cells: usize,
+    /// Total pending-garbage lines queued against this player. An attack
+    /// arriving **mid-think** (live versus: the opponent clears while we are
+    /// still deciding) changes the planning situation as surely as a board
+    /// change — the search modelled a queue that no longer exists — so it
+    /// re-plans, paying the reaction delay again like a human noticing the
+    /// meter jump. Cancellation can only happen on our own lock (which already
+    /// changes `locked_cells`), so the total is a faithful change detector.
+    /// Single-player and blinded bots always see `0` here: behaviour is
+    /// byte-identical outside live versus.
+    pending_lines: u32,
 }
 
 impl PieceSignature {
@@ -147,6 +157,7 @@ impl PieceSignature {
         Some(Self {
             piece_type,
             locked_cells: snapshot.board_cells.len(),
+            pending_lines: snapshot.pending_garbage_total(),
         })
     }
 }
@@ -459,6 +470,42 @@ mod tests {
             "first poll under a long reaction delay must be neutral"
         );
         assert!(frame.dt_seconds > 0.0, "neutral frames still advance time");
+    }
+
+    #[test]
+    fn garbage_arriving_mid_think_restarts_the_reaction() {
+        // Live versus: an attack landing in the queue while the bot is still
+        // deciding is a new planning situation (the searched future modelled an
+        // empty queue). The controller must drop the in-flight think and re-plan,
+        // re-paying its reaction delay — like a human noticing the meter jump.
+        let handicap = Handicap {
+            reaction: core::time::Duration::from_millis(500), // 30 polls at 60 Hz
+            ..Handicap::perfect()
+        };
+        let polls_until_first_action = |interrupt_at: Option<usize>| {
+            let mut controller = AiController::new(handicap, DEFAULT_AI_SEED);
+            let mut engine = Engine::new(EngineConfig::default(), 1);
+            engine.step(InputFrame::default()); // spawn the first piece
+            for poll in 0..120 {
+                if interrupt_at == Some(poll) {
+                    engine.queue_garbage(2); // the mid-think arrival
+                }
+                let frame = controller.poll(&engine.snapshot());
+                if pressed_anything(&frame) {
+                    return poll;
+                }
+                engine.step(frame);
+            }
+            panic!("controller never acted within 120 polls");
+        };
+
+        let undisturbed = polls_until_first_action(None);
+        let interrupted = polls_until_first_action(Some(10));
+        assert!(
+            interrupted >= undisturbed + 8,
+            "an arrival at poll 10 must restart the reaction \
+             (undisturbed acted at {undisturbed}, interrupted at {interrupted})"
+        );
     }
 
     #[test]

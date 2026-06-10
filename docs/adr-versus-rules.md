@@ -72,11 +72,13 @@ Perfect hole information is symmetric in bot-vs-bot; a human-facing surface can
 blind a bot with the research `BlindToGarbage` wrapper (also the A/B
 instrument).
 
-Known gap for a live versus surface (benchmarks are unaffected — attack routes
-between pieces there): the controller's staleness signature does not include
-the pending meter, so an attack arriving *mid-think* would not trigger a
-replan until the next piece. Wire pending into `PieceSignature` when a real-
-time versus surface exists.
+~~Known gap for a live versus surface~~ (closed with the versus-mode strike):
+the controller's staleness signature now includes the pending-garbage total,
+so an attack arriving *mid-think* re-plans immediately — re-paying the
+reaction delay, like a human noticing the meter jump (pinned by
+`garbage_arriving_mid_think_restarts_the_reaction`). Benchmarks were never
+affected (attack routes between pieces there), and blinded bots see a
+constant `0`, so their behaviour is unchanged.
 
 ## Deliberately deferred
 
