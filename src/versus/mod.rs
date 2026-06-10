@@ -24,6 +24,7 @@ use crate::level::engine_bridge::{das_config_from_level, PendingEdges, SIM_DT_SE
 use crate::player::{KeyboardController, PlayerController, RawKeyboardFrame};
 use crate::GameState;
 
+mod feel;
 mod overlay;
 mod render;
 
@@ -187,7 +188,8 @@ impl Plugin for VersusPlugin {
                     .run_if(in_state(VersusPhase::Running)),
             )
             .add_plugins(render::VersusRenderPlugin)
-            .add_plugins(overlay::VersusOverlayPlugin);
+            .add_plugins(overlay::VersusOverlayPlugin)
+            .add_plugins(feel::VersusFeelPlugin);
     }
 }
 
@@ -700,6 +702,13 @@ mod tests {
             routed,
             "a clear on seat 0 must queue garbage against seat 1"
         );
+        // The feel pass: net attack leaving a board spawns a "+n" pop.
+        let pops = app
+            .world_mut()
+            .query::<&feel::AttackPop>()
+            .iter(app.world())
+            .count();
+        assert!(pops > 0, "sent attack shows a +n pop by the sender's board");
     }
 
     #[test]
