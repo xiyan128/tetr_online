@@ -4,42 +4,39 @@
 //! the seeded piece generator, the score machine, and per-tick timing that a
 //! search must not fork or advance. So the AI carries its own lightweight,
 //! cloneable mirror of just the state a placement search needs: the board, the
-//! active piece, the hold slot, the revealed Next queue, the reconstructed 7-bag
-//! remainder, and the Back-to-Back flag. A [`SearchState`] is built from an
+//! active piece, the hold slot, the revealed Next queue, the engine-exported
+//! 7-bag remainder, and the Back-to-Back flag. A [`SearchState`] is built from an
 //! [`EngineSnapshot`] via [`SearchState::from_snapshot`] and advanced one
 //! placement at a time by [`SearchState::commit`], which locks the active piece
 //! via `BitBoard::lock_piece` (the bitboard mirror of `lock_and_clear`) so the board
 //! can never disagree with the real rules.
 //!
-//! # Bag reconstruction
+//! # Bag tracking
 //!
-//! The snapshot exposes the revealed Next queue but **not** the generator's
-//! internal bag, so a hold-aware lookahead must reconstruct it. We mirror Cold
-//! Clear's `bag: EnumSet<Piece>` with a small [`BagState`] bitset recording which
-//! of the seven tetrominoes have *not yet* been dealt out of the current bag,
-//! rebuilt by walking the already-dealt pieces (the active piece, then the
-//! revealed queue) front-to-back from a fresh bag.
+//! The snapshot exports the generator's own current-bag remainder
+//! ([`EngineSnapshot::bag_remainder`]) — the **exact** set the next piece beyond
+//! the revealed queue draws from — so the search starts from the truth rather
+//! than a reconstruction. (A reconstruction from the active+queue window alone
+//! is impossible: the window straddles bag boundaries, so walking it from a
+//! fresh bag under-claims whenever the active piece is not its bag's first
+//! piece, and at `preview_count <= 4` even over-claims pieces the bag already
+//! dealt. Pinned by `bag_matches_the_generator_truth_at_any_preview`.)
 //!
-//! The reconstruction is a **sound approximation**, not exact: the walk starts
-//! from a full bag at the window's first piece, so pieces from the *previous*
-//! bag inside the window are also treated as dealt — the remainder can be a
-//! conservative **subset** of the truth (speculation explores slightly fewer
-//! futures than possible, never impossible ones). Soundness holds because the
-//! current bag's dealt prefix (at most 6 pieces) always fits inside the
-//! active+queue window at the default preview of 5 (window 6) — pinned by
-//! `bag_reconstruction_never_claims_a_dealt_piece`. A `preview_count <= 4`
-//! window is shorter than a bag's dealt prefix can be, letting dealt pieces
-//! escape it — there the remainder **overclaims** and speculation would branch
-//! on impossible pieces. Exact reconstruction would need the engine to expose
-//! its deal count; not worth it while the shipped preview is 5.
+//! We mirror Cold Clear's `bag: EnumSet<Piece>` with a small [`BagState`] bitset.
+//! The accounting convention along a search path: pieces spawned **from the
+//! revealed queue** never touch the bag (the generator already dealt them — the
+//! exported remainder accounts for them, and a queue piece may even belong to a
+//! *previous* bag whose value legitimately remains available in the current
+//! one). Only **speculative** deals — `commit_with_next` /
+//! `commit_placement_with_next`, past the queue — consume the bag, refilling on
+//! the seven-bag boundary like the real generator.
 
 use smallvec::SmallVec;
 
 use crate::ai::movegen::Placement;
 use crate::engine::{
     breaks_back_to_back, classify_t_spin, qualifies_for_back_to_back, ActivePiece, BitBoard,
-    Board, CellKind, EngineSnapshot, LockOutcome, Piece, PieceRotation, RotationDirection,
-    TSpinKind,
+    Board, CellKind, EngineSnapshot, LockOutcome, Piece, TSpinKind,
 };
 
 /// The remainder of the current 7-bag: which tetrominoes have **not** yet been
@@ -78,9 +75,15 @@ impl BagState {
             .expect("PieceType::all() contains every piece")
     }
 
-    /// Whether `piece_type` is still available to be dealt from this bag.
+    /// Whether the **next deal** can produce `piece_type`.
+    ///
+    /// An exhausted bag (empty remainder — a seven-bag boundary) refills before
+    /// the next draw, so at a boundary *every* piece is possible: this returns
+    /// `true` for all seven then, mirroring [`deal`](Self::deal)'s lazy refill.
+    /// Without this, speculation at a bag boundary would enumerate nothing and a
+    /// search line would silently dead-end every seventh piece.
     pub fn contains(self, piece_type: crate::engine::PieceType) -> bool {
-        self.remaining & Self::bit(piece_type) != 0
+        self.remaining == 0 || self.remaining & Self::bit(piece_type) != 0
     }
 
     /// Account for `piece_type` having been dealt out of the bag.
@@ -96,14 +99,18 @@ impl BagState {
         self.remaining &= !Self::bit(piece_type);
     }
 
-    /// Reconstruct the bag remainder after `dealt` pieces have been handed out,
-    /// in deal order, starting from a fresh bag.
-    pub fn from_dealt(dealt: impl IntoIterator<Item = crate::engine::PieceType>) -> Self {
-        let mut bag = Self::full();
-        for piece_type in dealt {
-            bag.deal(piece_type);
+    /// A bag whose remainder is exactly `pieces` — the constructor for the
+    /// engine-exported [`EngineSnapshot::bag_remainder`]. An empty iterator is a
+    /// bag boundary; [`contains`](Self::contains)/[`deal`](Self::deal) treat it
+    /// as refilling on the next draw.
+    ///
+    /// [`EngineSnapshot::bag_remainder`]: crate::engine::EngineSnapshot::bag_remainder
+    pub fn from_pieces(pieces: impl IntoIterator<Item = crate::engine::PieceType>) -> Self {
+        let mut remaining = 0u8;
+        for piece_type in pieces {
+            remaining |= Self::bit(piece_type);
         }
-        bag
+        Self { remaining }
     }
 }
 
@@ -134,7 +141,8 @@ pub struct SearchState {
     pub hold: Option<crate::engine::PieceType>,
     /// The revealed Next queue, front = next to spawn.
     pub queue: SmallVec<[crate::engine::PieceType; 16]>,
-    /// The reconstructed 7-bag remainder the next *unknown* piece is drawn from.
+    /// The engine-exported 7-bag remainder the next *unknown* piece (beyond the
+    /// revealed queue) is drawn from; empty = a bag boundary (next draw refills).
     pub bag: BagState,
     /// Whether a Back-to-Back chain is currently active.
     pub b2b: bool,
@@ -168,12 +176,10 @@ impl SearchState {
         let queue: SmallVec<[crate::engine::PieceType; 16]> =
             snapshot.next_queue.iter().copied().collect();
 
-        // The active piece was the most recently dealt piece, then the queue (in
-        // order). Hold is *not* part of bag accounting: a held piece left the
-        // dealt stream when it was put aside, and the bag already advanced past it
-        // at deal time.
-        let dealt = std::iter::once(active.piece_type()).chain(queue.iter().copied());
-        let bag = BagState::from_dealt(dealt);
+        // The engine exports its generator's current-bag remainder directly —
+        // already net of every dealt piece (active, queue, and any held piece), so
+        // no reconstruction or hold special-casing is needed here.
+        let bag = BagState::from_pieces(snapshot.bag_remainder.iter().copied());
 
         Some(Self {
             board,
@@ -193,7 +199,8 @@ impl SearchState {
     /// Locks via `BitBoard::lock_piece` (so the cleared rows and
     /// resulting board match the real rules exactly), then deals the next piece:
     /// the front of the revealed queue becomes the new active piece (spawned at
-    /// its guideline origin), and the bag is advanced for it. When the revealed
+    /// its guideline origin); the bag is untouched (queue pieces are already
+    /// accounted in the exported remainder — see the module docs). When the revealed
     /// queue runs dry, the search is expected to supply a speculative next piece
     /// via [`SearchState::commit_with_next`]; calling `commit` with an empty queue
     /// leaves `active` unchanged and only mutates the board, which a caller can
@@ -216,6 +223,7 @@ impl SearchState {
     /// and commits each via this method to explore "what if the next piece is X".
     pub fn commit_with_next(&mut self, next: crate::engine::PieceType) -> LockOutcome {
         let outcome = self.lock_active();
+        self.bag.deal(next); // a speculative draw consumes the bag (queue spawns don't)
         self.spawn(next);
         outcome
     }
@@ -250,8 +258,9 @@ impl SearchState {
     /// Regardless of the swap, the placement's piece is classified against the
     /// pre-lock board (engine order, matching [`Engine`](crate::engine::Engine)'s
     /// own lock path) and locked via `BitBoard::lock_piece`; the Back-to-Back flag
-    /// is then transitioned and the *next queued* piece is spawned (the only
-    /// [`BagState::deal`] this method performs).
+    /// is then transitioned and the *next queued* piece is spawned (no
+    /// [`BagState::deal`] — queue pieces are already accounted in the exported
+    /// remainder; only speculative commits consume the bag).
     ///
     /// Returns the [`LockOutcome`] from the lock for the evaluator's reward half.
     ///
@@ -261,7 +270,7 @@ impl SearchState {
     pub fn commit_placement(&mut self, placement: &Placement) -> LockOutcome {
         let outcome = self.apply_placement(placement);
         if let Some(next) = self.deal_from_queue() {
-            self.spawn(next); // the ONLY deal — next ply's active
+            self.spawn(next); // queue-sourced: already accounted in the bag
         }
         outcome
     }
@@ -289,7 +298,8 @@ impl SearchState {
         next: crate::engine::PieceType,
     ) -> LockOutcome {
         let outcome = self.apply_placement(placement);
-        self.spawn(next); // the ONLY deal — the speculative next ply's active
+        self.bag.deal(next); // a speculative draw consumes the bag (queue spawns don't)
+        self.spawn(next);
         outcome
     }
 
@@ -363,12 +373,15 @@ impl SearchState {
         };
     }
 
-    /// Replace the active piece with a freshly dealt `piece_type` at its spawn
-    /// origin and advance the bag for it.
+    /// Replace the active piece with `piece_type` at its spawn origin.
+    ///
+    /// Deliberately does **not** touch the bag: queue-sourced spawns are already
+    /// accounted for by the engine-exported remainder (see the module's bag
+    /// convention), and the speculative commit paths deal the bag explicitly
+    /// before spawning.
     fn spawn(&mut self, piece_type: crate::engine::PieceType) {
         let origin = Piece::from(piece_type).spawn_coords(self.board_width, self.visible_height);
         self.active = ActivePiece::new(piece_type, origin);
-        self.bag.deal(piece_type);
     }
 
     /// Build a search state directly from parts, for crafted-board unit tests in the
@@ -414,25 +427,16 @@ fn rebuild_board(snapshot: &EngineSnapshot) -> Board {
     board
 }
 
-/// Reconstruct an [`ActivePiece`] at the pose reported by the snapshot.
+/// Reconstruct an [`ActivePiece`] at the pose reported by the snapshot, with
+/// **spawn-fresh history** ([`ActivePiece::at_pose`]).
 ///
-/// [`ActivePiece::new`] always spawns at rotation `R0`; we apply the snapshot's
-/// rotation with [`ActivePiece::rotate_to`] so the search starts from the real
-/// pose. The kick / direction bookkeeping passed here is synthetic (the search
-/// re-derives reachable poses from scratch and ignores lock-down history), so the
-/// only field that matters is the resulting rotation.
+/// The snapshot does not carry the piece's action/kick history, so the engine's
+/// true T-spin state for an in-place lock is unknowable here. Spawn-fresh history
+/// is the conservative reconstruction: it never classifies a spin the engine might
+/// not award. (Movegen re-derives placements — and their spin states — from
+/// scratch along explicit paths, so search placements are unaffected.)
 fn rebuild_active(snapshot: &crate::engine::ActivePieceSnapshot) -> ActivePiece {
-    let mut active = ActivePiece::new(snapshot.piece_type, snapshot.origin);
-    if snapshot.rotation != PieceRotation::R0 {
-        active.rotate_to(
-            snapshot.rotation,
-            snapshot.origin,
-            RotationDirection::Clockwise,
-            1,
-            false,
-        );
-    }
-    active
+    ActivePiece::at_pose(snapshot.piece_type, snapshot.origin, snapshot.rotation)
 }
 
 /// The neutral spawn origin a freshly dealt piece would take, mirroring the
@@ -465,7 +469,7 @@ fn hard_drop<B: crate::engine::Occupancy>(active: &ActivePiece, board: &B) -> Ac
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::engine::{Engine, EngineConfig, InputFrame, PieceType};
+    use crate::engine::{Engine, EngineConfig, InputFrame, PieceRotation, PieceType};
 
     /// A snapshot from a fresh engine that has spawned its first piece.
     fn spawned_snapshot(seed: u64) -> EngineSnapshot {
@@ -610,27 +614,35 @@ mod tests {
             state.queue.iter().copied().collect::<Vec<_>>(),
             queue_before
         );
+
+        // A speculative deal consumes the bag (unlike queue-sourced spawns). Use a
+        // crafted full bag so the membership flip is deterministic.
+        let mut s = crafted_state(PieceType::L, None, &[PieceType::O]);
+        assert!(s.bag.contains(PieceType::T));
+        s.active = hard_drop(&s.active, &s.board);
+        s.commit_with_next(PieceType::T);
+        assert!(
+            !s.bag.contains(PieceType::T),
+            "commit_with_next must deal the speculative piece out of the bag"
+        );
     }
 
     #[test]
-    fn bag_reconstructs_from_revealed_queue() {
+    fn bag_comes_from_the_engine_exported_remainder() {
+        // from_snapshot adopts the engine's exported remainder verbatim: bag
+        // membership must equal `snapshot.bag_remainder` membership. (At 6 pieces
+        // consumed the remainder is mid-bag and non-empty, so plain membership —
+        // not the boundary draw-set rule — is what's exercised.)
         let snapshot = spawned_snapshot(123);
+        assert!(!snapshot.bag_remainder.is_empty(), "mid-bag fixture");
         let state = SearchState::from_snapshot(&snapshot).unwrap();
 
-        // Re-derive the expected bag from active + queue and compare.
-        let dealt = std::iter::once(snapshot.active.as_ref().unwrap().piece_type)
-            .chain(snapshot.next_queue.iter().copied());
-        let expected = BagState::from_dealt(dealt);
-        assert_eq!(state.bag, expected);
-
-        // Pieces already dealt this bag are absent; the seven-bag invariant means
-        // the union of dealt + remaining over a whole bag is all seven types.
-        let dealt_this_bag: Vec<_> = std::iter::once(snapshot.active.as_ref().unwrap().piece_type)
-            .chain(snapshot.next_queue.iter().copied())
-            .take(7)
-            .collect();
-        for pt in &dealt_this_bag {
-            assert!(!state.bag.contains(*pt));
+        for pt in PieceType::all() {
+            assert_eq!(
+                state.bag.contains(pt),
+                snapshot.bag_remainder.contains(&pt),
+                "bag membership for {pt:?} must mirror the exported remainder"
+            );
         }
     }
 
@@ -641,45 +653,68 @@ mod tests {
             assert!(bag.contains(pt));
             bag.deal(pt);
         }
-        // A full bag dealt out is empty; the next deal refills it.
+        // A fully dealt bag is a boundary: the next draw refills, so EVERY piece
+        // is a possible next deal (the draw-set semantics speculation relies on).
+        for pt in PieceType::all() {
+            assert!(bag.contains(pt), "at a boundary every piece is drawable");
+        }
+        // The next deal refills then consumes the dealt piece.
         bag.deal(PieceType::I);
         assert!(!bag.contains(PieceType::I));
+        assert!(bag.contains(PieceType::T));
     }
 
     #[test]
-    fn bag_reconstruction_never_claims_a_dealt_piece() {
-        // The module-doc soundness contract: the reconstructed remainder may be a
-        // conservative subset of the true bag (previous-bag pieces in the window are
-        // wrongly treated as dealt), but at the default preview it must NEVER claim a
-        // piece the current bag has already dealt — speculation branching on an
-        // impossible next piece would search futures that cannot happen.
-        for seed in [0u64, 7, 42, 12345] {
-            // The generator's deal stream is the ground truth for bag boundaries.
-            let stream: Vec<PieceType> = crate::engine::PieceGenerator::with_seed(seed)
-                .take(40)
-                .collect();
-            let mut engine = Engine::new(EngineConfig::default(), seed);
-            engine.step(InputFrame::default()); // spawn piece 0
-            let mut consumed = 6usize; // 1 active + the default 5-piece preview
+    fn bag_matches_the_generator_truth_at_any_preview() {
+        // The exactness contract the engine-exported remainder buys: at EVERY
+        // position — any preview length, across bag boundaries, through a hold —
+        // the search bag's draw-set equals the true bag (the complement of what
+        // the current bag has dealt, derived from a same-seed generator replay).
+        // The old window reconstruction was wrong in ~78% of positions at preview
+        // 5 and unsoundly over-claimed dealt pieces at preview <= 4.
+        for preview_count in [5usize, 2] {
+            for seed in [0u64, 7, 42, 12345] {
+                let stream: Vec<PieceType> = crate::engine::PieceGenerator::with_seed(seed)
+                    .take(64)
+                    .collect();
+                // Tall field so naive center hard-drops never top out (bag
+                // accounting is board-independent).
+                let config = EngineConfig {
+                    preview_count,
+                    visible_height: 40,
+                    buffer_height: 20,
+                    ..EngineConfig::default()
+                };
+                let mut engine = Engine::new(config, seed);
+                engine.step(InputFrame::default()); // spawn the first piece
+                let mut consumed = 1 + preview_count; // active + revealed queue
 
-            for _ in 0..12 {
-                let snapshot = engine.snapshot();
-                if snapshot.game_over.is_some() {
-                    break; // naive center drops eventually stack out; soundness was checked while alive
+                for k in 0..16 {
+                    if k == 4 {
+                        // An empty-hold swap consumes one extra generator deal.
+                        engine.step(InputFrame {
+                            hold: true,
+                            ..InputFrame::default()
+                        });
+                        consumed += 1;
+                    }
+                    let state =
+                        SearchState::from_snapshot(&engine.snapshot()).unwrap();
+                    let dealt_this_bag = &stream[(consumed / 7) * 7..consumed];
+                    for pt in PieceType::all() {
+                        assert_eq!(
+                            state.bag.contains(pt),
+                            !dealt_this_bag.contains(&pt),
+                            "preview {preview_count}, seed {seed}, piece {k}: \
+                             bag draw-set diverged from the deal-stream truth for {pt:?}"
+                        );
+                    }
+                    engine.step(InputFrame {
+                        hard_drop: true,
+                        ..InputFrame::default()
+                    });
+                    consumed += 1;
                 }
-                let state = SearchState::from_snapshot(&snapshot).unwrap();
-                let dealt_this_bag = &stream[(consumed / 7) * 7..consumed];
-                for pt in PieceType::all() {
-                    assert!(
-                        !(state.bag.contains(pt) && dealt_this_bag.contains(&pt)),
-                        "seed {seed}: bag claims {pt:?} but the current bag already dealt it"
-                    );
-                }
-                engine.step(InputFrame {
-                    hard_drop: true,
-                    ..InputFrame::default()
-                });
-                consumed += 1;
             }
         }
     }
@@ -814,11 +849,10 @@ mod tests {
         assert_eq!(s.queue.len(), queue_len_before - 1);
         assert_eq!(s.active.piece_type(), next_up);
 
-        // The bag advanced by exactly one deal — the *next* queued piece's spawn —
-        // not by the swapped-in piece (which was already dealt).
-        let mut expected_bag = bag_before;
-        expected_bag.deal(next_up);
-        assert_eq!(s.bag, expected_bag);
+        // The bag is untouched: every piece involved (the swapped-in I, the next
+        // queued spawn) was already dealt by the generator and accounted in the
+        // exported remainder — only SPECULATIVE deals consume the search's bag.
+        assert_eq!(s.bag, bag_before);
     }
 
     #[test]
@@ -853,14 +887,12 @@ mod tests {
             vec![queue[2]]
         );
 
-        // Bag advances for the spawn ONLY. The swapped-in A was already dealt (in
-        // production it left the bag when it was revealed into the queue), so the
-        // funding pop must NOT re-deal it — `spawn`/`deal` fires only for B, the
-        // following queued piece. (STEP 0 invariant: never re-deal the swapped-in
-        // piece.)
-        let mut expected_bag = bag_before;
-        expected_bag.deal(queue[1]);
-        assert_eq!(s.bag, expected_bag);
+        // The bag is untouched: the swapped-in A and the spawned B are both
+        // queue-sourced (the generator dealt them long ago; the exported remainder
+        // already accounts for them). Re-dealing either would corrupt the bag —
+        // queue pieces can even belong to a previous bag whose values are
+        // legitimately still available in the current one.
+        assert_eq!(s.bag, bag_before);
     }
 
     #[test]
@@ -966,42 +998,41 @@ mod tests {
     }
 
     #[test]
-    fn commit_placement_deals_bag_once() {
-        // commit_placement performs exactly ONE bag deal per call — the trailing
-        // `spawn` of the next queued piece — and never re-deals a swapped-in piece.
-        // After a hold commit then a plain commit, the bag must reflect precisely
-        // those two spawns.
-        let queue = [
-            PieceType::I,
-            PieceType::O,
-            PieceType::T,
-            PieceType::S,
-            PieceType::Z,
-        ];
+    fn only_speculative_commits_consume_the_bag() {
+        // The bag convention: queue-sourced transitions (plain commits, hold
+        // commits, the empty-hold funding pop) never touch the bag — the engine's
+        // exported remainder already accounts for every revealed piece. Only a
+        // speculative deal (commit_placement_with_next / commit_with_next), which
+        // models drawing a genuinely unknown piece, consumes it.
+        let queue = [PieceType::I, PieceType::O];
         let mut s = crafted_state(PieceType::L, None, &queue);
-        // `for_test` starts the bag FULL (it does not pre-deal the active or the
-        // revealed queue), so every legitimate deal below is observable from full.
         assert_eq!(s.bag, BagState::full());
 
-        // 1) Hold commit (empty hold): locks the swapped-in queue[0]=I WITHOUT a
-        //    deal (already-dealt invariant), then spawns queue[1]=O — one deal.
+        // 1) Hold commit (empty hold): swap + funding pop + spawn — no bag change.
         let hold_placement = placements_of(&s)
             .into_iter()
             .find(|p| p.used_hold)
             .expect("a hold placement exists");
         assert_eq!(hold_placement.piece_type(), queue[0]);
         s.commit_placement(&hold_placement);
+        assert_eq!(s.bag, BagState::full(), "queue-sourced hold commit left the bag alone");
 
-        // 2) Plain commit of the now-active O: spawns queue[2]=T — one deal.
+        // 2) Plain commit draining the queue — still no bag change.
         let plain_placement = placements_of(&s)
             .into_iter()
             .find(|p| !p.used_hold)
             .expect("a no-hold placement exists");
         s.commit_placement(&plain_placement);
+        assert_eq!(s.bag, BagState::full(), "queue-sourced plain commit left the bag alone");
+        assert!(s.queue.is_empty(), "the two commits drained the 2-piece queue");
 
-        // Exactly two spawns dealt across the two commits: O then T. The starting
-        // active L and the swapped-in I were never dealt by commit_placement.
-        let expected = BagState::from_dealt([queue[1], queue[2]]);
-        assert_eq!(s.bag, expected);
+        // 3) Speculative commit past the queue: the supplied piece IS a bag draw.
+        let spec_placement = placements_of(&s)
+            .into_iter()
+            .find(|p| !p.used_hold)
+            .expect("a placement for the active piece exists");
+        s.commit_placement_with_next(&spec_placement, PieceType::S);
+        assert!(!s.bag.contains(PieceType::S), "the speculative S was dealt from the bag");
+        assert!(s.bag.contains(PieceType::Z), "undealt pieces remain available");
     }
 }

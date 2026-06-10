@@ -11,6 +11,12 @@ use rand::seq::SliceRandom;
 use rand::SeedableRng;
 
 pub struct PieceGenerator {
+    /// Deal stack: pieces pop from the END. Layout invariant (kept by `with_seed`
+    /// pre-filling one bag ahead and `next` refilling whenever `len` drops below
+    /// 7): the first 7 elements are the *next* (untouched) bag, and everything at
+    /// index 7.. is the not-yet-dealt remainder of the *current* bag — so
+    /// `bag[7..]` IS [`bag_remainder`](Self::bag_remainder), and an exactly-empty
+    /// remainder (`len == 7`) is a bag boundary.
     bag: Vec<PieceType>,
     rng: StdRng,
 }
@@ -21,7 +27,14 @@ impl PieceGenerator {
         let mut bag = Vec::from(PieceType::all());
         bag.shuffle(&mut rng);
 
-        Self { bag, rng }
+        let mut generator = Self { bag, rng };
+        // Pre-fill one bag ahead so the layout invariant above holds from the
+        // start (the fresh, untouched current bag sits at index 7..). This draws
+        // the second bag's shuffle at construction instead of on the first
+        // `next()`; the shuffles are consumed in the same order either way, so
+        // the dealt piece sequence for a given seed is unchanged.
+        generator.refill_bag();
+        generator
     }
 
     fn refill_bag(&mut self) {
@@ -30,6 +43,16 @@ impl PieceGenerator {
         next_bag.append(&mut self.bag);
 
         self.bag = next_bag;
+    }
+
+    /// The not-yet-dealt remainder of the **current** 7-bag, i.e. exactly the set
+    /// the next [`next()`](Iterator::next) call deals from — empty at a bag
+    /// boundary (the next deal opens a fresh bag of all seven). This is the
+    /// engine-side ground truth a search needs to speculate past the revealed
+    /// queue; reconstructing it from the queue alone is impossible (the queue
+    /// window straddles bag boundaries).
+    pub fn bag_remainder(&self) -> &[PieceType] {
+        &self.bag[7..]
     }
 
     /// The next `PieceType::LEN` pieces, in deal order, without consuming the
@@ -107,6 +130,60 @@ mod tests {
             pieces.sort_by_key(|piece_type| *piece_type as u8);
 
             assert_eq!(pieces, PieceType::all());
+        }
+    }
+
+    /// Sorted copy of a piece set, for order-insensitive comparison.
+    fn sorted(pieces: &[PieceType]) -> Vec<PieceType> {
+        let mut pieces = pieces.to_vec();
+        pieces.sort_by_key(|piece_type| *piece_type as u8);
+        pieces
+    }
+
+    #[test]
+    fn bag_remainder_is_the_complement_of_the_current_bags_dealt_pieces() {
+        // The exported remainder must equal "all seven minus what the current bag
+        // has dealt" at every point, across several bag boundaries. The dealt
+        // stream itself is the ground truth: piece `i` belongs to bag `i / 7`.
+        let mut generator = PieceGenerator::with_seed(7);
+
+        // Fresh generator: nothing dealt, the whole current bag remains.
+        assert_eq!(sorted(generator.bag_remainder()), PieceType::all());
+
+        let mut dealt: Vec<PieceType> = Vec::new();
+        for i in 0usize..21 {
+            dealt.push(generator.next().unwrap());
+            // At an exact bag boundary the current bag is spent and the export is
+            // EMPTY (the next deal opens a fresh bag); otherwise it is the
+            // complement of what the current bag has dealt so far.
+            let expected: Vec<PieceType> = if (i + 1).is_multiple_of(7) {
+                Vec::new()
+            } else {
+                let bag_start = ((i + 1) / 7) * 7;
+                let dealt_this_bag = &dealt[bag_start..];
+                PieceType::all()
+                    .into_iter()
+                    .filter(|pt| !dealt_this_bag.contains(pt))
+                    .collect()
+            };
+            assert_eq!(
+                sorted(generator.bag_remainder()),
+                sorted(&expected),
+                "remainder mismatch after deal {i}"
+            );
+        }
+    }
+
+    #[test]
+    fn bag_remainder_is_empty_exactly_at_bag_boundaries() {
+        let mut generator = PieceGenerator::with_seed(0);
+        for i in 1usize..=21 {
+            generator.next().unwrap();
+            assert_eq!(
+                generator.bag_remainder().is_empty(),
+                i.is_multiple_of(7),
+                "boundary emptiness wrong after {i} deals"
+            );
         }
     }
 }

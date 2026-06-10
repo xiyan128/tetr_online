@@ -331,7 +331,9 @@ depth-1 score, never worse than not searching it.)
 
 When a branch consumes the entire revealed Next queue, the next piece is *unknown* but
 **constrained**: it is drawn from the current 7-bag remainder, which `SearchState.bag`
-([`BagState`]) already reconstructs. The beam speculates over it **deterministically**:
+([`BagState`]) carries — exported by the engine snapshot (the generator's own
+remainder; exact, not a reconstruction) and advanced along the branch by each
+speculative deal. The beam speculates over it **deterministically**:
 
 - At a node whose `queue` is empty, instead of one child-per-placement we branch over
   **each `PieceType` still in `state.bag`** (`BagState::contains`), iterated in

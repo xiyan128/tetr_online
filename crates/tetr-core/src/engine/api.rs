@@ -143,6 +143,13 @@ pub struct EngineSnapshot {
     /// combo is active). Lets a search resume from the real in-game combo instead of
     /// assuming `0`, so it can value continuing a chain.
     pub combo: u32,
+    /// Pieces the generator's **current 7-bag** has not yet dealt — the exact set
+    /// the next piece *beyond the revealed queue* draws from (empty ⇒ a bag
+    /// boundary: the next deal opens a fresh bag of all seven). Exported because a
+    /// search speculating past the queue cannot reconstruct this from `next_queue`
+    /// alone: the queue window straddles bag boundaries, so any reconstruction is
+    /// wrong whenever the active piece is not the first piece of its bag.
+    pub bag_remainder: Vec<PieceType>,
     pub game_over: Option<GameOverStatus>,
 }
 
@@ -244,6 +251,7 @@ impl Engine {
             goal_remaining: self.score_state.goal_remaining(),
             back_to_back_active: self.score_state.back_to_back_active(),
             combo: self.score_state.combo(),
+            bag_remainder: self.generator.bag_remainder().to_vec(),
             game_over: self.game_over,
         }
     }
@@ -1433,5 +1441,64 @@ mod tests {
         // The latched game-over makes the next step a no-op: no respawn happens.
         engine.step(InputFrame::default());
         assert!(engine.snapshot().active.is_none());
+    }
+
+    #[test]
+    fn snapshot_bag_remainder_matches_the_deal_stream_truth() {
+        // The exported remainder must equal "all seven minus what the current bag
+        // has dealt", where the current bag is the one containing the next piece
+        // beyond the revealed queue. A same-seed generator replays the engine's
+        // deal stream as ground truth; piece `i` of the stream belongs to bag
+        // `i / 7`. Exercised across several bag boundaries and a hold (which
+        // consumes one extra deal when the hold slot is empty).
+        for seed in [0u64, 7, 42] {
+            let stream: Vec<PieceType> =
+                crate::engine::PieceGenerator::with_seed(seed).take(64).collect();
+            // Tall field so naive center hard-drops never top out; bag accounting
+            // is board-independent.
+            let config = EngineConfig {
+                visible_height: 40,
+                buffer_height: 20,
+                ..EngineConfig::default()
+            };
+            let mut engine = Engine::new(config, seed);
+            engine.step(InputFrame::default()); // spawn piece 0
+            let mut consumed = 6usize; // 1 active + the 5-piece preview
+
+            for k in 0..20 {
+                if k == 3 {
+                    // An empty-hold swap pulls one extra piece from the generator.
+                    engine.step(InputFrame {
+                        hold: true,
+                        ..InputFrame::default()
+                    });
+                    consumed += 1;
+                }
+
+                let bag_start = (consumed / 7) * 7;
+                let dealt_this_bag = &stream[bag_start..consumed];
+                let mut expected: Vec<PieceType> = PieceType::all()
+                    .into_iter()
+                    .filter(|pt| !dealt_this_bag.contains(pt))
+                    .collect();
+                if consumed.is_multiple_of(7) {
+                    expected.clear(); // a bag boundary exports an empty remainder
+                }
+
+                let mut remainder = engine.snapshot().bag_remainder;
+                remainder.sort_by_key(|pt| *pt as u8);
+                expected.sort_by_key(|pt| *pt as u8);
+                assert_eq!(
+                    remainder, expected,
+                    "seed {seed}: bag remainder diverged from the deal stream at piece {k}"
+                );
+
+                engine.step(InputFrame {
+                    hard_drop: true,
+                    ..InputFrame::default()
+                });
+                consumed += 1;
+            }
+        }
     }
 }

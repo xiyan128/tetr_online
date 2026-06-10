@@ -59,6 +59,26 @@ impl ActivePiece {
         }
     }
 
+    /// An `ActivePiece` at an arbitrary pose with **spawn-fresh history**: no
+    /// recorded action or kick, no T-slot kick-5 flag — exactly the state of
+    /// [`new`](Self::new) but at `rotation` instead of `R0`.
+    ///
+    /// For consumers that know a pose but not how it was reached (a snapshot
+    /// rebuild, movegen's start normalization): synthesizing a rotation via
+    /// [`rotate_to`](Self::rotate_to) would record `PieceAction::Rotate` and
+    /// wrongly enable T-spin classification for a piece whose true last action
+    /// is unknown. Spawn-fresh history is the conservative truth: it never
+    /// classifies a spin the engine might not award.
+    pub fn at_pose(
+        piece_type: PieceType,
+        origin: (isize, isize),
+        rotation: PieceRotation,
+    ) -> Self {
+        let mut active = Self::new(piece_type, origin);
+        active.piece.rotate_to(rotation);
+        active
+    }
+
     pub fn piece(&self) -> &Piece {
         &self.piece
     }
