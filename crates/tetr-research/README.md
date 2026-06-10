@@ -20,7 +20,7 @@ frontier. `ms/piece` is only meaningful on an **unloaded machine** (no concurren
 | `behavior` | **The APP/behavior suite.** Run any bot across the garbage scenarios. Start here. |
 | `metric` | Fast single-config metric (one number out) for the `/autoresearch` loop. |
 | `bench-marathon` | Marathon scoring speed for the greedy baseline vs the multi-ply beam (depths 1–3). |
-| `cc2-baseline` | Cold Clear 2's APP via the **TBP referee** (needs `CC2_BIN`). |
+| `cc2-baseline` | Cold Clear 2's APP via the **TBP referee** (needs `CC2_BIN`). ⚠️ Its `VERSUS=1` mode is **NOT a fair fight** — TBP has no garbage message, so every garbage dump forces a `stop`+`start` re-sync that cripples CC2 (the bin prints the same warning). Use it for infrastructure checks, never for publishable win-rates; the fair comparison is `cc2-native`. |
 | `cc2-native` | CC2's **ported** evaluator head-to-head in our fair native arena. |
 
 ## Key env knobs (the `behavior` bin)
@@ -51,7 +51,7 @@ frontier. `ms/piece` is only meaningful on an **unloaded machine** (no concurren
 
 ```sh
 cargo build --release -p tetr-research --bin behavior
-P="-0.003447473,-1.5,-0.2,-0.36203036,-1.5,-5.0,0.3472633,0.1,1.5,4.4650807,4.0"  # ATTACK_BOARD_PARAMS
+P="-0.003447473,-1.5,-0.2,-0.36203036,-1.5,-5.0,0.3472633,0.1,1.5,4.4650807,4.0"  # == Cc2Weights::attack_tuned()'s board params
 # beam vs best-first on the same tuned attack eval, same seeds:
 BOT=cc2custom CC2_PARAMS="$P" BEAM_DEPTH=6 BEAM_WIDTH=16 SEEDS=3 ./target/release/behavior
 BOT=bfcustom  CC2_PARAMS="$P" BEAM_DEPTH=6 NODE_BUDGET=400 SEEDS=3 ./target/release/behavior
