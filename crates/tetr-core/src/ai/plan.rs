@@ -68,9 +68,10 @@ pub fn placement_to_inputs(
 ) -> Vec<InputFrame> {
     let mut frames = Vec::new();
     // Walk a clone of the start pose alongside the path so a soft drop knows how far
-    // the piece falls. Mirror movegen's normalization: a clean piece at the start
-    // origin/rotation, no inherited lock-down history.
-    let mut piece = ActivePiece::new(start.piece_type(), start.origin());
+    // the piece falls. Mirror movegen's normalization exactly: a spawn-fresh piece at
+    // the start origin AND rotation (`at_pose`), so a path recorded from a rotated
+    // start replays against the same shadow pose movegen searched from.
+    let mut piece = ActivePiece::at_pose(start.piece_type(), start.origin(), start.rotation());
 
     for mv in &placement.path {
         match mv {

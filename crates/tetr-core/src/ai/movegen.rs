@@ -50,8 +50,8 @@ use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use crate::engine::{
-    ActivePiece, MoveDirection, Occupancy, Piece, PieceAction, PieceRotation, PieceType,
-    RotationDirection,
+    classify_t_spin, is_t_slot, ActivePiece, MoveDirection, Occupancy, Piece, PieceAction,
+    PieceRotation, PieceType, RotationDirection, TSpinKind,
 };
 
 /// One button press in the path to a placement.
@@ -116,13 +116,14 @@ impl Placement {
     }
 }
 
-/// The canonical key identifying a pose for de-duplication: origin + rotation.
+/// The geometric part of a search node's identity: origin + rotation.
 ///
-/// Two paths that arrive at the same `(x, y, rotation)` are the same node; the
-/// piece's lock-down history is *not* part of the key (a pose is a pose however it
-/// was reached), so the first arrival — always via a shortest path, since the
-/// search is breadth-first — wins. Rotation is stored as its `u8` discriminant so
-/// the key is totally ordered (`PieceRotation` is `Eq`/`Hash` but not `Ord`).
+/// On its own a pose under-identifies a node — T-spin classification reads the
+/// piece's action history, not just where it sits — so the BFS keys its visited
+/// set on `(PoseKey, spin_rank)` and dedups *emissions* on
+/// `(PoseKey, classification)`; see [`spin_rank`] / [`classification_key`].
+/// Rotation is stored as its `u8` discriminant so the key is totally ordered
+/// (`PieceRotation` is `Eq`/`Hash` but not `Ord`).
 type PoseKey = (isize, isize, u8);
 
 fn pose_key(piece: &ActivePiece) -> PoseKey {
@@ -182,20 +183,29 @@ pub fn generate_with_hold<B: Occupancy>(
 /// prefixes each path with [`Move::Hold`].
 fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> Vec<Placement> {
     // Normalize the start pose: the search re-derives reachable poses from scratch,
-    // so it begins from a clean piece at the start origin/rotation (no inherited
-    // lock-down history that could mis-flag a T-spin on the *start* pose).
-    let start = ActivePiece::new(start.piece_type(), start.origin());
+    // so it begins from a clean piece at the start origin AND rotation, with
+    // spawn-fresh history ([`ActivePiece::at_pose`]) — no inherited lock-down or
+    // kick state that could mis-flag a T-spin on the *start* pose itself.
+    let start = ActivePiece::at_pose(start.piece_type(), start.origin(), start.rotation());
 
-    let mut visited: FxHashSet<PoseKey> = FxHashSet::default();
+    // A node's identity is its pose PLUS its spin rank: two paths to the same
+    // `(x, y, rotation)` are interchangeable for geometry, but NOT for scoring —
+    // T-spin classification reads the action history, so a shift-final arrival
+    // must not shadow a rotate-final (spin) arrival at the same pose.
+    let mut visited: FxHashSet<(PoseKey, u8)> = FxHashSet::default();
+    // Emission is deduplicated separately, per (pose, classification): ranks are
+    // search bookkeeping, but two resting nodes whose lock would *classify*
+    // identically are interchangeable placements — keep the first (BFS-shortest).
+    let mut emitted: FxHashSet<(PoseKey, u8)> = FxHashSet::default();
     let mut frontier: VecDeque<(ActivePiece, SmallVec<[Move; 16]>)> = VecDeque::new();
     let mut placements: Vec<Placement> = Vec::new();
 
-    visited.insert(pose_key(&start));
+    visited.insert((pose_key(&start), spin_rank(&start)));
     frontier.push_back((start, SmallVec::new()));
 
     while let Some((piece, path)) = frontier.pop_front() {
         // If this pose rests on ground, it is a candidate final placement.
-        if is_resting(board, &piece) {
+        if is_resting(board, &piece) && emitted.insert((pose_key(&piece), classification_key(&piece, board))) {
             let mut full_path = path.clone();
             if used_hold {
                 full_path.insert(0, Move::Hold);
@@ -210,7 +220,7 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
         // Expand neighbours: lateral shifts, both rotations, and a soft-drop.
         for mv in [Move::Left, Move::Right, Move::Cw, Move::Ccw, Move::SoftDrop] {
             if let Some(next) = apply_move(board, &piece, mv) {
-                if visited.insert(pose_key(&next)) {
+                if visited.insert((pose_key(&next), spin_rank(&next))) {
                     let mut next_path = path.clone();
                     next_path.push(mv);
                     frontier.push_back((next, next_path));
@@ -220,6 +230,43 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
     }
 
     placements
+}
+
+/// The T-spin-relevant component of a search node's identity beyond its pose.
+///
+/// `0`: a lock here never classifies (shift/drop-final with no sticky flag).
+/// `1`: rotate-final (kick 1-4) — classification enabled, Mini stays Mini.
+/// `2`: kick-5 rotate-final or the sticky §12.4 flag — Mini promotes to Full and
+/// the state survives later non-rotation moves.
+///
+/// Non-T pieces never classify, so they keep a single rank — the visited set (and
+/// thus the BFS state space) only grows for the T piece.
+fn spin_rank(piece: &ActivePiece) -> u8 {
+    if piece.piece_type() != PieceType::T {
+        return 0;
+    }
+    if piece.used_kick_5_into_t_slot() {
+        return 2;
+    }
+    if piece.last_successful_action() == PieceAction::Rotate {
+        if piece.last_rotation_kick_number() == Some(5) {
+            2
+        } else {
+            1
+        }
+    } else {
+        0
+    }
+}
+
+/// What locking `piece` at its current pose would classify as, as a small
+/// emission-dedup key: `0` no spin, `1` Mini, `2` Full.
+fn classification_key<B: Occupancy>(piece: &ActivePiece, board: &B) -> u8 {
+    match classify_t_spin(piece, board) {
+        None => 0,
+        Some(TSpinKind::Mini) => 1,
+        Some(TSpinKind::Full) => 2,
+    }
 }
 
 /// Apply one [`Move`] to `piece` on `board`, delegating SRS to the engine.
@@ -263,11 +310,19 @@ fn rotate<B: Occupancy>(board: &B, piece: &ActivePiece, dir: RotationDirection) 
     if kick_number == 0 {
         return None;
     }
+    // Mirror the engine's §7.5 point-5 override exactly (api.rs::rotate_active_piece):
+    // if SRS test 5 placed a T into a T-slot, set the sticky flag so the spin
+    // classifies Full and SURVIVES later non-rotation moves (§12.4) — which is what
+    // the engine will do when this path is replayed. Without it, movegen would
+    // undervalue every kick-5 spin that shifts before locking.
+    let entered_t_slot_with_kick_5 =
+        kick_number == 5 && piece.piece_type() == PieceType::T && {
+            let mut probe = piece.clone();
+            probe.rotate_to(rotation, origin, dir, kick_number, false);
+            is_t_slot(&probe, board)
+        };
     let mut rotated = piece.clone();
-    // Mirror the engine: pass `false` for the kick-5 t-slot flag; T-spin
-    // classification keys off `last_rotation_kick_number == Some(5)` (see
-    // api.rs::rotate_active_piece and t_spin::classify_t_spin).
-    rotated.rotate_to(rotation, origin, dir, kick_number, false);
+    rotated.rotate_to(rotation, origin, dir, kick_number, entered_t_slot_with_kick_5);
     Some(rotated)
 }
 
@@ -380,17 +435,22 @@ mod tests {
     }
 
     #[test]
-    fn no_duplicate_poses() {
-        // The visited-set must prevent two placements at the same (x, y, rotation).
+    fn no_duplicate_pose_classifications() {
+        // Emission is deduplicated per (pose, T-spin classification): a pose may
+        // legitimately appear twice when a spin and a non-spin arrival both exist
+        // (they score differently), but never twice with the SAME classification.
         let board = Board::new(10, 20);
         for piece_type in PieceType::all() {
             let start = spawn_piece(piece_type, 10, 20);
             let placements = generate(&board, &start);
-            let mut keys: Vec<PoseKey> = placements.iter().map(|p| pose_key(&p.piece)).collect();
+            let mut keys: Vec<(PoseKey, u8)> = placements
+                .iter()
+                .map(|p| (pose_key(&p.piece), classification_key(&p.piece, &board)))
+                .collect();
             let n = keys.len();
             keys.sort();
             keys.dedup();
-            assert_eq!(keys.len(), n, "{piece_type:?} produced duplicate poses");
+            assert_eq!(keys.len(), n, "{piece_type:?} produced duplicate (pose, class) placements");
         }
     }
 
@@ -569,5 +629,146 @@ mod tests {
                 .any(|p| p.used_hold && p.piece_type() == PieceType::I),
             "an empty hold should offer the next (I) piece"
         );
+    
+}
+
+
+    #[test]
+    fn shift_final_arrival_does_not_shadow_a_spin_arrival() {
+        // Regression for the spin-shadowing bug: with the visited-set keyed on pose
+        // alone, whichever path reached a pose FIRST (BFS-shortest) owned it — and a
+        // shift-final arrival classifies as no spin, hiding a reachable rotate-final
+        // spin at the same pose from the planner entirely.
+        //
+        //   col:  0 1 2 3
+        //    y2:    X          lip
+        //    y0:    X . X      shoulders; slot center (2, 1)
+        //
+        // The T can slide along the floor into origin (1, 0) at R0 (3 moves,
+        // shift-final => None) or rotate into the same pose (4 moves, rotate-final
+        // => Mini). Both must be emitted; before the fix only the shorter, spinless
+        // one survived.
+        let mut board = Board::new(10, 20);
+        for (x, y) in [(1, 0), (3, 0), (1, 2)] {
+            board.set(x, y, CellKind::Some(PieceType::I));
+        }
+        let start = spawn_piece(PieceType::T, 10, 20);
+        let placements = generate(&board, &start);
+
+        let at_pose: Vec<&Placement> = placements
+            .iter()
+            .filter(|p| pose_key(&p.piece) == (1, 0, PieceRotation::R0 as u8))
+            .collect();
+        let classes: Vec<u8> = at_pose
+            .iter()
+            .map(|p| classification_key(&p.piece, &board))
+            .collect();
+        assert!(
+            classes.contains(&0) && classes.iter().any(|&c| c > 0),
+            "pose (1,0,R0) must be emitted both as a plain placement and as a spin; got classes {classes:?} \
+             from paths {:?}",
+            at_pose.iter().map(|p| &p.path).collect::<Vec<_>>()
+        );
+        // The spin variant really is rotate-final and the plain one shift-final.
+        let spin = at_pose
+            .iter()
+            .find(|p| classification_key(&p.piece, &board) > 0)
+            .unwrap();
+        assert!(matches!(spin.path.last(), Some(Move::Cw | Move::Ccw)));
+        let plain = at_pose
+            .iter()
+            .find(|p| classification_key(&p.piece, &board) == 0)
+            .unwrap();
+        assert!(matches!(plain.path.last(), Some(Move::Left | Move::Right)));
+    }
+
+    #[test]
+    fn rotation_sets_the_kick5_sticky_flag_like_the_engine() {
+        // movegen's rotate() must mirror api.rs::rotate_active_piece's §7.5 point-5
+        // override: an SRS test-5 rotation of a T into a T-slot sets the sticky flag
+        // (so the spin classifies Full and survives later non-rotation moves). The
+        // fixture is the engine's own regression board
+        // (api.rs::engine_sets_point_5_override_when_kick_5_rotates_into_a_t_slot).
+        let mut board = Board::new(10, 20);
+        for (x, y) in [(5, 5), (4, 7), (3, 5), (3, 3)] {
+            board.set(x, y, CellKind::Some(PieceType::I));
+        }
+        let piece = ActivePiece::at_pose(PieceType::T, (4, 5), PieceRotation::R0);
+
+        let rotated = apply_move(&board, &piece, Move::Cw).expect("the kick-5 rotation resolves");
+        assert_eq!(rotated.last_rotation_kick_number(), Some(5), "resolves via SRS test 5");
+        assert!(
+            rotated.used_kick_5_into_t_slot(),
+            "kick-5 into a T-slot must set the sticky flag, exactly as the engine does"
+        );
+        assert_eq!(
+            classify_t_spin(&rotated, &board),
+            Some(TSpinKind::Full),
+            "the kick-5 slot classifies Full"
+        );
+
+        // Negative control: the same rotation on an empty board resolves without a
+        // kick-5 slot and must NOT set the flag.
+        let empty = Board::new(10, 20);
+        let rotated = apply_move(&empty, &piece, Move::Cw).expect("rotation resolves");
+        assert!(!rotated.used_kick_5_into_t_slot());
+    }
+
+    #[test]
+    fn placement_classification_matches_the_engine_award() {
+        // The gold parity contract: for every placement movegen emits, replaying its
+        // path through a REAL engine (via plan-to-input) must award exactly the
+        // T-spin classification `classify_t_spin` predicts for the placement piece.
+        // This pins the whole chain — path recording, spin-state tracking, the
+        // sticky flag, plan rendering, and the engine's own classifier — together.
+        use crate::ai::plan::placement_to_inputs;
+        use crate::engine::{Engine, EngineConfig, EngineEvent, EngineScoreAction};
+
+        let fixtures: [&[(isize, isize)]; 4] = [
+            &[],                                     // empty board: no spins anywhere
+            &[(1, 0), (3, 0), (1, 2)],               // the slide-or-spin slot above
+            &[(5, 5), (4, 7), (3, 5), (3, 3)],       // the engine's kick-5 fixture
+            &[(1, 0), (3, 0), (1, 2), (5, 0), (7, 0), (5, 2)], // two slots
+        ];
+
+        for (i, cells) in fixtures.iter().enumerate() {
+            let mut board = Board::new(10, 20);
+            for &(x, y) in *cells {
+                board.set(x, y, CellKind::Some(PieceType::I));
+            }
+            for piece_type in [PieceType::T, PieceType::L] {
+                let start = spawn_piece(piece_type, 10, 20);
+                for placement in generate(&board, &start) {
+                    let predicted = crate::engine::classify_t_spin(&placement.piece, &board);
+
+                    // Replay on a fresh engine carrying the same board + start pose.
+                    let mut engine = Engine::new(EngineConfig::default(), 0);
+                    for &(x, y) in *cells {
+                        assert!(engine.set_cell(x, y, CellKind::Some(PieceType::I)));
+                    }
+                    engine.set_active(start.clone());
+                    let mut awarded = None;
+                    for frame in placement_to_inputs(&board, &start, &placement) {
+                        for event in engine.step(frame) {
+                            if let EngineEvent::ScoreAwarded {
+                                action: EngineScoreAction::TSpin { kind, .. },
+                                ..
+                            } = event
+                            {
+                                awarded = Some(kind);
+                            }
+                        }
+                    }
+                    assert_eq!(
+                        awarded, predicted,
+                        "fixture {i}, {piece_type:?} placement at {:?} rot {:?} path {:?}: \
+                         engine awarded {awarded:?} but movegen predicted {predicted:?}",
+                        placement.origin(),
+                        placement.rotation(),
+                        placement.path,
+                    );
+                }
+            }
+        }
     }
 }

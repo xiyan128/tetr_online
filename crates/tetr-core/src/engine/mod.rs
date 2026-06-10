@@ -46,4 +46,4 @@ pub use lock_down::{
 };
 pub use pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 pub use scoring::EngineScoreAction;
-pub use t_spin::{classify_t_spin, t_spin_corners, TSpinCorners, TSpinKind};
+pub use t_spin::{classify_t_spin, is_t_slot, t_spin_corners, TSpinCorners, TSpinKind};
