@@ -10,8 +10,10 @@
 //! types; it is driven entirely through these plain data structures.
 
 use crate::engine::active_piece::ActivePiece;
+use crate::engine::attack::attack_lines;
 use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};
+use crate::engine::garbage::PendingGarbage;
 use crate::engine::generator::PieceGenerator;
 use crate::engine::goals::GoalSystem;
 use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
@@ -32,6 +34,13 @@ pub struct EngineConfig {
     pub lock_down_seconds: f32,
     pub starting_level: u8,
     pub goal_system: GoalSystem,
+    /// Versus: the maximum pending-garbage lines that rise onto the board after
+    /// one clear-less lock (the "garbage cap"). Pending lines beyond the cap
+    /// stay queued for the next opportunity. `0` disables rising entirely —
+    /// pending garbage can then only ever be cancelled (a config edge, not the
+    /// "uncapped" convention some games use). Irrelevant outside versus — the
+    /// queue is only fed by [`Engine::queue_garbage`].
+    pub garbage_cap: u32,
 }
 
 impl Default for EngineConfig {
@@ -45,6 +54,7 @@ impl Default for EngineConfig {
             lock_down_seconds: LOCK_DOWN_SECONDS,
             starting_level: MIN_LEVEL,
             goal_system: GoalSystem::Fixed,
+            garbage_cap: 8,
         }
     }
 }
@@ -95,6 +105,18 @@ pub enum EngineEvent {
     Held {
         held: PieceType,
         active: PieceType,
+    },
+    /// Versus: this lock's attack survived cancellation — `lines` garbage lines
+    /// leave the board for the opponent (net of any pending garbage it offset;
+    /// a fully-cancelled attack emits nothing). The match driver routes this to
+    /// the opponent's [`Engine::queue_garbage`].
+    AttackSent {
+        lines: u32,
+    },
+    /// Versus: pending garbage rose onto the board after a clear-less lock
+    /// (`lines` rows, capped per lock by [`EngineConfig::garbage_cap`]).
+    GarbageInserted {
+        lines: u32,
     },
     GameOver {
         reason: GameOverStatus,
@@ -150,6 +172,9 @@ pub struct EngineSnapshot {
     /// alone: the queue window straddles bag boundaries, so any reconstruction is
     /// wrong whenever the active piece is not the first piece of its bag.
     pub bag_remainder: Vec<PieceType>,
+    /// Versus: total pending-garbage lines queued against this player (the
+    /// incoming meter). Always `0` outside versus.
+    pub pending_garbage: u32,
     pub game_over: Option<GameOverStatus>,
 }
 
@@ -163,6 +188,8 @@ pub struct Engine {
     score_state: ScoreState,
     game_over: Option<GameOverStatus>,
     gravity_accumulator_seconds: f32,
+    /// Versus: incoming garbage queued against this player (see `garbage.rs`).
+    garbage: PendingGarbage,
 }
 
 impl Engine {
@@ -183,6 +210,7 @@ impl Engine {
             score_state,
             game_over: None,
             gravity_accumulator_seconds: 0.0,
+            garbage: PendingGarbage::new(seed),
         };
         engine.fill_next_queue();
         engine
@@ -252,6 +280,7 @@ impl Engine {
             back_to_back_active: self.score_state.back_to_back_active(),
             combo: self.score_state.combo(),
             bag_remainder: self.generator.bag_remainder().to_vec(),
+            pending_garbage: self.garbage.total(),
             game_over: self.game_over,
         }
     }
@@ -287,6 +316,13 @@ impl Engine {
     /// return (and the latched game-over in the snapshot) is the caller's signal,
     /// not an [`EngineEvent::GameOver`].
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
+        // A finished game accepts no more garbage: the board stays a faithful
+        // record of how it ended, and the latched game-over reason is never
+        // rewritten post-mortem. "You are (already) topped out" is the honest
+        // return.
+        if self.game_over.is_some() {
+            return true;
+        }
         let overflow = self.board.insert_garbage_lines(count, hole_col);
         let buried = self
             .active
@@ -297,6 +333,26 @@ impl Engine {
             self.game_over = Some(GameOverStatus::BlockOut);
         }
         overflow || buried
+    }
+
+    /// Versus: queue an opponent's attack of `lines` against this player. The
+    /// garbage does not touch the board yet — it sits pending (visible as
+    /// [`EngineSnapshot::pending_garbage`]) where this player's own attack can
+    /// still cancel it line-for-line, and rises after a lock that clears no
+    /// lines (capped per lock by [`EngineConfig::garbage_cap`], emitting
+    /// [`EngineEvent::GarbageInserted`]). Each queued batch draws one hole
+    /// column from this engine's own seeded stream, so a `(seed, attack
+    /// sequence)` reproduces the board exactly. Like
+    /// [`insert_garbage`](Self::insert_garbage) this runs out-of-band of
+    /// [`step`](Self::step) — queueing has no immediate board effect, so there
+    /// is no event to miss.
+    pub fn queue_garbage(&mut self, lines: u32) {
+        // A finished game accepts no more attack (and must not advance the
+        // hole stream): the final snapshot stays a faithful record.
+        if self.game_over.is_some() {
+            return;
+        }
+        self.garbage.queue(lines, self.config.board_width);
     }
 
     /// Test-only seam: install `active` as the current active piece, bypassing
@@ -526,17 +582,77 @@ impl Engine {
             piece_type,
             lines_cleared,
         });
-        self.score_lock_result(t_spin, lines_cleared, events);
+        // The attack table reads the combo index BEFORE this clear advances it
+        // (the same pre-increment convention the research harness pinned), so
+        // capture it before scoring mutates the chain state.
+        let combo_before = self.score_state.combo();
+        let award = self.score_lock_result(t_spin, lines_cleared, events);
 
         if lock_out {
             self.game_over = Some(GameOverStatus::LockOut);
             events.push(EngineEvent::GameOver {
                 reason: GameOverStatus::LockOut,
             });
+            // A dying lock sends nothing: the attack block below is never
+            // reached, so the clear neither cancels this player's pending
+            // queue nor emits AttackSent — death takes priority over offense,
+            // and no consumer has to scan a batch for a trailing GameOver to
+            // know whether its AttackSent counts.
             return;
         }
 
+        // Versus: a clear's attack first cancels this player's own pending
+        // garbage (oldest first); only the remainder leaves the board.
+        if let Some(award) = award {
+            let attack = attack_lines(
+                award.action,
+                award.back_to_back_bonus,
+                combo_before,
+                self.board.is_empty(),
+            );
+            let net = self.garbage.cancel(attack);
+            if net > 0 {
+                events.push(EngineEvent::AttackSent { lines: net });
+            }
+        }
+
+        // Versus: pending garbage rises after a lock that cleared nothing —
+        // between lock and spawn, so a fatal rise is an ordinary block-out for
+        // the next spawn (or an outright overflow here).
+        if lines_cleared == 0 {
+            self.rise_pending_garbage(events);
+            if self.game_over.is_some() {
+                return;
+            }
+        }
+
         self.spawn_next_piece(events);
+    }
+
+    /// Apply the batches due after a clear-less lock (see `garbage.rs`): insert
+    /// each through the same board primitive the out-of-band seam uses, emit
+    /// [`EngineEvent::GarbageInserted`], and latch a block-out if the stack is
+    /// forced past the ceiling. Runs between lock and spawn, so there is no
+    /// active piece to bury — overflow is the only fatal case here.
+    fn rise_pending_garbage(&mut self, events: &mut Vec<EngineEvent>) {
+        let rising = self.garbage.rise(self.config.garbage_cap);
+        let mut inserted = 0u32;
+        let mut overflow = false;
+        for batch in rising {
+            overflow |= self
+                .board
+                .insert_garbage_lines(batch.lines as usize, batch.hole_col);
+            inserted += batch.lines;
+        }
+        if inserted > 0 {
+            events.push(EngineEvent::GarbageInserted { lines: inserted });
+        }
+        if overflow {
+            self.game_over = Some(GameOverStatus::BlockOut);
+            events.push(EngineEvent::GameOver {
+                reason: GameOverStatus::BlockOut,
+            });
+        }
     }
 
     fn score_lock_result(
@@ -544,17 +660,23 @@ impl Engine {
         t_spin: Option<TSpinKind>,
         lines_cleared: usize,
         events: &mut Vec<EngineEvent>,
-    ) {
+    ) -> Option<ScoreAward> {
         let action = EngineScoreAction::from_lock_result(t_spin, lines_cleared);
-        self.score(action, events);
+        self.score(action, events)
     }
 
-    fn score(&mut self, action: EngineScoreAction, events: &mut Vec<EngineEvent>) {
-        if let Some(score_award) =
-            score_action(&mut self.score_state, self.config.goal_system, action)
-        {
+    /// Score `action`, push the award event, and hand the award back to the
+    /// caller (the lock path feeds it to the versus attack table).
+    fn score(
+        &mut self,
+        action: EngineScoreAction,
+        events: &mut Vec<EngineEvent>,
+    ) -> Option<ScoreAward> {
+        let award = score_action(&mut self.score_state, self.config.goal_system, action);
+        if let Some(score_award) = award {
             push_score_award(events, score_award);
         }
+        award
     }
 
     fn advance_time(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
@@ -1265,6 +1387,9 @@ mod tests {
                     total_score: 100,
                     back_to_back_bonus: false,
                 },
+                // Clearing the 4-wide board empties it: a perfect clear, whose
+                // 10 attack lines leave uncancelled (nothing is pending).
+                EngineEvent::AttackSent { lines: 10 },
                 EngineEvent::Spawned { .. },
             ]
         ));
@@ -1319,6 +1444,8 @@ mod tests {
                     total_score: 800,
                     back_to_back_bonus: false,
                 },
+                // Tetris (4) + perfect clear (10) on the emptied 4-wide board.
+                EngineEvent::AttackSent { lines: 14 },
                 EngineEvent::Spawned { .. },
             ]
         ));
@@ -1339,6 +1466,8 @@ mod tests {
                     total_score: 2000,
                     back_to_back_bonus: true,
                 },
+                // Tetris (4) + B2B (1) + combo index 1 (0) + perfect clear (10).
+                EngineEvent::AttackSent { lines: 15 },
                 EngineEvent::Spawned { .. },
             ]
         ));
@@ -1502,5 +1631,216 @@ mod tests {
                 consumed += 1;
             }
         }
+    }
+
+    // ---- Versus garbage rules (queue / cancellation / rising) ----
+
+    /// Fill row `y` except the columns in `skip` (a line-clear precondition).
+    fn fill_row_except(engine: &mut Engine, y: isize, skip: &[isize]) {
+        for x in 0..10 {
+            if !skip.contains(&x) {
+                engine.set_cell(x, y, CellKind::Some(PieceType::J));
+            }
+        }
+    }
+
+    #[test]
+    fn queued_garbage_is_pending_until_a_clear_less_lock() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.queue_garbage(3);
+        assert_eq!(engine.snapshot().pending_garbage, 3);
+        assert!(
+            engine.snapshot().board_cells.is_empty(),
+            "queueing alone must not touch the board"
+        );
+
+        // A lock that clears nothing: the pending garbage rises beneath it.
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
+        assert!(events.contains(&EngineEvent::GarbageInserted { lines: 3 }));
+        assert_eq!(engine.snapshot().pending_garbage, 0);
+        // 3 garbage rows of 9 cells (one hole each) plus the locked O.
+        assert_eq!(engine.snapshot().board_cells.len(), 3 * 9 + 4);
+    }
+
+    #[test]
+    fn a_clear_defers_rising_and_attack_cancels_pending_first() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        // Rows 0-1 ready for a Double at cols 4-5; a stray high cell prevents a
+        // perfect clear from inflating the attack.
+        fill_row_except(&mut engine, 0, &[4, 5]);
+        fill_row_except(&mut engine, 1, &[4, 5]);
+        engine.set_cell(0, 5, CellKind::Some(PieceType::J));
+        engine.queue_garbage(2);
+
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (3, -1)));
+        // The clear defers rising entirely...
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::GarbageInserted { .. })),
+            "a clearing lock must not let garbage rise"
+        );
+        // ...and the Double's 1 attack line is absorbed by the oldest pending
+        // line instead of leaving the board.
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::AttackSent { .. })),
+            "a fully-cancelled attack sends nothing"
+        );
+        assert_eq!(engine.snapshot().pending_garbage, 1);
+    }
+
+    #[test]
+    fn net_attack_is_what_survives_cancellation() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        // Rows 0-1 filled except cols 4-5 and nothing else: the Double perfect-
+        // clears, so the gross attack is 1 (Double) + 10 (perfect clear) = 11.
+        fill_row_except(&mut engine, 0, &[4, 5]);
+        fill_row_except(&mut engine, 1, &[4, 5]);
+        engine.queue_garbage(1);
+
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (3, -1)));
+        assert!(
+            events.contains(&EngineEvent::AttackSent { lines: 10 }),
+            "11 gross attack minus 1 cancelled pending line leaves 10: {events:?}"
+        );
+        assert_eq!(engine.snapshot().pending_garbage, 0);
+    }
+
+    #[test]
+    fn rising_respects_the_garbage_cap_and_a_split_batch_keeps_its_hole() {
+        let config = EngineConfig {
+            garbage_cap: 4,
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config, 7);
+        engine.queue_garbage(6); // one 6-line batch: a single hole column
+
+        lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 12)));
+        assert_eq!(
+            engine.snapshot().pending_garbage,
+            2,
+            "the cap holds 2 of the 6 lines back"
+        );
+        lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 14)));
+        assert_eq!(engine.snapshot().pending_garbage, 0);
+
+        // All 6 garbage rows came from one batch, so they share one hole column.
+        let cells = engine.snapshot().board_cells;
+        for y in 0..6isize {
+            let filled: Vec<isize> = cells.iter().filter(|c| c.y == y).map(|c| c.x).collect();
+            assert_eq!(filled.len(), 9, "garbage row {y} has exactly one hole");
+            let hole: Vec<isize> = (0..10).filter(|x| !filled.contains(x)).collect();
+            let row0_hole: Vec<isize> = {
+                let f: Vec<isize> = cells.iter().filter(|c| c.y == 0).map(|c| c.x).collect();
+                (0..10).filter(|x| !f.contains(x)).collect()
+            };
+            assert_eq!(hole, row0_hole, "split halves of one batch share the hole");
+        }
+    }
+
+    #[test]
+    fn an_overflowing_rise_is_a_block_out() {
+        let config = EngineConfig {
+            garbage_cap: 64,
+            ..EngineConfig::default()
+        };
+        let mut engine = Engine::new(config, 7);
+        engine.queue_garbage(64); // taller than the whole 40-row backing
+
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
+        assert!(events.contains(&EngineEvent::GameOver {
+            reason: GameOverStatus::BlockOut
+        }));
+        assert_eq!(
+            engine.snapshot().game_over,
+            Some(GameOverStatus::BlockOut),
+            "an overflowing rise ends the game in-band"
+        );
+    }
+
+    #[test]
+    fn a_dying_lock_sends_no_attack_and_leaves_pending_intact() {
+        // A piece can lock entirely above the skyline yet still clear buffer
+        // rows (full-matrix clears are deliberate). Death takes priority over
+        // offense: the lock-out lock emits NO AttackSent — its clear neither
+        // cancels this player's pending queue nor reaches the opponent — so no
+        // consumer has to scan an event batch for a trailing GameOver to know
+        // whether an attack counts.
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        // Rows 30-31 (buffer zone; visible height is 20) filled except cols
+        // 4-5: the O completes both, a Double that would perfect-clear (gross
+        // attack 11) — while locking entirely above the skyline.
+        for y in [30, 31] {
+            fill_row_except(&mut engine, y, &[4, 5]);
+        }
+        engine.queue_garbage(1);
+
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (3, 29)));
+        assert!(events.contains(&EngineEvent::GameOver {
+            reason: GameOverStatus::LockOut
+        }));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::AttackSent { .. })),
+            "a dying lock must not send: {events:?}"
+        );
+        assert_eq!(
+            engine.snapshot().pending_garbage,
+            1,
+            "a dying lock must not consume its own pending queue either"
+        );
+    }
+
+    #[test]
+    fn a_finished_engine_accepts_no_garbage() {
+        // End a game by an overflowing rise (everything in one lock).
+        let mut engine = Engine::new(
+            EngineConfig {
+                garbage_cap: 64,
+                ..EngineConfig::default()
+            },
+            7,
+        );
+        engine.queue_garbage(64); // taller than the 40-row backing
+        lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
+        assert_eq!(engine.snapshot().game_over, Some(GameOverStatus::BlockOut));
+
+        // Post-mortem, both out-of-band seams are inert.
+        let cells_before = engine.snapshot().board_cells.len();
+        engine.queue_garbage(5);
+        assert_eq!(
+            engine.snapshot().pending_garbage,
+            0,
+            "a finished game accepts no more attack"
+        );
+        assert!(
+            engine.insert_garbage(3, 0),
+            "inserting into a finished game reports topped-out"
+        );
+        assert_eq!(
+            engine.snapshot().board_cells.len(),
+            cells_before,
+            "the final board is a faithful record"
+        );
+        assert_eq!(
+            engine.snapshot().game_over,
+            Some(GameOverStatus::BlockOut),
+            "the latched reason is never rewritten post-mortem"
+        );
+    }
+
+    #[test]
+    fn garbage_holes_are_engine_seed_deterministic() {
+        let board_after = |seed: u64| {
+            let mut engine = Engine::new(EngineConfig::default(), seed);
+            engine.queue_garbage(2);
+            engine.queue_garbage(3);
+            lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
+            sorted_cell_coords(&engine.snapshot().board_cells)
+        };
+        assert_eq!(board_after(42), board_after(42), "same seed, same holes");
     }
 }

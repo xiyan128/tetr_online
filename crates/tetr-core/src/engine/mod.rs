@@ -16,6 +16,7 @@ mod bit_board;
 mod board;
 mod constants;
 mod game_over;
+mod garbage;
 mod generator;
 mod goals;
 mod gravity;

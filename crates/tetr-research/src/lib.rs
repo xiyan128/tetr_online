@@ -431,11 +431,20 @@ pub fn evaluate_downstack(
 }
 
 // --- Versus (mutual garbage) benchmark ---------------------------------------
-// The complete head-to-head: both bots play the identical piece sequence; line
-// clears convert to attack (guideline table), attack cancels the opponent's
-// incoming garbage queue, and un-cancelled garbage is dumped onto the receiver.
-// A player loses by topping out. This is Cold Clear 2's home turf — the metric
-// that actually decides "beat CC2", as opposed to one-sided downstacking.
+// The complete head-to-head: both bots play the identical piece sequence and a
+// player loses by topping out. The garbage RULES (cancellation, rising after
+// clear-less locks, the per-lock cap, hole choice) are the ENGINE's — see
+// tetr-core's garbage module — and `play_versus` only routes each side's net
+// AttackSent to the other side's queue. The `GarbageQueue` below is a HARNESS
+// scheduler kept for the scripted pressure scenarios (behavior.rs Faucet) and
+// the TBP referee (`cc2_baseline`), which inserts raw and does its own
+// bookkeeping. NOTE one deliberate divergence: this harness queue settles the
+// OLDEST garbage lowest (drain_newest_first), while the engine's chronological
+// rising leaves the NEWEST batch lowest — boards from the two paths are not
+// comparable for multi-batch deliveries, and `cc2_baseline` win rates are not
+// like-for-like with `play_versus` (the referee also keeps the old wholesale
+// dump timing). This is Cold Clear 2's home turf — the metric that actually
+// decides "beat CC2", as opposed to one-sided downstacking.
 
 /// Frames a single piece may take before we treat the bot as wedged (~4.3s at 60 Hz
 /// — far beyond any real per-piece search, so only a genuinely stuck bot trips it).
@@ -509,21 +518,23 @@ pub fn versus_hole(rng: &mut u64) -> usize {
 }
 
 /// Drive one player's bot until it locks a single piece (or tops out / stalls).
-/// Returns `(attack produced by that placement, topped_out)`.
-fn versus_step_piece(
-    engine: &mut Engine,
-    bot: &mut dyn PlayerController,
-    combo: &mut u32,
-) -> (u32, bool) {
+/// Returns `(net attack sent by that placement, topped_out)`.
+///
+/// Attack accounting is the **engine's**: [`EngineEvent::AttackSent`] already
+/// carries the post-cancellation net (the engine offsets its own pending queue
+/// at lock time), and pending garbage rises by the engine's guideline timing —
+/// after a clear-less lock, capped per lock. The caller's only job is routing
+/// the net attack to the opponent's queue. (When nothing was ever queued the
+/// pending queue is empty and net == gross — which is how the TBP referee path
+/// keeps its own external bookkeeping.)
+fn versus_step_piece(engine: &mut Engine, bot: &mut dyn PlayerController) -> (u32, bool) {
     let mut attack = 0u32;
     let mut topped = false;
     for _ in 0..MAX_PIECE_FRAMES {
         let mut locked = false;
         for event in drive_engine(engine, bot) {
-            if let Some(clear) = fold_combo(&event, engine, combo) {
-                attack += clear.attack;
-            }
             match &event {
+                EngineEvent::AttackSent { lines } => attack += lines,
                 EngineEvent::Locked { .. } => locked = true,
                 EngineEvent::GameOver { .. } => topped = true,
                 _ => {}
@@ -542,7 +553,6 @@ fn versus_step_piece(
 pub struct VersusEngine {
     engine: Engine,
     bot: Box<dyn PlayerController>,
-    combo: u32,
 }
 
 impl VersusEngine {
@@ -550,13 +560,15 @@ impl VersusEngine {
         Self {
             engine: Engine::new(marathon_config(), seed),
             bot: make_bot(controller_seed(seed)),
-            combo: 0,
         }
     }
 
-    /// Place one piece; return `(attack produced, topped_out)`.
+    /// Place one piece; return `(attack produced, topped_out)`. The referee
+    /// inserts garbage raw ([`receive`](Self::receive)), so this engine's
+    /// pending queue stays empty and the attack reported here is gross — the
+    /// referee does its own cancellation bookkeeping externally.
     pub fn step_piece(&mut self) -> (u32, bool) {
-        versus_step_piece(&mut self.engine, &mut *self.bot, &mut self.combo)
+        versus_step_piece(&mut self.engine, &mut *self.bot)
     }
 
     /// Receive one garbage batch (`lines` rows, hole at `hole_col`); return true if
@@ -604,9 +616,11 @@ pub struct VersusOutcome {
     pub b_topped: bool,
 }
 
-/// Salt folding the match seed into the versus garbage-hole RNG, decorrelating hole
-/// placement from the (same-seeded) piece stream. `cc2_baseline`'s referee mirrors
-/// this stream, so the constant must stay shared — never inline a copy.
+/// Salt folding the match seed into the HARNESS-side garbage-hole RNG used by the
+/// TBP referee (`cc2_baseline`), decorrelating hole placement from the
+/// (same-seeded) piece stream. `play_versus` no longer draws holes here at all:
+/// engine-rules matches use each receiver engine's own internal stream
+/// (tetr-core's garbage module, its own salt).
 pub const VERSUS_HOLE_SALT: u64 = 0xA5A5_5A5A_DEAD_BEEF;
 
 /// Play one versus match between bot A and bot B. Both face the identical piece
@@ -626,15 +640,16 @@ pub fn play_versus(
     max_plies: u32,
 ) -> VersusOutcome {
     // Level rises but never ends the game here (only top-out / the cap do).
+    // The versus rules — cancellation, rising after clear-less locks, the
+    // garbage cap, hole choice — are the ENGINE's (see tetr-core's garbage
+    // module); this driver only routes each side's net attack to the other
+    // side's pending queue.
     let mut a_engine = Engine::new(marathon_config(), seed);
     let mut b_engine = Engine::new(marathon_config(), seed);
     let mut a_bot = make_a(controller_seed(seed));
     let mut b_bot = make_b(controller_seed(seed));
-    let (mut a_combo, mut b_combo) = (0u32, 0u32);
-    let (mut a_q, mut b_q) = (GarbageQueue::default(), GarbageQueue::default());
     let (mut a_attack, mut b_attack) = (0u32, 0u32);
     let (mut a_topped, mut b_topped) = (false, false);
-    let mut hole_rng = seed ^ VERSUS_HOLE_SALT;
     let mut plies = 0u32;
 
     'match_loop: for ply in 0..max_plies {
@@ -642,33 +657,29 @@ pub fn play_versus(
         let order = if ply % 2 == 0 { [0u8, 1] } else { [1, 0] };
         for &who in &order {
             plies += 1;
+            // Route the attack BEFORE checking death: the engine already
+            // encodes the rule (a lock-out lock emits no AttackSent), so any
+            // attack that WAS emitted — e.g. a real clear whose next spawn
+            // block-outs — legitimately left the board and must reach the
+            // opponent's queue and the stats. The driver never second-guesses
+            // the event stream.
             if who == 0 {
-                let (atk, topped) = versus_step_piece(&mut a_engine, &mut *a_bot, &mut a_combo);
+                let (atk, topped) = versus_step_piece(&mut a_engine, &mut *a_bot);
+                if atk > 0 {
+                    b_engine.queue_garbage(atk);
+                    a_attack += atk;
+                }
                 if topped {
-                    a_topped = true;
-                    break 'match_loop;
-                }
-                let leftover = a_q.cancel(atk);
-                if leftover > 0 {
-                    b_q.push(leftover, versus_hole(&mut hole_rng));
-                    a_attack += leftover;
-                }
-                if a_q.dump(&mut a_engine) {
                     a_topped = true;
                     break 'match_loop;
                 }
             } else {
-                let (atk, topped) = versus_step_piece(&mut b_engine, &mut *b_bot, &mut b_combo);
+                let (atk, topped) = versus_step_piece(&mut b_engine, &mut *b_bot);
+                if atk > 0 {
+                    a_engine.queue_garbage(atk);
+                    b_attack += atk;
+                }
                 if topped {
-                    b_topped = true;
-                    break 'match_loop;
-                }
-                let leftover = b_q.cancel(atk);
-                if leftover > 0 {
-                    a_q.push(leftover, versus_hole(&mut hole_rng));
-                    b_attack += leftover;
-                }
-                if b_q.dump(&mut b_engine) {
                     b_topped = true;
                     break 'match_loop;
                 }
@@ -912,6 +923,59 @@ pub fn beam_cc2_weights_bot(
         max_depth,
         Box::new(Cc2Evaluator::new(weights)),
     )
+}
+
+#[cfg(test)]
+mod versus_rules_tests {
+    use super::*;
+    use tetr_core::ai::{AiController, Handicap};
+
+    /// THE accounting gate for moving attack into the engine: over a real bot
+    /// game with nothing queued (pending empty ⇒ net == gross), the engine's
+    /// AttackSent events must total exactly what the research-side fold
+    /// (`fold_combo` + `attack_lines`, the convention every APP baseline was
+    /// recorded under) computes from the same event stream.
+    #[test]
+    fn engine_attack_events_match_the_research_fold() {
+        let mut engine = Engine::new(marathon_config(), 11);
+        let mut bot = AiController::new(Handicap::perfect(), 99);
+        let mut combo = 0u32;
+        let (mut fold_total, mut event_total) = (0u32, 0u32);
+        for _ in 0..4_000 {
+            if engine.snapshot().game_over.is_some() {
+                break;
+            }
+            for event in drive_engine(&mut engine, &mut bot) {
+                if let Some(clear) = fold_combo(&event, &engine, &mut combo) {
+                    fold_total += clear.attack;
+                }
+                if let EngineEvent::AttackSent { lines } = event {
+                    event_total += lines;
+                }
+            }
+        }
+        assert!(fold_total > 0, "the bot must have attacked at least once");
+        assert_eq!(
+            event_total, fold_total,
+            "engine-side attack must reproduce the research fold bit-for-bit"
+        );
+    }
+
+    /// A whole match is a pure function of its seed: same seed, same bots ⇒
+    /// identical outcome (the property SPRT and win-rate climbs rely on).
+    #[test]
+    fn play_versus_is_deterministic() {
+        let make = |seed: u64| -> Box<dyn PlayerController> {
+            Box::new(AiController::new(Handicap::perfect(), seed))
+        };
+        let run = || {
+            let o = play_versus(&make, &make, 42, 40);
+            (
+                o.result, o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped,
+            )
+        };
+        assert_eq!(run(), run());
+    }
 }
 
 #[cfg(test)]
