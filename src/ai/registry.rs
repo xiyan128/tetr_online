@@ -15,8 +15,8 @@
 use bevy::prelude::*;
 
 use crate::ai::{
-    AiController, BeamPlanner, BestFirstPlanner, Cc2Evaluator, Cc2Weights, Handicap,
-    LinearEvaluator, Policy, SearchBudget, SearchPolicy, DEFAULT_AI_SEED,
+    AiController, BeamPlanner, BestFirstPlanner, Cc2Evaluator, Cc2Weights, Evaluator, Handicap,
+    LinearEvaluator, Planner, SearchBudget, SearchPolicy, DEFAULT_AI_SEED,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms
@@ -25,26 +25,10 @@ use crate::ai::{
 const BEAM_WIDTH: usize = 16;
 const BEAM_DEPTH: u8 = 2;
 
-/// Cold Clear 2 board weights warm-climbed for attack-per-piece (`cc2-app-climb`,
-/// APP fitness) — the attack profile shared by the beam and best-first attack models.
-const ATTACK_BOARD_PARAMS: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
-    -0.003_447_473,
-    -1.5,
-    -0.2,
-    -0.362_030_36,
-    -1.5,
-    -5.0,
-    0.347_263_3,
-    0.1,
-    1.5,
-    4.465_080_7,
-    4.0,
-];
-
-/// Best-first node budget for the in-game attack model. At ~120-160 ms/piece (measured)
-/// it blocks the main thread noticeably, but the AI's reaction delay masks most of it;
-/// the headless bench runs it far higher, where quality scales with budget (tuned-attack
-/// clean APP 0.655→0.680, faucet1/2 0.325→0.455 from budget 150→400, but at 2-3x the ms).
+/// Best-first node budget for the in-game attack model — the same operating point the
+/// research harness benchmarks (~25 ms/piece in release after the bitboard strike, well
+/// inside a watchable cadence). The headless bench runs it far higher, where quality
+/// scales with budget at proportional latency.
 const ATTACK_BF_BUDGET: u32 = 150;
 
 /// One selectable AI model: a display name + a factory for a fresh controller.
@@ -71,6 +55,11 @@ impl ModelEntry {
 /// The catalog of AI models plus the current selection. Inserted by the
 /// [`GamePlugin`](crate::GamePlugin); read by the model-select screen and the
 /// sandbox.
+///
+/// Invariant: `entries` is non-empty ([`Default`] always populates it) and
+/// `selected` is always in bounds (it starts at 0 and [`select`](Self::select)
+/// bounds-checks) — so the accessors index directly instead of carrying dead
+/// fallback arms.
 #[derive(Resource)]
 pub struct ModelRegistry {
     entries: Vec<ModelEntry>,
@@ -92,18 +81,26 @@ impl ModelRegistry {
 
     /// The selected model's label (for the log line / HUD).
     pub fn selected_label(&self) -> &str {
-        self.entries
-            .get(self.selected)
-            .map_or("?", |e| e.label.as_str())
+        &self.entries[self.selected].label
     }
 
     /// Build a fresh [`AiController`] for the selected model.
     pub fn selected_controller(&self) -> AiController {
-        match self.entries.get(self.selected) {
-            Some(entry) => (entry.build)(),
-            None => AiController::beatable(),
-        }
+        (self.entries[self.selected].build)()
     }
+}
+
+/// Wire a planner + evaluator into a fresh controller under the shared default
+/// handicap — the one construction every Tier-2 entry shares, so an entry differs
+/// only by the (planner, evaluator, budget) triple it names.
+fn search_model(
+    planner: Box<dyn Planner>,
+    eval: Box<dyn Evaluator>,
+    budget: SearchBudget,
+) -> AiController {
+    let h = Handicap::default();
+    let policy = SearchPolicy::new(planner, eval, budget, h.imperfection, DEFAULT_AI_SEED);
+    AiController::with_policy(Box::new(policy), h.reaction)
 }
 
 impl Default for ModelRegistry {
@@ -119,15 +116,11 @@ impl Default for ModelRegistry {
         // ~+26-33% over greedy on the marathon bench — the architecture leapfrog. It
         // reads `LinearEvaluator::default()`, so any `weights.rs` tuning flows in free.
         entries.push(ModelEntry::new("Beam - DT-20 (Tier-2)", || {
-            let h = Handicap::default();
-            let policy = SearchPolicy::new(
+            search_model(
                 Box::new(BeamPlanner::new(BEAM_WIDTH)),
                 Box::new(LinearEvaluator::default()),
                 SearchBudget::beam(BEAM_DEPTH),
-                h.imperfection,
-                DEFAULT_AI_SEED,
-            );
-            AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
+            )
         }));
 
         // Cold Clear 2's evaluator, ported (`Cc2Evaluator`) on the same beam — watch
@@ -135,57 +128,78 @@ impl Default for ModelRegistry {
         // DT-20 beats it at both downstacking and versus (it is depth-hungry, tuned
         // for CC2's deep MCTS); this shows its tetris-well / T-spin-seeking style.
         entries.push(ModelEntry::new("Beam - CC2 eval (ported)", || {
-            let h = Handicap::default();
-            let policy = SearchPolicy::new(
+            search_model(
                 Box::new(BeamPlanner::new(BEAM_WIDTH)),
                 Box::new(Cc2Evaluator::default()),
                 SearchBudget::beam(BEAM_DEPTH),
-                h.imperfection,
-                DEFAULT_AI_SEED,
-            );
-            AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
+            )
         }));
 
-        // The APP-sprint attack bot: Cold Clear 2's evaluator with board weights
-        // **warm-climbed for attack-per-piece** (`cc2-app-climb`), on a deeper beam,
-        // with the engine's combo tracking active. In benchmarks it plays concentrated
-        // B2B-Tetris / T-spin attack plus combo-aware digging (clean APP ~0.67, cheese
-        // ~0.68 at depth 6 — far above the shipped linear bot's ~0.2). Depth 3 keeps
-        // the per-piece search watchable in-browser; the headless bench runs it deeper.
+        // The APP-sprint attack bot: Cold Clear 2's evaluator with the APP-climbed
+        // board weights (`Cc2Weights::attack_tuned`), on a deeper beam, with the
+        // engine's combo tracking active — concentrated B2B-Tetris / T-spin attack
+        // plus combo-aware digging. Depth 3 keeps the per-piece search watchable
+        // in-browser; the headless bench runs it deeper.
         entries.push(ModelEntry::new("Beam - CC2 Attack (tuned)", || {
-            let weights = Cc2Weights::DEFAULT.with_board_params(&ATTACK_BOARD_PARAMS);
-            let h = Handicap::default();
-            let policy = SearchPolicy::new(
+            search_model(
                 Box::new(BeamPlanner::new(BEAM_WIDTH)),
-                Box::new(Cc2Evaluator::new(weights)),
+                Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
                 SearchBudget::beam(3), // deeper than the default 2 — attack tuning + combos need lookahead
-                h.imperfection,
-                DEFAULT_AI_SEED,
-            );
-            AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
+            )
         }));
 
         // The **best-first** search over the same tuned CC2 attack eval — a graph
-        // search with a per-root transposition table that pursues deep attack lines the
-        // beam's fixed-width truncation prunes. In benches it beats the beam per node and
-        // scales smoothly with `NODE_BUDGET`; here the budget is kept modest so the
-        // (blocking) per-piece search stays watchable in-browser.
+        // search with a per-root transposition table that pursues deep attack lines
+        // the beam's fixed-width truncation prunes. In benches it beats the beam per
+        // node and scales smoothly with the node budget.
         entries.push(ModelEntry::new("Search - CC2 Attack (best-first)", || {
-            let weights = Cc2Weights::DEFAULT.with_board_params(&ATTACK_BOARD_PARAMS);
-            let h = Handicap::default();
-            let policy = SearchPolicy::new(
-                Box::new(BestFirstPlanner::new(ATTACK_BF_BUDGET)),
-                Box::new(Cc2Evaluator::new(weights)),
-                SearchBudget::beam(6), // best-first is depth-capped by the visible queue, not width
-                h.imperfection,
-                DEFAULT_AI_SEED,
-            );
-            AiController::with_policy(Box::new(policy) as Box<dyn Policy>, h.reaction)
+            search_model(
+                Box::new(BestFirstPlanner::new()),
+                Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                // Depth-capped by the visible queue, not width; the node budget is
+                // the quality/latency dial.
+                SearchBudget::best_first(ATTACK_BF_BUDGET, 6),
+            )
         }));
 
         Self {
             entries,
             selected: 0,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn select_clamps_to_the_catalog() {
+        let mut reg = ModelRegistry::default();
+        let last = reg.labels().len() - 1;
+        reg.select(last);
+        assert_eq!(reg.selected, last);
+        reg.select(usize::MAX); // out of range: ignored, selection unchanged
+        assert_eq!(reg.selected, last);
+    }
+
+    #[test]
+    fn selected_label_tracks_selection() {
+        let mut reg = ModelRegistry::default();
+        for (i, label) in reg.labels().into_iter().enumerate() {
+            reg.select(i);
+            assert_eq!(reg.selected_label(), label);
+        }
+    }
+
+    #[test]
+    fn every_entry_builds_a_controller() {
+        // Each factory must construct without panicking — the registry-level smoke
+        // test that a catalog edit cannot ship an unbuildable model.
+        let mut reg = ModelRegistry::default();
+        for i in 0..reg.labels().len() {
+            reg.select(i);
+            let _ = reg.selected_controller();
         }
     }
 }

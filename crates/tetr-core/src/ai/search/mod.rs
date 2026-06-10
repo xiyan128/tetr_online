@@ -42,23 +42,28 @@ use crate::ai::movegen::{generate_with_hold, spawn_piece, Move, Placement};
 use crate::ai::state::SearchState;
 use crate::engine::{classify_t_spin, LockOutcome, PieceType, TSpinKind};
 
-/// How much work a planner may do in one [`Planner::plan`] call.
+/// How much total work a planner may spend on one decision.
 ///
-/// `nodes` caps how many placements/states the search may expand before it must
-/// yield (the unit a WASM time-slice is measured in); `max_depth` caps lookahead
-/// plies. The greedy Tier-1 planner finishes in one call and ignores `nodes`; a
-/// future beam/DAG planner honours both so it can be polled incrementally.
+/// `max_depth` caps lookahead plies for every planner. `nodes` caps total node
+/// expansions per decision for the node-counted planner ([`BestFirstPlanner`]);
+/// the planners that bound their work another way ignore it — greedy finishes in
+/// one shot, and the beam is bounded by its width × depth. Time-slicing (how much
+/// of the budget runs per [`Planner::plan`] call before yielding
+/// [`PlannerStep::NeedMoreBudget`]) is each planner's own contract, not part of
+/// the budget.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchBudget {
-    /// Maximum states to expand before yielding. `0` means "unbounded this call".
+    /// Total node expansions per decision for node-counted planners (best-first).
+    /// `0` means uncapped — the depth cap / frontier exhaustion alone terminates.
+    /// Ignored by greedy and the beam.
     pub nodes: u32,
     /// Maximum lookahead plies (current piece = depth 1).
     pub max_depth: u8,
 }
 
 impl SearchBudget {
-    /// A budget for a one-shot, single-ply search (the greedy default): unbounded
-    /// nodes, depth 1.
+    /// A budget for a one-shot, single-ply search (the greedy default): depth 1,
+    /// no node cap (greedy ignores it).
     pub fn greedy() -> Self {
         Self {
             nodes: 0,
@@ -66,15 +71,22 @@ impl SearchBudget {
         }
     }
 
-    /// A budget for a multi-ply beam search up to `max_depth` plies, expanding a
-    /// whole generation per `plan` call (`nodes == 0`, unbounded per call). The beam
-    /// *width* is a [`BeamPlanner`](crate::ai::search::BeamPlanner) field, not part of
-    /// the budget. `beam(1)` reproduces the greedy single-ply decision.
+    /// A budget for a multi-ply beam search up to `max_depth` plies. The beam is
+    /// bounded by its *width* (a [`BeamPlanner`](crate::ai::search::BeamPlanner)
+    /// field) × depth and ignores `nodes`. `beam(1)` reproduces the greedy
+    /// single-ply decision.
     pub fn beam(max_depth: u8) -> Self {
         Self {
             nodes: 0,
             max_depth,
         }
+    }
+
+    /// A budget for the best-first planner: `nodes` total expansions per decision
+    /// (its quality dial; `0` = uncapped, terminate on depth / frontier alone — pass
+    /// a real cap in production) under a `max_depth` ply cap.
+    pub fn best_first(nodes: u32, max_depth: u8) -> Self {
+        Self { nodes, max_depth }
     }
 }
 

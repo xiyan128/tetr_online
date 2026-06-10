@@ -96,23 +96,29 @@ impl BoardFeatures {
     /// outcome to score a board with no associated move (those two features come
     /// out `0`).
     pub fn extract(board: &Board, lock: &LockOutcome) -> Self {
-        let cols = board.column_bits();
-        let heights = column_heights(&cols);
+        Self::extract_cols(&board.column_bits(), lock)
+    }
+
+    /// Extract the full feature set from a column bitboard (bit `y` of `cols[x]` set
+    /// ⇔ `(x, y)` filled) — the zero-copy core behind [`extract`](Self::extract), and
+    /// the path an evaluator already holding the search's columns takes directly.
+    pub fn extract_cols(cols: &[u64], lock: &LockOutcome) -> Self {
+        let heights = column_heights(cols);
         let stack_height = heights.iter().copied().max().unwrap_or(0);
 
-        let (holes, hole_depth, rows_with_holes) = hole_features(&cols, &heights);
+        let (holes, hole_depth, rows_with_holes) = hole_features(cols, &heights);
 
         Self {
             landing_height: landing_height(lock),
             eroded_piece_cells: eroded_piece_cells(lock),
-            row_transitions: row_transitions(&cols, stack_height),
-            column_transitions: column_transitions(&cols, stack_height),
+            row_transitions: row_transitions(cols, stack_height),
+            column_transitions: column_transitions(cols, stack_height),
             holes,
-            board_wells: board_wells(&cols, stack_height),
+            board_wells: board_wells(cols, stack_height),
             hole_depth,
             rows_with_holes,
-            tetris_well: tetris_well(&cols, &heights, stack_height),
-            near_full_rows: near_full_rows(&cols, stack_height),
+            tetris_well: tetris_well(cols, &heights, stack_height),
+            near_full_rows: near_full_rows(cols, stack_height),
         }
     }
 }

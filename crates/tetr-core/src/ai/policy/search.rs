@@ -170,7 +170,6 @@ fn score_candidates(obs: &Observation, eval: &dyn Evaluator) -> Vec<PlacementPla
 mod tests {
     use super::*;
     use crate::engine::{Board, CellKind, PieceType};
-    use std::collections::VecDeque;
 
     /// A search state with an unambiguous best (vertical I clears a Tetris in the
     /// col-3 well).
@@ -182,7 +181,7 @@ mod tests {
             }
         }
         let active = movegen::spawn_piece(PieceType::I, 4, 10);
-        crate::ai::state::SearchState::for_test(board, active, None, VecDeque::new())
+        crate::ai::state::SearchState::for_test(board, active, None, std::iter::empty())
     }
 
     fn placed(decision: Decision) -> crate::ai::movegen::Placement {
@@ -223,7 +222,7 @@ mod tests {
     fn empty_board_still_decides() {
         let active = movegen::spawn_piece(PieceType::T, 6, 12);
         let state =
-            crate::ai::state::SearchState::for_test(Board::new(6, 12), active, None, VecDeque::new());
+            crate::ai::state::SearchState::for_test(Board::new(6, 12), active, None, std::iter::empty());
         let mut policy = SearchPolicy::greedy(0.0, 7);
         let _ = placed(policy.decide(&state));
     }

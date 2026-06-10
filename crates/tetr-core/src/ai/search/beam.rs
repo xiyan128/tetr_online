@@ -2,7 +2,7 @@
 //!
 //! A CC2-style **beam search** behind the same [`Planner`] trait the greedy Tier-1
 //! planner implements, so it drops in with no controller / policy / runner change.
-//! See `BEAM.md` (this directory) for the normative design; the load-bearing pins:
+//! See `BEAM.md` (this directory) for the design record; the load-bearing pins:
 //!
 //! 1. **Determinism (BEAM.md §1).** Zero RNG, no clock. The only tie-breaker is
 //!    movegen's canonical placement order: children are pushed in
@@ -24,13 +24,13 @@
 //! `budget.max_depth` (or the frontier empties), at which point it returns the
 //! best ply-1 placement. [`SearchPolicy::plan_best`] already drives that loop.
 
-use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
+use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
     best_root_plan, commit_child, hold_placements, Planner, PlannerStep, RootKey, SearchBudget,
 };
 use crate::ai::state::SearchState;
-use crate::engine::{BitBoard, ColumnView, LockOutcome, PieceType, TSpinKind};
+use crate::engine::{ColumnView, LockOutcome, PieceType, TSpinKind};
 
 
 /// Multiplicative pessimism applied to a speculative branch's *reward* contribution
@@ -60,6 +60,24 @@ struct BeamNode {
     /// A per-branch reward discount carried from speculation (BEAM.md §5). `1.0`
     /// until the branch crosses into speculative plies; multiplied by [`SPEC_DECAY`]
     /// at each speculative expansion so deeper speculative rewards count for less.
+    spec_weight: f32,
+}
+
+/// One not-yet-scored child of the generation being expanded: the forked state, its
+/// lock results, and the node bookkeeping, in **one** struct — so the batch inputs
+/// and the post-score node build read the same element and can never fall out of
+/// lockstep (this replaced a pair of parallel "owners"/"meta" vectors).
+struct PendingChild {
+    state: SearchState,
+    lock: LockOutcome,
+    t_spin: Option<TSpinKind>,
+    /// The chain context the child scores under (the PARENT's pre-placement state).
+    ctx: EvalContext,
+    /// Which ply-1 root this descends from.
+    root_index: usize,
+    /// The parent's accumulated path reward; this move's reward folds in at scoring.
+    parent_acc: Reward,
+    /// The branch's speculative reward discount (`1.0` on concrete branches).
     spec_weight: f32,
 }
 
@@ -106,82 +124,55 @@ impl BeamPlanner {
         self
     }
 
-    /// Seed the run: expand depth 1 (the root frontier), score it as one batch, and
-    /// build the initial frontier. Returns the seeded [`BeamRun`], or `None` when the
-    /// state has no legal placement (topped out).
+    /// Seed the run: form the ply-1 root children (depth 1), score them as one batch,
+    /// and build the initial frontier. Returns the seeded [`BeamRun`], or `None` when
+    /// the state has no legal placement (topped out).
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator) -> Option<BeamRun> {
         let roots = hold_placements(state);
         if roots.is_empty() {
             return None;
         }
 
-        // Fork + transition each root child, collecting batch owners in canonical
-        // order so the one batch call preserves it.
-        let mut children: Vec<SearchState> = Vec::with_capacity(roots.len());
-        let mut owners: Vec<(LockOutcome, Option<TSpinKind>, EvalContext)> =
-            Vec::with_capacity(roots.len());
-        // Root children are scored with the decision point's chain — the combo / B2B
-        // state before the move — exactly as the per-generation expansion does.
+        // Fork + transition each root child in canonical order, through the shared
+        // fork → classify pre-lock → commit helper. Root children score with the
+        // decision point's chain — the combo / B2B state before the move — exactly
+        // as the per-generation expansion does.
         let root_ctx = EvalContext {
             combo: state.combo,
             b2b: state.b2b,
         };
-        for placement in &roots {
-            // Build each root child through the shared fork → classify pre-lock →
-            // commit helper; the whole generation is scored together below in one
-            // `evaluate_batch` (so the per-child path here stops at commit, not eval).
-            let (child, lock, t_spin) = commit_child(state, placement);
-            owners.push((lock, t_spin, root_ctx));
-            children.push(child);
-        }
+        let pending: Vec<PendingChild> = roots
+            .iter()
+            .enumerate()
+            .map(|(i, placement)| {
+                let (child, lock, t_spin) = commit_child(state, placement);
+                PendingChild {
+                    state: child,
+                    lock,
+                    t_spin,
+                    ctx: root_ctx,
+                    root_index: i,
+                    parent_acc: Reward(0),
+                    spec_weight: 1.0,
+                }
+            })
+            .collect();
 
-        // Score borrowing each child's own board — no second dense-board copy (the
-        // fork above already produced it; `boards` is a vec of pointers). The borrow
-        // is scoped so `children` is free to move into the frontier below.
-        let scores = {
-            let boards: Vec<&BitBoard> = children.iter().map(|c| &c.board).collect();
-            Self::score_batch(eval, &owners, &boards)
-        };
-
-        let mut root_best = vec![i32::MIN; roots.len()];
-        let mut frontier: Vec<BeamNode> = Vec::with_capacity(roots.len());
-        for (i, ((value, reward), child)) in scores.into_iter().zip(children).enumerate() {
-            let score = (value + reward).0;
-            // `>`: keep the first maximum (canonical order), matching greedy.
-            if score > root_best[i] {
-                root_best[i] = score;
-            }
-            frontier.push(BeamNode {
-                state: child,
-                acc_reward: reward,
-                root_index: i,
-                score,
-                spec_weight: 1.0,
-            });
-        }
-
-        // Stable sort descending by score, then truncate: ties keep canonical order.
-        sort_desc_by_score(&mut frontier);
-        frontier.truncate(self.beam_width);
-
-        Some(BeamRun {
+        let mut run = BeamRun {
+            root_best: vec![i32::MIN; roots.len()],
             roots,
-            root_best,
-            frontier,
+            frontier: Vec::new(),
             depth: 1,
             root_key: RootKey::of(state),
-        })
+        };
+        Self::score_into_frontier(&mut run, pending, eval, self.beam_width);
+        Some(run)
     }
 
-    /// Expand one generation from the current frontier: form every child, score the
-    /// whole generation in **one** batch, fold rewards into `acc_reward`, update
-    /// `root_best`, then stable-sort/truncate into the next frontier.
+    /// Expand one generation from the current frontier: form every child, then hand
+    /// the generation to [`score_into_frontier`](Self::score_into_frontier).
     fn expand_generation(&self, run: &mut BeamRun, eval: &dyn Evaluator) {
-        // Batch owners (kept alive for the borrow the batch call takes) and the
-        // per-child metadata to rebuild nodes after scoring, both in lockstep order.
-        let mut owners: Vec<(LockOutcome, Option<TSpinKind>, EvalContext)> = Vec::new();
-        // (root_index, parent_acc_reward, child_state, child_spec_weight)
-        let mut meta: Vec<(usize, Reward, SearchState, f32)> = Vec::new();
+        let mut pending: Vec<PendingChild> = Vec::new();
 
         for parent in &run.frontier {
             if parent.state.queue.is_empty() {
@@ -190,7 +181,7 @@ impl BeamPlanner {
                 // terminal node contributes no children; its `root_best` was already
                 // recorded when it entered the frontier, so the back-up keeps it.
                 if self.speculate {
-                    Self::expand_speculative(parent, &mut owners, &mut meta);
+                    Self::expand_speculative(parent, &mut pending);
                 }
                 continue;
             }
@@ -204,43 +195,74 @@ impl BeamPlanner {
             };
             for placement in hold_placements(&parent.state) {
                 let (child, lock, t_spin) = commit_child(&parent.state, &placement);
-                owners.push((lock, t_spin, parent_ctx));
-                meta.push((parent.root_index, parent.acc_reward, child, parent.spec_weight));
+                pending.push(PendingChild {
+                    state: child,
+                    lock,
+                    t_spin,
+                    ctx: parent_ctx,
+                    root_index: parent.root_index,
+                    parent_acc: parent.acc_reward,
+                    spec_weight: parent.spec_weight,
+                });
             }
         }
 
-        // Borrow each child's board for the batch (scoped so `meta` can be consumed
-        // below) instead of cloning the dense board a second time per child.
+        Self::score_into_frontier(run, pending, eval, self.beam_width);
+        run.depth += 1;
+    }
+
+    /// Score a generation's `pending` children in **one** [`Evaluator::evaluate_batch`]
+    /// call (BEAM.md §7) and fold the results into the next frontier: weight each
+    /// child's reward by its branch's speculative discount, accumulate the path
+    /// reward, back up `root_best`, then stable-sort / truncate to the beam width.
+    /// The shared scoring tail of [`seed`](Self::seed) (all-concrete, weight `1.0`)
+    /// and [`expand_generation`](Self::expand_generation).
+    fn score_into_frontier(
+        run: &mut BeamRun,
+        pending: Vec<PendingChild>,
+        eval: &dyn Evaluator,
+        beam_width: usize,
+    ) {
+        // The batch borrows each child's lock + board straight out of `pending`
+        // (scoped so `pending` is free to move into the frontier below).
         let scores = {
-            let boards: Vec<&BitBoard> = meta.iter().map(|(_, _, child, _)| &child.board).collect();
-            Self::score_batch(eval, &owners, &boards)
+            let inputs: Vec<(&LockOutcome, ColumnView, Option<TSpinKind>, EvalContext)> = pending
+                .iter()
+                .map(|p| (&p.lock, p.state.board.view(), p.t_spin, p.ctx))
+                .collect();
+            eval.evaluate_batch(&inputs)
         };
 
-        let mut next: Vec<BeamNode> = Vec::with_capacity(meta.len());
-        for ((root_index, parent_acc, child, spec_weight), (value, reward)) in
-            meta.into_iter().zip(scores)
-        {
+        let mut next: Vec<BeamNode> = Vec::with_capacity(pending.len());
+        for (p, (value, reward)) in pending.into_iter().zip(scores) {
             // Discount this move's reward by the branch's speculative weight; the
-            // board Value is kept whole (the resulting board is real regardless).
-            let weighted_reward = Reward((reward.0 as f32 * spec_weight).round() as i32);
-            let acc = parent_acc + weighted_reward;
+            // board Value is kept whole (the resulting board is real regardless). A
+            // concrete branch (weight 1.0) keeps the integer reward exactly, with no
+            // f32 round-trip.
+            let weighted_reward = if p.spec_weight == 1.0 {
+                reward
+            } else {
+                Reward((reward.0 as f32 * p.spec_weight).round() as i32)
+            };
+            let acc = p.parent_acc + weighted_reward;
             let score = (value + acc).0;
-            if score > run.root_best[root_index] {
-                run.root_best[root_index] = score;
+            // `>`: keep the first maximum (canonical order), matching greedy.
+            if score > run.root_best[p.root_index] {
+                run.root_best[p.root_index] = score;
             }
             next.push(BeamNode {
-                state: child,
+                state: p.state,
                 acc_reward: acc,
-                root_index,
+                root_index: p.root_index,
                 score,
-                spec_weight,
+                spec_weight: p.spec_weight,
             });
         }
 
+        // Stable sort descending by score, then truncate: ties keep canonical order.
         sort_desc_by_score(&mut next);
-        next.truncate(self.beam_width);
+        next.truncate(beam_width);
         run.frontier = next;
-        run.depth += 1;
     }
 
     /// Speculative expansion of an empty-queue `parent` (BEAM.md §5): for each piece
@@ -251,11 +273,7 @@ impl BeamPlanner {
     ///
     /// No RNG, no expectimax average — every bag-legal piece is enumerated and
     /// beam-width truncation prunes the fan-out, keeping the planner deterministic.
-    fn expand_speculative(
-        parent: &BeamNode,
-        owners: &mut Vec<(LockOutcome, Option<TSpinKind>, EvalContext)>,
-        meta: &mut Vec<(usize, Reward, SearchState, f32)>,
-    ) {
+    fn expand_speculative(parent: &BeamNode, pending: &mut Vec<PendingChild>) {
         let placements = hold_placements(&parent.state);
         let child_weight = parent.spec_weight * SPEC_DECAY;
         let parent_ctx = EvalContext {
@@ -278,29 +296,18 @@ impl BeamPlanner {
                 // when hold is occupied (movegen's `hold.or(queue_front)`), so the
                 // shared transition's empty-hold funding pop never fires here.
                 let lock = child.commit_placement_with_next(placement, next_piece);
-                owners.push((lock, t_spin, parent_ctx));
-                meta.push((parent.root_index, parent.acc_reward, child, child_weight));
+                pending.push(PendingChild {
+                    state: child,
+                    lock,
+                    t_spin,
+                    ctx: parent_ctx,
+                    root_index: parent.root_index,
+                    parent_acc: parent.acc_reward,
+                    spec_weight: child_weight,
+                });
             }
         }
     }
-
-    /// Score a generation's children in **one** [`Evaluator::evaluate_batch`] call,
-    /// pairing each owned `(lock, t_spin, ctx)` with its child's borrowed board in
-    /// order (BEAM.md §7). The boards are borrowed from the surviving child states —
-    /// not cloned — so a generation costs one dense-board copy per child, not two.
-    fn score_batch(
-        eval: &dyn Evaluator,
-        owners: &[(LockOutcome, Option<TSpinKind>, EvalContext)],
-        boards: &[&BitBoard],
-    ) -> Vec<(Value, Reward)> {
-        let inputs: Vec<(&LockOutcome, ColumnView, Option<TSpinKind>, EvalContext)> = owners
-            .iter()
-            .zip(boards)
-            .map(|((l, t, ctx), b)| (l, b.view(), *t, *ctx))
-            .collect();
-        eval.evaluate_batch(&inputs)
-    }
-
 }
 
 impl Planner for BeamPlanner {
@@ -364,7 +371,6 @@ mod tests {
     use crate::ai::eval::LinearEvaluator;
     use crate::ai::search::GreedyPlanner;
     use crate::engine::{Board, CellKind, Engine, EngineConfig, InputFrame};
-    use std::collections::VecDeque;
 
     fn linear() -> LinearEvaluator {
         LinearEvaluator::default()
@@ -397,7 +403,7 @@ mod tests {
             }
         }
         let active = movegen::spawn_piece(PieceType::I, 4, 12);
-        SearchState::for_test(board, active, None, VecDeque::new())
+        SearchState::for_test(board, active, None, std::iter::empty())
     }
 
     #[test]
@@ -456,7 +462,7 @@ mod tests {
             }
         }
         let active = movegen::spawn_piece(PieceType::I, 4, 4);
-        let state = SearchState::for_test(board, active, None, VecDeque::new());
+        let state = SearchState::for_test(board, active, None, std::iter::empty());
 
         // Movegen still emits placements if the spawn pose itself rests; to force the
         // empty case we assert on the actual movegen output and only require the beam
@@ -482,7 +488,7 @@ mod tests {
         }
         // O on a 2x2 board has nowhere to go; movegen yields no resting poses.
         let active = movegen::spawn_piece(PieceType::O, 2, 2);
-        let state = SearchState::for_test(board, active, None, VecDeque::new());
+        let state = SearchState::for_test(board, active, None, std::iter::empty());
         if hold_placements(&state).is_empty() {
             let mut beam = BeamPlanner::new(8);
             assert!(matches!(
@@ -532,7 +538,7 @@ mod tests {
             }
         }
         let active = movegen::spawn_piece(PieceType::S, 4, 12);
-        let state = SearchState::for_test(board, active, Some(PieceType::I), VecDeque::new());
+        let state = SearchState::for_test(board, active, Some(PieceType::I), std::iter::empty());
 
         let mut beam = BeamPlanner::new(16);
         let plan = drive(&mut beam, &state, &linear(), SearchBudget::beam(1)).unwrap();
@@ -576,7 +582,7 @@ mod tests {
         board.set(5, 0, CellKind::Some(PieceType::O));
         let active = movegen::spawn_piece(PieceType::T, 6, 12);
         // Empty queue + occupied hold: depth-2 search past the queue speculates.
-        let state = SearchState::for_test(board, active, Some(PieceType::L), VecDeque::new());
+        let state = SearchState::for_test(board, active, Some(PieceType::L), std::iter::empty());
 
         let mut a = BeamPlanner::new(12);
         let mut b = BeamPlanner::new(12);
@@ -596,7 +602,7 @@ mod tests {
         let mut board = Board::new(6, 12);
         board.set(0, 0, CellKind::Some(PieceType::O));
         let active = movegen::spawn_piece(PieceType::T, 6, 12);
-        let state = SearchState::for_test(board, active, None, VecDeque::new());
+        let state = SearchState::for_test(board, active, None, std::iter::empty());
 
         let mut beam = BeamPlanner::new(16).with_speculation(false);
         let mut greedy = GreedyPlanner::new();

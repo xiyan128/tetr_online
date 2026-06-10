@@ -38,9 +38,13 @@ use crate::ai::search::{
 use crate::ai::state::SearchState;
 
 
-/// Nodes expanded per `plan` call before yielding (the WASM time-slice unit). The
-/// blocking [`SearchPolicy::plan_best`](crate::ai::SearchPolicy) loops until `Done`.
-const EXPAND_CHUNK: u32 = 1024;
+/// Nodes expanded per `plan` call before yielding — the cooperative time-slice unit,
+/// deliberately far below any real node budget (the shipped budget is 150, the bench
+/// default 4000) so an incremental runner actually observes
+/// [`PlannerStep::NeedMoreBudget`] instead of the whole search running in one call.
+/// The blocking [`SearchPolicy::plan_best`](crate::ai::SearchPolicy) just loops until
+/// `Done`, so slice size never changes a decision — only call granularity.
+const EXPAND_CHUNK: u32 = 64;
 
 /// Identity of a search state for transposition: same key ⇒ same future, so two paths
 /// reaching it are interchangeable. **Per-root** (`root_index` is part of the key) so a
@@ -116,18 +120,20 @@ struct Run {
 }
 
 /// A deterministic best-first graph-search planner with per-root transposition.
+///
+/// The total node-expansion budget per decision comes from
+/// [`SearchBudget::nodes`] (see [`SearchBudget::best_first`]) — the planner itself
+/// only carries the in-flight run.
+#[derive(Default)]
 pub struct BestFirstPlanner {
-    node_budget: u32,
     run: Option<Run>,
 }
 
 impl BestFirstPlanner {
-    /// A planner with the given total node-expansion budget per decision.
-    pub fn new(node_budget: u32) -> Self {
-        Self {
-            node_budget: node_budget.max(1),
-            run: None,
-        }
+    /// A fresh planner (no in-flight run). The node budget is supplied per call via
+    /// [`SearchBudget::best_first`].
+    pub fn new() -> Self {
+        Self::default()
     }
 
     /// Generate + score every child of `parent` (one per placement), in canonical
@@ -202,16 +208,16 @@ impl BestFirstPlanner {
     }
 
     /// Expand up to `EXPAND_CHUNK` best nodes (or until the node budget / frontier is
-    /// exhausted). A node at `max_depth`, or with an empty queue (no concrete next
-    /// piece — speculation past the visible queue is left to a future revision), is a
-    /// leaf: its score already credited its root, so it is simply dropped.
-    fn expand_chunk(&self, run: &mut Run, eval: &dyn Evaluator, max_depth: u8) {
+    /// exhausted). A node at `budget.max_depth`, or with an empty queue (no concrete
+    /// next piece — speculation past the visible queue is left to a future revision),
+    /// is a leaf: its score already credited its root, so it is simply dropped.
+    fn expand_chunk(run: &mut Run, eval: &dyn Evaluator, budget: SearchBudget) {
         let mut this_call = 0u32;
-        while this_call < EXPAND_CHUNK && run.expanded < self.node_budget {
+        while this_call < EXPAND_CHUNK && !budget_spent(run.expanded, budget) {
             let Some(node) = run.frontier.pop() else {
                 break;
             };
-            if node.depth >= max_depth || node.state.queue.is_empty() {
+            if node.depth >= budget.max_depth || node.state.queue.is_empty() {
                 continue; // leaf — already backed up
             }
             run.expanded += 1;
@@ -222,7 +228,12 @@ impl BestFirstPlanner {
             }
         }
     }
+}
 
+/// Whether `expanded` has consumed the decision's node budget (`nodes == 0` =
+/// uncapped: only depth / frontier exhaustion terminate).
+fn budget_spent(expanded: u32, budget: SearchBudget) -> bool {
+    budget.nodes != 0 && expanded >= budget.nodes
 }
 
 impl Planner for BestFirstPlanner {
@@ -247,9 +258,9 @@ impl Planner for BestFirstPlanner {
             Some(run) => run,
         };
 
-        self.expand_chunk(&mut run, eval, budget.max_depth);
+        Self::expand_chunk(&mut run, eval, budget);
 
-        if run.expanded >= self.node_budget || run.frontier.is_empty() {
+        if budget_spent(run.expanded, budget) || run.frontier.is_empty() {
             let plan = best_root_plan(&run.roots, &run.root_best);
             self.run = None;
             PlannerStep::Done(Some(plan))
@@ -295,10 +306,11 @@ mod tests {
         // The same state planned twice (depth 4, budget 2000) yields the identical plan.
         let state = engine_state(7);
         let eval = LinearEvaluator::default();
-        let mut a = BestFirstPlanner::new(2000);
-        let mut b = BestFirstPlanner::new(2000);
-        let pa = drive(&mut a, &state, &eval, SearchBudget::beam(4)).unwrap();
-        let pb = drive(&mut b, &state, &eval, SearchBudget::beam(4)).unwrap();
+        let mut a = BestFirstPlanner::new();
+        let mut b = BestFirstPlanner::new();
+        let budget = SearchBudget::best_first(2000, 4);
+        let pa = drive(&mut a, &state, &eval, budget).unwrap();
+        let pb = drive(&mut b, &state, &eval, budget).unwrap();
         assert_eq!(pa.placement.origin(), pb.placement.origin());
         assert_eq!(pa.placement.rotation(), pb.placement.rotation());
         assert_eq!(pa.placement.path, pb.placement.path);
@@ -311,12 +323,35 @@ mod tests {
         // greedy single-ply argmax — identical to GreedyPlanner (the seam-faithful gate).
         let state = engine_state(42);
         let eval = LinearEvaluator::default();
-        let mut bf = BestFirstPlanner::new(2000);
+        let mut bf = BestFirstPlanner::new();
         let mut greedy = GreedyPlanner::new();
-        let bp = drive(&mut bf, &state, &eval, SearchBudget::beam(1)).unwrap();
+        let bp = drive(&mut bf, &state, &eval, SearchBudget::best_first(2000, 1)).unwrap();
         let gp = drive(&mut greedy, &state, &eval, SearchBudget::greedy()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
         assert_eq!(bp.placement.path, gp.placement.path);
+    }
+
+    #[test]
+    fn best_first_time_slices_at_the_production_budget() {
+        // The cooperative-yield contract: EXPAND_CHUNK (the per-call slice) sits below
+        // the shipped node budget, so the first `plan` call must yield NeedMoreBudget
+        // rather than running the whole decision — and the final plan must not depend
+        // on slice granularity (the sliced run equals a fresh full drive).
+        let state = engine_state(7);
+        let eval = LinearEvaluator::default();
+        let budget = SearchBudget::best_first(150, 6);
+
+        let mut sliced = BestFirstPlanner::new();
+        assert!(
+            matches!(sliced.plan(&state, &eval, budget), PlannerStep::NeedMoreBudget),
+            "a 150-node decision must span multiple {EXPAND_CHUNK}-node slices"
+        );
+        let sliced_plan = drive(&mut sliced, &state, &eval, budget).unwrap();
+
+        let full_plan = drive(&mut BestFirstPlanner::new(), &state, &eval, budget).unwrap();
+        assert_eq!(sliced_plan.placement.origin(), full_plan.placement.origin());
+        assert_eq!(sliced_plan.placement.path, full_plan.placement.path);
+        assert_eq!(sliced_plan.score, full_plan.score);
     }
 }

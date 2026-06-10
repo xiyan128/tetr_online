@@ -16,11 +16,22 @@
 //! The snapshot exposes the revealed Next queue but **not** the generator's
 //! internal bag, so a hold-aware lookahead must reconstruct it. We mirror Cold
 //! Clear's `bag: EnumSet<Piece>` with a small [`BagState`] bitset recording which
-//! of the seven tetrominoes have *not yet* been dealt out of the current bag.
-//! Walking the already-dealt pieces (the active piece, then the revealed queue)
-//! front-to-back and refilling whenever the bag empties yields the exact set the
-//! next unknown piece will be drawn from — which is what `commit` needs once it
-//! runs past the revealed queue.
+//! of the seven tetrominoes have *not yet* been dealt out of the current bag,
+//! rebuilt by walking the already-dealt pieces (the active piece, then the
+//! revealed queue) front-to-back from a fresh bag.
+//!
+//! The reconstruction is a **sound approximation**, not exact: the walk starts
+//! from a full bag at the window's first piece, so pieces from the *previous*
+//! bag inside the window are also treated as dealt — the remainder can be a
+//! conservative **subset** of the truth (speculation explores slightly fewer
+//! futures than possible, never impossible ones). Soundness holds because the
+//! current bag's dealt prefix (at most 6 pieces) always fits inside the
+//! active+queue window at the default preview of 5 (window 6) — pinned by
+//! `bag_reconstruction_never_claims_a_dealt_piece`. A `preview_count <= 4`
+//! window is shorter than a bag's dealt prefix can be, letting dealt pieces
+//! escape it — there the remainder **overclaims** and speculation would branch
+//! on impossible pieces. Exact reconstruction would need the engine to expose
+//! its deal count; not worth it while the shipped preview is 5.
 
 use smallvec::SmallVec;
 
@@ -189,11 +200,7 @@ impl SearchState {
     ///
     /// Returns the [`LockOutcome`] from the lock for the evaluator's reward half.
     pub fn commit(&mut self) -> LockOutcome {
-        let piece = self.active.clone();
-        let t_spin = classify_t_spin(&piece, &self.board);
-        let outcome = self.board.lock_piece(&piece);
-        self.update_b2b(&outcome, t_spin);
-        self.update_combo(&outcome);
+        let outcome = self.lock_active();
         if let Some(next) = self.deal_from_queue() {
             self.spawn(next);
         }
@@ -207,12 +214,21 @@ impl SearchState {
     /// Next queue it enumerates the bag's remaining pieces ([`SearchState::bag`])
     /// and commits each via this method to explore "what if the next piece is X".
     pub fn commit_with_next(&mut self, next: crate::engine::PieceType) -> LockOutcome {
+        let outcome = self.lock_active();
+        self.spawn(next);
+        outcome
+    }
+
+    /// Classify-then-lock `self.active` at its current pose and transition the B2B /
+    /// combo chains — the shared core of [`commit`](Self::commit) and
+    /// [`commit_with_next`](Self::commit_with_next), which differ only in where the
+    /// next active piece comes from (the queue front vs a speculative deal).
+    fn lock_active(&mut self) -> LockOutcome {
         let piece = self.active.clone();
         let t_spin = classify_t_spin(&piece, &self.board);
         let outcome = self.board.lock_piece(&piece);
         self.update_b2b(&outcome, t_spin);
         self.update_combo(&outcome);
-        self.spawn(next);
         outcome
     }
 
@@ -628,6 +644,44 @@ mod tests {
         // A full bag dealt out is empty; the next deal refills it.
         bag.deal(PieceType::I);
         assert!(!bag.contains(PieceType::I));
+    }
+
+    #[test]
+    fn bag_reconstruction_never_claims_a_dealt_piece() {
+        // The module-doc soundness contract: the reconstructed remainder may be a
+        // conservative subset of the true bag (previous-bag pieces in the window are
+        // wrongly treated as dealt), but at the default preview it must NEVER claim a
+        // piece the current bag has already dealt — speculation branching on an
+        // impossible next piece would search futures that cannot happen.
+        for seed in [0u64, 7, 42, 12345] {
+            // The generator's deal stream is the ground truth for bag boundaries.
+            let stream: Vec<PieceType> = crate::engine::PieceGenerator::with_seed(seed)
+                .take(40)
+                .collect();
+            let mut engine = Engine::new(EngineConfig::default(), seed);
+            engine.step(InputFrame::default()); // spawn piece 0
+            let mut consumed = 6usize; // 1 active + the default 5-piece preview
+
+            for _ in 0..12 {
+                let snapshot = engine.snapshot();
+                if snapshot.game_over.is_some() {
+                    break; // naive center drops eventually stack out; soundness was checked while alive
+                }
+                let state = SearchState::from_snapshot(&snapshot).unwrap();
+                let dealt_this_bag = &stream[(consumed / 7) * 7..consumed];
+                for pt in PieceType::all() {
+                    assert!(
+                        !(state.bag.contains(pt) && dealt_this_bag.contains(&pt)),
+                        "seed {seed}: bag claims {pt:?} but the current bag already dealt it"
+                    );
+                }
+                engine.step(InputFrame {
+                    hard_drop: true,
+                    ..InputFrame::default()
+                });
+                consumed += 1;
+            }
+        }
     }
 
     #[test]

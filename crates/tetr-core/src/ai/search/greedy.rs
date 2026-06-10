@@ -113,11 +113,10 @@ mod tests {
     use crate::engine::{
         ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType,
     };
-    use std::collections::VecDeque;
 
     /// Build a `SearchState` from a crafted board + active piece (no hold/queue).
     fn state_with(board: Board, active: ActivePiece) -> SearchState {
-        SearchState::for_test(board, active, None, VecDeque::new())
+        SearchState::for_test(board, active, None, std::iter::empty())
     }
 
     /// A planner plan, unwrapped, or a panic with context.
@@ -257,7 +256,7 @@ mod tests {
         }
         // Active S, held I.
         let active = movegen::spawn_piece(PieceType::S, 4, 12);
-        let state = SearchState::for_test(board, active, Some(PieceType::I), VecDeque::new());
+        let state = SearchState::for_test(board, active, Some(PieceType::I), std::iter::empty());
 
         let mut planner = GreedyPlanner::new();
         let plan = plan_of(&state, &mut planner);

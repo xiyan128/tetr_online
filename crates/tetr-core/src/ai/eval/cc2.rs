@@ -99,6 +99,28 @@ impl Cc2Weights {
         ]
     }
 
+    /// The attack profile: [`DEFAULT`](Self::DEFAULT) with the board weights replaced
+    /// by the `cc2-app-climb` result (warm-climbed for attack-per-piece, 2026-06).
+    /// This is the brain the shipped beam / best-first attack bots play; it lives here
+    /// — beside [`DT20`](super::BoardWeights::DT20) and friends — so the game registry
+    /// and the research harness read the same numbers.
+    pub fn attack_tuned() -> Self {
+        const ATTACK_BOARD_PARAMS: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
+            -0.003_447_473,
+            -1.5,
+            -0.2,
+            -0.362_030_36,
+            -1.5,
+            -5.0,
+            0.347_263_3,
+            0.1,
+            1.5,
+            4.465_080_7,
+            4.0,
+        ];
+        Self::DEFAULT.with_board_params(&ATTACK_BOARD_PARAMS)
+    }
+
     /// Return a copy with the board-Value weights replaced by `p` (see
     /// [`board_params`](Self::board_params) for the order).
     pub fn with_board_params(mut self, p: &[f32; Self::BOARD_PARAM_COUNT]) -> Self {
@@ -558,5 +580,70 @@ mod tests {
         let base = value(EvalContext { combo: 0, b2b: false });
         assert!(value(EvalContext { combo: 0, b2b: true }) > base, "b2b raises Value");
         assert_eq!(value(EvalContext { combo: 5, b2b: false }), base, "combo does not affect Value");
+    }
+
+    #[test]
+    fn cc2_evaluate_cols_matches_evaluate() {
+        // The bit-identical contract on the override (the per-impl differential the
+        // trait doc promises), exercised on a board with holes, a well, and a T-slot.
+        let eval = Cc2Evaluator::default();
+        let mut board = Board::new(10, 20);
+        for x in 0..9 {
+            board.set(x, 0, CellKind::Some(PieceType::I));
+        }
+        board.set(0, 2, CellKind::Some(PieceType::O)); // covered hole at (0, 1)
+        let clear_lock = LockOutcome {
+            cells_locked: vec![(9, 0, CellKind::Some(PieceType::T))],
+            cleared_rows: vec![0],
+            top_y_after_lock: Some(2),
+        };
+
+        for (lock, t_spin) in [
+            (no_clear_lock(PieceType::T), None),
+            (clear_lock, Some(TSpinKind::Full)),
+        ] {
+            let ctx = EvalContext { combo: 3, b2b: true };
+            let bb = crate::engine::BitBoard::from_board(&board);
+            assert_eq!(
+                eval.evaluate_cols(&lock, bb.view(), t_spin, ctx),
+                eval.evaluate(&lock, &board, t_spin, ctx),
+            );
+        }
+    }
+
+    /// Columns from filled-cell lists, for driving the T-slot detectors directly.
+    fn cols_from(cells: &[&[u32]]) -> Vec<u64> {
+        cells
+            .iter()
+            .map(|rows| rows.iter().fold(0u64, |c, &y| c | (1u64 << y)))
+            .collect()
+    }
+
+    #[test]
+    fn tslot_left_detects_a_tsd_notch() {
+        // col0 filled to height 2 (y = surface 2), col1 lower (the slot), col2 shaped
+        // occupied(y-1) / open(y) / occupied(y+1) — the left-opening TSD notch the
+        // detector returns as a South-T center at (1, 2).
+        let cols = cols_from(&[&[0, 1], &[0], &[0, 1, 3]]);
+        assert_eq!(well_known_tslot_left(&cols), Some((1, 2)));
+        assert_eq!(well_known_tslot_right(&cols), None);
+    }
+
+    #[test]
+    fn tslot_right_detects_the_mirror_notch() {
+        let cols = cols_from(&[&[0, 1, 3], &[0], &[0, 1]]);
+        assert_eq!(well_known_tslot_right(&cols), Some((1, 2)));
+        assert_eq!(well_known_tslot_left(&cols), None);
+    }
+
+    #[test]
+    fn tslot_detectors_ignore_a_flat_or_plain_well_board() {
+        // Flat surface: no notch anywhere.
+        assert_eq!(well_known_tslot_left(&cols_from(&[&[0], &[0], &[0]])), None);
+        assert_eq!(well_known_tslot_right(&cols_from(&[&[0], &[0], &[0]])), None);
+        // A plain 1-wide well with no lid is a Tetris well, not a T-slot.
+        let well = cols_from(&[&[0, 1], &[], &[0, 1]]);
+        assert_eq!(well_known_tslot_left(&well), None);
+        assert_eq!(well_known_tslot_right(&well), None);
     }
 }

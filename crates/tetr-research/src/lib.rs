@@ -603,10 +603,21 @@ pub struct VersusOutcome {
     pub b_topped: bool,
 }
 
+/// Salt folding the match seed into the versus garbage-hole RNG, decorrelating hole
+/// placement from the (same-seeded) piece stream. `cc2_baseline`'s referee mirrors
+/// this stream, so the constant must stay shared — never inline a copy.
+pub const VERSUS_HOLE_SALT: u64 = 0xA5A5_5A5A_DEAD_BEEF;
+
 /// Play one versus match between bot A and bot B. Both face the identical piece
 /// sequence (same engine seed), so the result reflects decision quality, not piece
 /// luck. A player loses by topping out; if the ply cap is reached with both alive,
-/// the higher total attack sent wins.
+/// the higher total attack wins.
+///
+/// "Attack" here is **net** attack — the post-cancellation spillover that actually
+/// lands on the opponent's queue (the standard "garbage sent" notion), not gross
+/// lines generated. Lines spent cancelling your own incoming queue count for
+/// survival but not for this tiebreaker, so a pure digging bot under pressure can
+/// record zero attack while playing well.
 pub fn play_versus(
     make_a: &dyn Fn(u64) -> Box<dyn PlayerController>,
     make_b: &dyn Fn(u64) -> Box<dyn PlayerController>,
@@ -622,7 +633,7 @@ pub fn play_versus(
     let (mut a_q, mut b_q) = (GarbageQueue::default(), GarbageQueue::default());
     let (mut a_attack, mut b_attack) = (0u32, 0u32);
     let (mut a_topped, mut b_topped) = (false, false);
-    let mut hole_rng = seed ^ 0xA5A5_5A5A_DEAD_BEEF;
+    let mut hole_rng = seed ^ VERSUS_HOLE_SALT;
     let mut plies = 0u32;
 
     'match_loop: for ply in 0..max_plies {
@@ -790,9 +801,9 @@ pub fn bestfirst_bot(
     eval: Box<dyn Evaluator>,
 ) -> Box<dyn PlayerController> {
     let policy = SearchPolicy::new(
-        Box::new(BestFirstPlanner::new(node_budget)),
+        Box::new(BestFirstPlanner::new()),
         eval,
-        SearchBudget::beam(max_depth),
+        SearchBudget::best_first(node_budget, max_depth),
         0.0, // no imperfection — measure policy quality
         seed,
     );

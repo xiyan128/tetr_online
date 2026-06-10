@@ -60,7 +60,6 @@ mod tests {
     use crate::ai::policy::SearchPolicy;
     use crate::ai::state::SearchState;
     use crate::engine::{Board, CellKind, PieceType};
-    use std::collections::VecDeque;
 
     fn runner() -> SyncRunner {
         SyncRunner::new(Box::new(SearchPolicy::greedy(0.0, 1)))
@@ -76,7 +75,7 @@ mod tests {
             }
         }
         let active = movegen::spawn_piece(PieceType::I, 4, 10);
-        SearchState::for_test(board, active, None, VecDeque::new())
+        SearchState::for_test(board, active, None, std::iter::empty())
     }
 
     #[test]

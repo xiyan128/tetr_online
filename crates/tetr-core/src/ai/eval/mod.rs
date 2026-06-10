@@ -122,8 +122,9 @@ pub trait Evaluator: Send + Sync {
     /// Score a placement whose resulting board is given as a [`ColumnView`] — the
     /// bitboard search's hot path, avoiding the `Array2D`. The default reconstructs a
     /// dense [`Board`] and defers to [`evaluate`](Self::evaluate) (correct, allocating);
-    /// a fast evaluator (CC2) overrides it to read the columns directly. An override
-    /// **must** be bit-identical to the default.
+    /// both shipped evaluators override it to read the columns directly. An override
+    /// **must** be bit-identical to the default — pinned per impl by an
+    /// `evaluate_cols`-vs-`evaluate` differential test.
     ///
     /// [`ColumnView`]: crate::engine::ColumnView
     fn evaluate_cols(
@@ -138,10 +139,10 @@ pub trait Evaluator: Send + Sync {
 
     /// Score a batch in one shot. `out[i]` scores `inputs[i]` (order preserved).
     ///
-    /// The default loops [`evaluate`](Self::evaluate); a batched backend (the
-    /// neural value net) overrides this to fold a whole search generation into a
-    /// single forward pass. The override **must** be bit-identical to mapping
-    /// [`evaluate`](Self::evaluate) over the same inputs.
+    /// The default loops [`evaluate_cols`](Self::evaluate_cols); a batched backend
+    /// (e.g. a neural evaluator) overrides this to fold a whole search generation
+    /// into a single forward pass. The override **must** be bit-identical to mapping
+    /// [`evaluate_cols`](Self::evaluate_cols) over the same inputs.
     fn evaluate_batch(
         &self,
         inputs: &[(&LockOutcome, crate::engine::ColumnView, Option<TSpinKind>, EvalContext)],
@@ -173,6 +174,22 @@ impl LinearEvaluator {
     pub fn weights(&self) -> &Weights {
         &self.weights
     }
+
+    /// Shared scoring core over the column bitboard: both trait paths feed it their
+    /// columns, so the dense and bitboard scores are bit-identical by construction
+    /// (the same shape as `Cc2Evaluator::score`).
+    fn score(
+        &self,
+        cols: &[u64],
+        lock: &LockOutcome,
+        t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
+    ) -> (Value, Reward) {
+        let features = BoardFeatures::extract_cols(cols, lock);
+        let value = Value(self.weights.board.dot(&features));
+        let board_is_empty = cols.iter().all(|&c| c == 0);
+        (value, reward_for(&self.weights.reward, lock, board_is_empty, t_spin, ctx))
+    }
 }
 
 impl Evaluator for LinearEvaluator {
@@ -187,9 +204,18 @@ impl Evaluator for LinearEvaluator {
         t_spin: Option<TSpinKind>,
         ctx: EvalContext,
     ) -> (Value, Reward) {
-        let features = BoardFeatures::extract(board, lock);
-        let value = Value(self.weights.board.dot(&features));
-        (value, compute_reward(&self.weights.reward, lock, board, t_spin, ctx))
+        self.score(&board.column_bits(), lock, t_spin, ctx)
+    }
+
+    /// Fast bitboard path: the columns ARE the input — no dense reconstruction.
+    fn evaluate_cols(
+        &self,
+        lock: &LockOutcome,
+        board: crate::engine::ColumnView,
+        t_spin: Option<TSpinKind>,
+        ctx: EvalContext,
+    ) -> (Value, Reward) {
+        self.score(board.columns(), lock, t_spin, ctx)
     }
 }
 
@@ -218,6 +244,19 @@ pub fn compute_reward(
     t_spin: Option<TSpinKind>,
     ctx: EvalContext,
 ) -> Reward {
+    reward_for(weights, lock, board.is_empty(), t_spin, ctx)
+}
+
+/// [`compute_reward`]'s core, with the perfect-clear input reduced to the one bit it
+/// actually reads — `board_is_empty` — so the bitboard scoring paths can feed it from
+/// the columns without materialising a dense [`Board`].
+fn reward_for(
+    weights: &RewardWeights,
+    lock: &LockOutcome,
+    board_is_empty: bool,
+    t_spin: Option<TSpinKind>,
+    ctx: EvalContext,
+) -> Reward {
     let w = weights;
     let lines = lock.cleared_rows.len();
 
@@ -237,7 +276,7 @@ pub fn compute_reward(
         (None, _) => (0.0, false), // no lines cleared
     };
 
-    let perfect = lines > 0 && board.is_empty();
+    let perfect = lines > 0 && board_is_empty;
 
     let mut total = base;
     if b2b_eligible {
@@ -481,6 +520,38 @@ mod tests {
         let base = compute_reward(&RewardWeights::SURVIVAL, &lock, &board, None, ctx);
         let scaled = compute_reward(&with_attack, &lock, &board, None, ctx);
         assert_eq!(scaled.0 - base.0, 60, "delta = w.attack(10) * attack_lines(6)");
+    }
+
+    #[test]
+    fn linear_evaluate_cols_matches_evaluate() {
+        // The bit-identical contract on the override (the per-impl differential the
+        // trait doc promises): scoring through the ColumnView fast path must equal
+        // scoring the equivalent dense board, including reward and perfect-clear.
+        let eval = LinearEvaluator::default();
+
+        let mut stacked = Board::new(4, 8);
+        stacked.set(0, 0, CellKind::Some(PieceType::O));
+        stacked.set(0, 2, CellKind::Some(PieceType::O)); // a covered hole at (0, 1)
+        stacked.set(2, 0, CellKind::Some(PieceType::O));
+        let clear_lock = LockOutcome {
+            cells_locked: vec![(1, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0],
+            top_y_after_lock: Some(1),
+        };
+        let empty = Board::new(4, 8); // post-clear empty => perfect-clear path
+
+        for (board, lock, t_spin) in [
+            (&stacked, &no_clear_lock(), None),
+            (&stacked, &clear_lock, None),
+            (&empty, &clear_lock, Some(TSpinKind::Full)),
+        ] {
+            let ctx = EvalContext { combo: 2, b2b: true };
+            let bb = crate::engine::BitBoard::from_board(board);
+            assert_eq!(
+                eval.evaluate_cols(lock, bb.view(), t_spin, ctx),
+                eval.evaluate(lock, board, t_spin, ctx),
+            );
+        }
     }
 
     #[test]

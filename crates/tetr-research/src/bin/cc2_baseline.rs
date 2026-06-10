@@ -382,7 +382,8 @@ fn run_versus(
     let mut cc2_attack = 0u32;
     let mut cc2_q = GarbageQueue::default();
 
-    let mut hole_rng = seed ^ 0xA5A5_5A5A_DEAD_BEEF;
+    // The shared salt keeps this referee's hole stream identical to `play_versus`'s.
+    let mut hole_rng = seed ^ tetr_research::VERSUS_HOLE_SALT;
     let mut ours_topped = false;
     let mut cc2_topped = false;
     let mut cc2_plies = 0u32; // CC2 placements made
