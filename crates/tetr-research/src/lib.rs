@@ -639,6 +639,40 @@ pub fn play_versus(
     seed: u64,
     max_plies: u32,
 ) -> VersusOutcome {
+    play_versus_format(
+        make_a,
+        make_b,
+        seed,
+        VersusFormat {
+            max_plies,
+            rain_period: 0,
+        },
+    )
+}
+
+/// Match-format knobs for [`play_versus_format`].
+#[derive(Clone, Copy, Debug)]
+pub struct VersusFormat {
+    /// Ply cap; a capped game falls back to the net-attack tiebreak.
+    pub max_plies: u32,
+    /// Environmental "rain": every `rain_period` plies (`0` = off) BOTH sides
+    /// get one garbage line queued through the normal rules (cancellable,
+    /// capped rising). Mirror matches between strong bots almost never kill
+    /// (measured ≤6% decisive even attack-tuned at 400 plies), which starves
+    /// every survival-sensitive objective; symmetric rain forces matches
+    /// decisive while staying fair — same-seeded engines even draw identical
+    /// hole columns for the same rain batch.
+    pub rain_period: u32,
+}
+
+/// [`play_versus`] under an explicit [`VersusFormat`] (rain, ply cap).
+pub fn play_versus_format(
+    make_a: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_b: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    seed: u64,
+    format: VersusFormat,
+) -> VersusOutcome {
+    let max_plies = format.max_plies;
     // Level rises but never ends the game here (only top-out / the cap do).
     // The versus rules — cancellation, rising after clear-less locks, the
     // garbage cap, hole choice — are the ENGINE's (see tetr-core's garbage
@@ -653,6 +687,12 @@ pub fn play_versus(
     let mut plies = 0u32;
 
     'match_loop: for ply in 0..max_plies {
+        // Environmental rain (see [`VersusFormat::rain_period`]): symmetric
+        // queued pressure, before either side moves this ply.
+        if format.rain_period > 0 && ply % format.rain_period == format.rain_period - 1 {
+            a_engine.queue_garbage(1);
+            b_engine.queue_garbage(1);
+        }
         // Alternate first mover so neither side gets a structural send-first edge.
         let order = if ply % 2 == 0 { [0u8, 1] } else { [1, 0] };
         for &who in &order {
@@ -725,9 +765,27 @@ pub fn evaluate_versus(
     seeds: &[u64],
     max_plies: u32,
 ) -> VersusStats {
+    evaluate_versus_format(
+        make_a,
+        make_b,
+        seeds,
+        VersusFormat {
+            max_plies,
+            rain_period: 0,
+        },
+    )
+}
+
+/// [`evaluate_versus`] under an explicit [`VersusFormat`].
+pub fn evaluate_versus_format(
+    make_a: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_b: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    seeds: &[u64],
+    format: VersusFormat,
+) -> VersusStats {
     let outcomes: Vec<VersusOutcome> = seeds
         .iter()
-        .map(|&seed| play_versus(make_a, make_b, seed, max_plies))
+        .map(|&seed| play_versus_format(make_a, make_b, seed, format))
         .collect();
     let a_wins = outcomes
         .iter()

@@ -25,8 +25,8 @@ use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
 use tetr_research::cli::env_usize;
 use tetr_research::{
-    beam_cc2_bot, bestfirst_cc2_weights_bot, evaluate_versus, seed_set, BlindToGarbage,
-    VersusResult, VersusStats,
+    beam_cc2_bot, bestfirst_cc2_weights_bot, evaluate_versus_format, seed_set, BlindToGarbage,
+    VersusFormat, VersusResult, VersusStats,
 };
 
 /// Deaths and cap-game outcomes for the aware arm of one orientation.
@@ -65,6 +65,12 @@ fn main() {
     let width = env_usize("BEAM_WIDTH", 16);
     let nodes = env_usize("NODE_BUDGET", 192) as u32;
     let plies = env_usize("MAX_PLIES", 160) as u32;
+    // RAIN_PERIOD > 0 queues one symmetric environmental line every N plies —
+    // the decisiveness knob (mirror matches almost never kill without it).
+    let format = VersusFormat {
+        max_plies: plies,
+        rain_period: env_usize("RAIN_PERIOD", 0) as u32,
+    };
 
     let make: Box<dyn Fn(u64) -> Box<dyn PlayerController>> = match bot.as_str() {
         "bf" => {
@@ -77,15 +83,15 @@ fn main() {
                 _ => Cc2Weights::DEFAULT,
             };
             eprintln!(
-                "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies",
-                seeds.len()
+                "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies, rain {}",
+                seeds.len(), env_usize("RAIN_PERIOD", 0)
             );
             Box::new(move |s| bestfirst_cc2_weights_bot(s, nodes, depth, weights))
         }
         _ => {
             eprintln!(
-                "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies",
-                seeds.len()
+                "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies, rain {}",
+                seeds.len(), env_usize("RAIN_PERIOD", 0)
             );
             Box::new(move |s| beam_cc2_bot(s, width, depth))
         }
@@ -95,8 +101,8 @@ fn main() {
      -> Box<dyn PlayerController> { Box::new(BlindToGarbage(make(s))) };
 
     // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds.
-    let fwd = evaluate_versus(&make, &|s| make_blind(s, &make), &seeds, plies);
-    let rev = evaluate_versus(&|s| make_blind(s, &make), &make, &seeds, plies);
+    let fwd = evaluate_versus_format(&make, &|s| make_blind(s, &make), &seeds, format);
+    let rev = evaluate_versus_format(&|s| make_blind(s, &make), &make, &seeds, format);
 
     let (fd_a, fd_b, fc_a, fc_b) = tally(&fwd, true);
     let (rd_a, rd_b, rc_a, rc_b) = tally(&rev, false);
