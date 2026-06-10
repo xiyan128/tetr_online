@@ -999,7 +999,6 @@ dependencies = [
  "bevy_gizmos_render",
  "bevy_image",
  "bevy_input",
- "bevy_input_focus",
  "bevy_log",
  "bevy_math",
  "bevy_mesh",
@@ -5043,7 +5042,6 @@ name = "tetr-core"
 version = "0.1.0"
 dependencies = [
  "array2d",
- "bevy",
  "itertools 0.14.0",
  "rand 0.10.1",
  "rustc-hash 2.1.2",

@@ -26,10 +26,10 @@ name = "tetr_online"
 bench = false
 
 [dependencies]
-# Engine-agnostic core (engine + player + ai), extracted to its own crate. `bevy`
-# feature on so the host keeps its keyboard-input adapter
-# (`RawKeyboardFrame::from_keyboard`).
-tetr-core = { path = "crates/tetr-core", features = ["bevy"] }
+# Engine-agnostic core (engine + player + ai), extracted to its own crate —
+# pure Rust, no Bevy anywhere in its graph (the host adapts input itself via
+# `keyboard_input_from_keybinds`).
+tetr-core = { path = "crates/tetr-core" }
 bevy_asset_loader = "0.26.0"
 # Settings persistence (RON, via serde derives). `ron` is already in the graph
 # transitively through `bevy_asset`; both are size-cheap and let `GameSettings`

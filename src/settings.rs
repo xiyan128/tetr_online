@@ -94,10 +94,9 @@ pub struct Keybinds {
 }
 
 impl Default for Keybinds {
-    /// Mirrors the bindings previously hard-coded in
-    /// [`RawKeyboardFrame::from_keyboard`](crate::player::RawKeyboardFrame::from_keyboard):
-    /// arrows for move/soft-drop, Space = hard drop, Up/X = rotate CW, Z = rotate
-    /// CCW, LeftShift = hold, Escape = pause.
+    /// The original hard-coded mapping, now just the default: arrows for
+    /// move/soft-drop, Space = hard drop, Up/X = rotate CW, Z = rotate CCW,
+    /// LeftShift = hold, Escape = pause.
     fn default() -> Self {
         Self {
             move_left: (KeyCode::ArrowLeft, None),

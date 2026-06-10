@@ -7,3 +7,8 @@
 [toolchain]
 channel = "nightly-2026-04-24"
 targets = ["wasm32-unknown-unknown"]
+# rustfmt + clippy are NOT implied: CI runners persist rustup's `minimal`
+# profile, so without listing them the pinned nightly installs bare and the
+# fmt/clippy gates fail before compiling anything. Local rustup setups with the
+# `default` profile already have them; listing is a no-op there.
+components = ["rustfmt", "clippy"]

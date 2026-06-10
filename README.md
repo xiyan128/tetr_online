@@ -39,12 +39,18 @@ Try the web demo: https://www.xiyan.dev/tetr_online/
 **AI:**
 
 - A built-in bot plays through the exact same input surface as a human. The
-  **Watch AI** menu entry runs it in any variant.
-- It's a one-piece greedy search over a tunable board evaluator, with an
-  adjustable *handicap* (reaction delay plus an imperfection rate) so it's a
-  beatable opponent rather than a flawless one. The player architecture is
-  model-agnostic: a deeper search — or a neural policy — drops in behind a single
-  trait without touching the rest.
+  **Watch AI** menu entry runs it in any variant, with a model picker spanning
+  the catalog: a one-piece greedy baseline, deterministic multi-ply beam
+  searches (our linear evaluator and a verbatim port of Cold Clear 2's), and
+  the strongest model — best-first graph search with transposition over an
+  attack-tuned evaluator.
+- Searches run as **anytime sessions** sliced cooperatively across frames, so
+  even the heaviest model never stalls a frame — the thinking hides inside the
+  bot's human-like reaction delay. An adjustable *handicap* (reaction delay
+  plus an imperfection rate) keeps every model beatable rather than flawless,
+  and the architecture stays model-agnostic: a stronger search — or a neural
+  policy — drops in behind the same seams (see
+  `docs/adr-ai-compute-architecture.md`).
 
 **Cross-platform:** runs natively on Windows, macOS, and Linux, and in the browser
 via WebAssembly with both WebGPU and WebGL2 renderers.
@@ -53,16 +59,19 @@ via WebAssembly with both WebGPU and WebGL2 renderers.
 
 The codebase is split along one hard boundary:
 
-- **`src/engine/`** is the rule core — plain Rust with **no Bevy types**. It is a
-  pure, deterministic function of `(seed, input frames)`: no wall-clock, no
-  thread-local RNG. That purity is what makes headless AI evaluation, replays, and
-  future lockstep multiplayer possible.
-- **The Bevy host** (everything else) drives the engine through a small plain-data
+- **`crates/tetr-core`** is the rule core plus the bot — plain Rust with **no
+  Bevy anywhere in its graph**. The engine is a pure, deterministic function of
+  `(seed, input frames)`: no wall-clock, no thread-local RNG. That purity is
+  what makes headless AI evaluation, replays, and future lockstep multiplayer
+  possible. The AI plugs in through the same `PlayerController` seam the
+  keyboard uses, so keyboard, AI, and a future network/replay source are
+  interchangeable.
+- **The Bevy host** (`src/`) drives the engine through a small plain-data
   contract — `InputFrame` in, `EngineSnapshot` and `EngineEvent` out — and owns
-  rendering, audio, input, menus, and persistence.
-- **`src/ai/`** is the bot, also Bevy-free. It plugs in through the same
-  `PlayerController` seam the keyboard uses, so keyboard, AI, and a future
-  network/replay source are interchangeable.
+  rendering, audio, input, menus, persistence, and the Watch-AI model registry.
+- **`crates/tetr-embed`** wraps the same core as a tiny headless wasm widget;
+  **`crates/tetr-research`** is the benchmark harness (APP suites, bot-vs-bot
+  versus, the Cold Clear 2 referee).
 
 The engine boundary is held by a guideline acceptance suite under `tests/`.
 
