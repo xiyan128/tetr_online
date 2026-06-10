@@ -101,6 +101,31 @@ impl ModelRegistry {
     pub fn selected_controller(&self) -> AiController {
         (self.entries[self.selected].build)()
     }
+
+    /// The label of model `index` (out of range reads empty — same contract as
+    /// [`detail`](Self::detail)). Versus seat HUDs and pickers read this.
+    pub fn label(&self, index: usize) -> &str {
+        self.entries.get(index).map_or("", |e| e.label.as_str())
+    }
+
+    /// Build a fresh [`AiController`] for model `index`, if it exists. The
+    /// versus mode builds *two* controllers (possibly the same model twice), so
+    /// it addresses the catalog directly instead of going through the single
+    /// `selected` cursor the Watch-AI flow uses.
+    pub fn build(&self, index: usize) -> Option<AiController> {
+        self.entries.get(index).map(|e| (e.build)())
+    }
+
+    /// Number of models in the catalog (the picker's cycle length).
+    pub fn len(&self) -> usize {
+        self.entries.len()
+    }
+
+    /// Standard companion to [`len`](Self::len) (the catalog is never empty,
+    /// but clippy rightly insists the pair exists together).
+    pub fn is_empty(&self) -> bool {
+        self.entries.is_empty()
+    }
 }
 
 /// Wire a mind + evaluator into a fresh controller under the shared default

@@ -41,6 +41,9 @@ pub mod settings;
 pub mod storage;
 pub(crate) mod ui;
 pub mod variant;
+/// Versus mode: two engines, attack routed between them, seats open to humans
+/// and bots (see `docs/adr-versus-mode-ui.md`).
+pub mod versus;
 pub(crate) mod vfx;
 
 pub use crate::engine::{
@@ -85,6 +88,13 @@ pub enum GameState {
     Playing,
     /// Post-game results; offers restart / back to menu.
     GameOver,
+    /// Configure a versus match (who sits at each board) before starting it.
+    VersusSetup,
+    /// A live versus match: two engines, attack routed between them. Its
+    /// lifecycle (countdown/running/paused/over) is the
+    /// [`versus::VersusPhase`] sub-state; the result screen is the `Over`
+    /// phase *inside* this state, so the final boards stay on screen.
+    Versus,
 }
 
 /// Pause sub-state of [`GameState::Playing`].
@@ -159,6 +169,10 @@ impl Plugin for GamePlugin {
             // and the AI engine driver; the level driver reads the flag to choose
             // keyboard vs. AI, so adding this is purely additive.
             .add_plugins(crate::ai::AiSandboxPlugin)
+            // Versus mode (two boards, attack exchange). Self-contained: its
+            // systems are scoped to `GameState::Versus`, so the single-player
+            // pipeline is untouched.
+            .add_plugins(crate::versus::VersusPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
             .add_plugins(crate::features::FeaturesPlugin)
             // Render-pipeline visual effects (CRT pass; bloom on capable builds).
