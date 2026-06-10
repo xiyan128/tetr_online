@@ -25,6 +25,16 @@
 //! acceptance bar above noise (re-evaluate the incumbent or SPRT per
 //! candidate), and a periodic held-out check during the climb.
 //!
+//! RUN RECORD v2 (same day, ROTATE=1, ACCEPT_MARGIN=25, SIGMA=0.15): rotation
+//! killed seed memorization but the bar was far below the objective's noise —
+//! with ±1000 death spikes a 48-match block mean has σ ≈ ±90, so 25 let lucky
+//! proposals through (20 accepts / 56 iters), the accept-rate rule then GREW
+//! sigma, and the parameters random-walked (tslot3 4.9 → 17.3); validation:
+//! deaths 14-16, tiebreaks 8-57, margin −14.8. Gate caught it again; nothing
+//! shipped. CALIBRATION LESSON: ACCEPT_MARGIN must be ~2σ of the block mean
+//! (~150-200 at these sizes), with SIGMA small (~0.08) so a rare false accept
+//! cannot teleport the walk.
+//!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
 //!      when rotating), VAL_SEEDS (32), ROTATE (1), ACCEPT_MARGIN (25),
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
