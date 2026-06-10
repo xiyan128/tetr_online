@@ -37,8 +37,9 @@ use smallvec::SmallVec;
 
 use crate::ai::movegen::Placement;
 use crate::engine::{
-    classify_t_spin, ActivePiece, BitBoard, Board, CellKind, EngineSnapshot, LockOutcome, Piece,
-    PieceRotation, RotationDirection, TSpinKind,
+    breaks_back_to_back, classify_t_spin, qualifies_for_back_to_back, ActivePiece, BitBoard,
+    Board, CellKind, EngineSnapshot, LockOutcome, Piece, PieceRotation, RotationDirection,
+    TSpinKind,
 };
 
 /// The remainder of the current 7-bag: which tetrominoes have **not** yet been
@@ -336,20 +337,19 @@ impl SearchState {
 
     /// Transition the Back-to-Back flag for a freshly locked placement.
     ///
-    /// A clear keeps the chain alive only when it is a "difficult" clear — any
-    /// T-spin (Mini or Full) or a Tetris (four lines) — and breaks it on any other
-    /// clear; a placement that clears no lines preserves the chain. This mirrors the
-    /// engine's Back-to-Back rule and is kept in sync with the `b2b_eligible`
-    /// categories in the `b2b_eligible` arms of `eval::compute_reward`.
+    /// Delegates to the engine's own predicates — the exact transition
+    /// `ScoreState::lock_result` performs — so the search's chain can never drift
+    /// from what the engine will do when the move is actually played: a qualifying
+    /// clear (Tetris, full T-spin, mini T-spin *single*) sets the chain, a plain
+    /// 1-3 line clear breaks it, and anything else (no clear, or a non-qualifying
+    /// spin clear such as a mini double) preserves it.
     fn update_b2b(&mut self, outcome: &LockOutcome, t_spin: Option<TSpinKind>) {
         let lines = outcome.cleared_rows.len();
-        if lines == 0 {
-            return; // no clear: chain preserved
+        if qualifies_for_back_to_back(t_spin, lines) {
+            self.b2b = true;
+        } else if breaks_back_to_back(t_spin, lines) {
+            self.b2b = false;
         }
-        self.b2b = matches!(
-            (t_spin, lines),
-            (Some(TSpinKind::Full | TSpinKind::Mini), _) | (None, 4)
-        );
     }
 
     /// Advance the combo chain for a freshly locked placement: a line clear extends
@@ -912,6 +912,21 @@ mod tests {
         s.b2b = false;
         s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Full));
         assert!(s.b2b, "T-spin double sets b2b");
+
+        // A mini T-spin single qualifies...
+        s.b2b = false;
+        s.update_b2b(&lock_with_rows(&[0]), Some(TSpinKind::Mini));
+        assert!(s.b2b, "mini single sets b2b");
+
+        // ...but a mini DOUBLE neither qualifies nor breaks (the engine rule:
+        // `qualifies_for_back_to_back` lists only the mini single) — the chain is
+        // preserved as-is, never started by it.
+        s.b2b = false;
+        s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Mini));
+        assert!(!s.b2b, "mini double does not start a chain");
+        s.b2b = true;
+        s.update_b2b(&lock_with_rows(&[0, 1]), Some(TSpinKind::Mini));
+        assert!(s.b2b, "mini double preserves an active chain");
     }
 
     #[test]

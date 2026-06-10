@@ -36,7 +36,9 @@ pub mod weights;
 
 use std::ops::Add;
 
-use crate::engine::{attack_lines, Board, EngineScoreAction, LockOutcome, TSpinKind};
+use crate::engine::{
+    attack_lines, qualifies_for_back_to_back, Board, EngineScoreAction, LockOutcome, TSpinKind,
+};
 
 pub use cc2::{Cc2Evaluator, Cc2Weights};
 pub use features::BoardFeatures;
@@ -293,7 +295,11 @@ fn reward_for(
     // survival profile is byte-for-byte unchanged.
     if lines > 0 {
         let action = EngineScoreAction::from_lock_result(t_spin, lines);
-        let b2b_continue = ctx.b2b && b2b_eligible;
+        // Continuation uses the ENGINE's qualifying rule (`qualifies_for_back_to_back`,
+        // the same predicate `ScoreState::lock_result` applies), not the looser
+        // `b2b_eligible` bonus table above — the two differ on a mini double, and this
+        // term claims engine-exact attack.
+        let b2b_continue = ctx.b2b && qualifies_for_back_to_back(t_spin, lines);
         let attack = attack_lines(action, b2b_continue, ctx.combo, perfect);
         total += w.attack * attack as f32;
     }
@@ -552,6 +558,27 @@ mod tests {
                 eval.evaluate(lock, board, t_spin, ctx),
             );
         }
+    }
+
+    #[test]
+    fn mini_double_attack_does_not_continue_b2b() {
+        // The attack term's continuation rule is the ENGINE's `qualifies_for_back_to_back`
+        // (only the mini SINGLE qualifies), not the looser abstract bonus table — so a
+        // mini t-spin double under an active chain must price its attack exactly as it
+        // would with no chain.
+        let lock = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::T))],
+            cleared_rows: vec![0, 1],
+            top_y_after_lock: None,
+        };
+        let mut board = Board::new(4, 6);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        let mut w = RewardWeights::SURVIVAL;
+        w.attack = 10.0;
+        let spin = Some(TSpinKind::Mini);
+        let chained = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: true });
+        let fresh = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: false });
+        assert_eq!(chained, fresh, "a mini double neither continues nor prices a B2B");
     }
 
     #[test]

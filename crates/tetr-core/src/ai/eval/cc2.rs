@@ -259,10 +259,11 @@ impl Cc2Evaluator {
         if !perfect_clear || !w.perfect_clear_override {
             // True chain (info.back_to_back) is unavailable here; like
             // LinearEvaluator, credit every B2B-eligible clear. The search's
-            // SearchState carries the real chain.
+            // SearchState carries the real chain. A zero-line spin is not a clear,
+            // so it earns no clear bonus (`back_to_back_clear` is a *clear* weight).
             let b2b_eligible = matches!(
                 (t_spin, lines),
-                (Some(TSpinKind::Full | TSpinKind::Mini), _) | (None, 4)
+                (Some(TSpinKind::Full | TSpinKind::Mini), 1..) | (None, 4)
             );
             if b2b_eligible {
                 reward += w.back_to_back_clear;
@@ -580,6 +581,21 @@ mod tests {
         let base = value(EvalContext { combo: 0, b2b: false });
         assert!(value(EvalContext { combo: 0, b2b: true }) > base, "b2b raises Value");
         assert_eq!(value(EvalContext { combo: 5, b2b: false }), base, "combo does not affect Value");
+    }
+
+    #[test]
+    fn no_clear_spin_earns_no_b2b_bonus() {
+        // `back_to_back_clear` is a *clear* weight: a T spun into a slot without
+        // clearing must earn only the wasted-T penalty, never the B2B clear bonus.
+        let eval = Cc2Evaluator::default();
+        let board = Board::new(10, 20);
+        let (_, r) = eval.evaluate(
+            &no_clear_lock(PieceType::T),
+            &board,
+            Some(TSpinKind::Full),
+            EvalContext::default(),
+        );
+        assert_eq!(r, Reward((-1.5 * SCALE).round() as i32), "wasted_t only");
     }
 
     #[test]
