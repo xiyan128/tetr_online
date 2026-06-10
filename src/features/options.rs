@@ -502,8 +502,8 @@ const KEY_TABLE: &[(KeyCode, &str)] = &[
 // ---------------------------------------------------------------------------
 
 /// Build raw per-frame [`RawKeyboardFrame`](crate::player::RawKeyboardFrame) from
-/// Bevy's keyboard state using the player's [`Keybinds`], replacing the
-/// hard-coded mapping in `RawKeyboardFrame::from_keyboard`.
+/// Bevy's keyboard state using the player's [`Keybinds`] — the host-side input
+/// adapter (the engine-agnostic core never sees Bevy key types).
 ///
 /// This is the read-path the gameplay driver calls (from `src/level/mod.rs`) so
 /// remapped keys take effect. `hold_enabled` gates the Hold action: when the player

@@ -1,8 +1,9 @@
 //! Keyboard-driven [`PlayerController`] that owns player-side DAS.
 //!
-//! The Bevy driver feeds raw key state + frame `dt` in via
-//! [`KeyboardController::set_input`] (built from `ButtonInput<KeyCode>` with
-//! [`RawKeyboardFrame::from_keyboard`]), then calls [`PlayerController::poll`].
+//! The host driver feeds raw key state + frame `dt` in via
+//! [`KeyboardController::set_input`] (the Bevy game builds the frame from its
+//! remappable keybinds, the wasm embed from DOM key events), then calls
+//! [`PlayerController::poll`].
 //! `poll` resolves the held horizontal direction, advances the DAS machine, and
 //! emits an [`InputFrame`] whose `left`/`right` are per-frame one-cell pulses at
 //! the DAS cadence. The other action flags are edge-triggered (just-pressed) so
@@ -88,39 +89,6 @@ impl PlayerController for KeyboardController {
     fn poll(&mut self, _snapshot: &EngineSnapshot) -> InputFrame {
         let input = self.input;
         self.resolve_frame(&input)
-    }
-}
-
-// The one Bevy touch-point in `tetr-core`: an adapter from Bevy's keyboard state to
-// the engine-agnostic `RawKeyboardFrame`. Gated behind the `bevy` feature (off by
-// default) so the core — and the embed wasm built from it — never pulls Bevy. The
-// Bevy game enables the feature; the headless embed builds its own DOM-event adapter.
-#[cfg(feature = "bevy")]
-impl RawKeyboardFrame {
-    /// Build raw input from Bevy's keyboard state for one frame.
-    ///
-    /// Bindings (per migration map): arrows for move/soft-drop, Space =
-    /// hard drop, Up / X = rotate CW, Z = rotate CCW, LeftShift = hold,
-    /// Escape = pause.
-    pub fn from_keyboard(
-        keyboard: &bevy::input::ButtonInput<bevy::input::keyboard::KeyCode>,
-        dt_seconds: f32,
-    ) -> Self {
-        use bevy::input::keyboard::KeyCode;
-        Self {
-            dt_seconds,
-            left_pressed: keyboard.pressed(KeyCode::ArrowLeft),
-            right_pressed: keyboard.pressed(KeyCode::ArrowRight),
-            left_just_pressed: keyboard.just_pressed(KeyCode::ArrowLeft),
-            right_just_pressed: keyboard.just_pressed(KeyCode::ArrowRight),
-            soft_drop: keyboard.pressed(KeyCode::ArrowDown),
-            hard_drop_just_pressed: keyboard.just_pressed(KeyCode::Space),
-            rotate_cw_just_pressed: keyboard.just_pressed(KeyCode::ArrowUp)
-                || keyboard.just_pressed(KeyCode::KeyX),
-            rotate_ccw_just_pressed: keyboard.just_pressed(KeyCode::KeyZ),
-            hold_just_pressed: keyboard.just_pressed(KeyCode::ShiftLeft),
-            pause_just_pressed: keyboard.just_pressed(KeyCode::Escape),
-        }
     }
 }
 
