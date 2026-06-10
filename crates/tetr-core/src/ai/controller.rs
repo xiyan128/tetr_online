@@ -33,13 +33,17 @@
 //! 1. **Detect a new piece.** If the active piece's identity changed (or the board
 //!    did under the same piece), the current plan is stale: cancel the in-flight
 //!    decision, clear the queued frames, and start a fresh think.
-//! 2. **React.** Accumulate the poll's `dt` into a reaction timer; while it is below
-//!    [`Handicap::reaction`], emit neutral frames. The decision is *submitted* at
-//!    the start of the think (so it can compute off-thread during the delay) but not
-//!    *applied* until the delay elapses.
-//! 3. **Apply.** Once the reaction elapses and the runner has a [`Decision`], render
-//!    it to frames and enqueue them.
-//! 4. **Emit.** Pop the next queued frame, or a neutral frame if none.
+//! 2. **Pump.** Poll the runner every frame and buffer a finished [`Decision`].
+//!    A cooperative venue ([`SlicedRunner`]) does its per-frame quantum of search
+//!    *inside* that poll, so the thinking overlaps the reaction window below —
+//!    this pump is what hides a heavy search's latency in the delay a human-like
+//!    bot pays anyway.
+//! 3. **React.** Accumulate the poll's `dt` into a reaction timer; while it is
+//!    below [`Handicap::reaction`], emit neutral frames. The buffered decision is
+//!    not *applied* until the delay elapses.
+//! 4. **Apply.** Once the reaction elapses and a decision is buffered, render it
+//!    to frames and enqueue them.
+//! 5. **Emit.** Pop the next queued frame, or a neutral frame if none.
 //!
 //! # Determinism
 //!
@@ -61,7 +65,7 @@ use crate::ai::eval::{Cc2Evaluator, Cc2Weights};
 use crate::ai::handicap::Handicap;
 use crate::ai::plan::placement_to_inputs;
 use crate::ai::policy::{Decision, Policy, SearchPolicy};
-use crate::ai::runner::{DecisionRunner, SyncRunner};
+use crate::ai::runner::{DecisionRunner, SlicedRunner, SyncRunner};
 use crate::ai::search::{BestFirstPlanner, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{EngineSnapshot, InputFrame, PieceType};
@@ -90,6 +94,9 @@ pub struct AiController {
     /// Whether a decision has been submitted for the current piece (so we submit
     /// once per piece, not every poll while reacting).
     submitted: bool,
+    /// A decision the runner finished while the reaction window was still
+    /// running, held until the controller may act on it.
+    ready: Option<Decision>,
 }
 
 /// A cheap fingerprint of "which piece, on which board" so the controller can tell
@@ -134,16 +141,20 @@ impl AiController {
 
     /// The strongest shipped bot: a best-first graph search (per-root transposition)
     /// over the Cold Clear 2 evaluator with the APP-climbed attack weights
-    /// ([`Cc2Weights::attack_tuned`]), at the interactive operating point below
-    /// (~25 ms/piece native release — watchable, and fine for wasm). This is the
-    /// **one home** for "the best model": the Watch-AI registry's best-first entry
-    /// and the wasm embed both build through here, so the operating point can never
-    /// fork between surfaces. The handicap dials (reaction delay + imperfection)
-    /// still apply, so even the strongest brain stays beatable on demand.
+    /// ([`Cc2Weights::attack_tuned`]), behind the **cooperative** venue
+    /// ([`SlicedRunner`]) so the per-piece search spreads across frames instead of
+    /// stalling one — the same total work, no hitch, native and wasm alike. This
+    /// is the **one home** for "the best model": the Watch-AI registry's
+    /// best-first entry and the wasm embed both build through here, so the
+    /// operating point can never fork between surfaces. The handicap dials
+    /// (reaction delay + imperfection) still apply, so even the strongest brain
+    /// stays beatable on demand.
     pub fn attack(handicap: Handicap, seed: u64) -> Self {
-        /// Total best-first node expansions per decision — the quality/latency dial.
-        /// Headless benches run far higher, where quality scales with budget at
-        /// proportional latency; this is the interactive point.
+        /// Total best-first node expansions per decision — the quality dial.
+        /// Headless benches run far higher, where quality scales with budget;
+        /// this is the interactive point, sized so the sliced think completes
+        /// within the default 200 ms reaction window on every platform (at the
+        /// wasm quantum of 16/poll, 150 nodes is 10 polls of the 12 available).
         const ATTACK_NODE_BUDGET: u32 = 150;
         /// Ply cap; best-first is depth-capped by the visible queue, not width.
         const ATTACK_DEPTH: u8 = 6;
@@ -155,20 +166,28 @@ impl AiController {
             handicap.imperfection,
             seed,
         );
-        Self::with_policy(Box::new(policy), handicap.reaction)
+        Self::with_runner(
+            Box::new(SlicedRunner::new(Box::new(policy))),
+            handicap.reaction,
+        )
     }
 
-    /// A controller around an explicit [`Policy`], wrapped in the synchronous
-    /// runner. The brain seam: pass any policy (a custom-weighted search, a future
-    /// neural net) and the shell drives it. `reaction` is the shell-level handicap;
+    /// A controller around an explicit [`Policy`], wrapped in the **blocking**
+    /// runner ([`SyncRunner`]): the whole decision computes inline at submit.
+    /// This is the headless construction — benchmarks and research bots, where
+    /// no frame exists to hitch and exact full-budget decisions per poll are the
+    /// contract. Interactive surfaces wrap their policy in a [`SlicedRunner`]
+    /// via [`with_runner`](Self::with_runner) instead (as [`attack`](Self::attack)
+    /// and the game's model registry do). `reaction` is the shell-level handicap;
     /// the policy carries its own imperfection + RNG.
     pub fn with_policy(policy: Box<dyn Policy>, reaction: Duration) -> Self {
         Self::with_runner(Box::new(SyncRunner::new(policy)), reaction)
     }
 
-    /// A controller around an explicit [`DecisionRunner`], for swapping in an
-    /// off-thread / time-sliced runner without changing the controller logic.
-    pub(crate) fn with_runner(runner: Box<dyn DecisionRunner>, reaction: Duration) -> Self {
+    /// A controller around an explicit [`DecisionRunner`] — the venue seam.
+    /// Interactive surfaces pass a cooperative [`SlicedRunner`]; headless drivers
+    /// usually reach for [`with_policy`](Self::with_policy) (blocking) instead.
+    pub fn with_runner(runner: Box<dyn DecisionRunner>, reaction: Duration) -> Self {
         Self {
             runner,
             plan: VecDeque::new(),
@@ -176,6 +195,7 @@ impl AiController {
             planning_for: None,
             think_elapsed: 0.0,
             submitted: false,
+            ready: None,
         }
     }
 
@@ -186,26 +206,22 @@ impl AiController {
         self.plan.clear();
         self.think_elapsed = 0.0;
         self.submitted = false;
+        self.ready = None;
         self.planning_for = Some(signature);
     }
 
-    /// Try to apply a ready decision: render the chosen placement to frames and
-    /// enqueue them. Returns `true` if a decision was handled (frames enqueued or an
-    /// explicit "no move"), `false` if the runner had nothing yet.
-    fn try_apply_decision(&mut self, obs: &SearchState) -> bool {
-        let Some(decision) = self.runner.poll() else {
-            return false;
-        };
+    /// Apply a finished decision: render the chosen placement to frames and
+    /// enqueue them.
+    fn apply_decision(&mut self, decision: Decision, obs: &SearchState) {
         match decision {
             // No legal placement: nothing to do (the engine tops out on its own);
             // leave the plan empty so we emit neutral frames.
-            Decision::None => true,
+            Decision::None => {}
             Decision::Place(placement) => {
                 // Render against the board the maneuver happens on, from the active
                 // piece's current pose — the inputs `placement_to_inputs` round-trips.
                 let frames = placement_to_inputs(&obs.board.to_array2d(), &obs.active, &placement);
                 self.plan = frames.into();
-                true
             }
         }
     }
@@ -235,26 +251,35 @@ impl PlayerController for AiController {
             return neutral();
         };
 
-        // (2) Submit the decision once per piece (so it can compute during the
-        // reaction delay), then accumulate the reaction timer.
+        // (2) Submit once per piece, then pump the runner *every* poll — a
+        // cooperative venue does its per-frame quantum inside `runner.poll()`, so
+        // pumping during the reaction window below is precisely what overlaps the
+        // thinking with the delay. A finished decision is buffered in `ready`
+        // until the reaction allows acting on it.
         if !self.submitted {
             self.runner.submit(obs.clone());
             self.submitted = true;
         }
+        if self.ready.is_none() {
+            self.ready = self.runner.poll();
+        }
+
+        // (3) Accumulate the reaction timer; while it runs, emit neutral frames.
         self.think_elapsed += NOMINAL_DT;
         if self.think_elapsed < self.reaction.as_secs_f32() {
             return neutral(); // still "reacting"
         }
 
-        // (3) Reaction elapsed: apply the decision if the runner is ready, then emit
-        // its first maneuver frame.
-        if self.try_apply_decision(&obs) {
+        // (4) Reaction elapsed: apply the buffered decision and emit its first
+        // maneuver frame.
+        if let Some(decision) = self.ready.take() {
+            self.apply_decision(decision, &obs);
             if let Some(frame) = self.plan.pop_front() {
                 return frame;
             }
         }
 
-        // (4) Nothing to emit yet (decision not ready, or no legal move): idle.
+        // (5) Nothing to emit yet (decision not ready, or no legal move): idle.
         neutral()
     }
 }
@@ -466,5 +491,88 @@ mod tests {
             || frame.rotate_clockwise
             || frame.rotate_counterclockwise
             || frame.hold
+    }
+
+    /// An attack-shaped policy (the shipped interactive operating point) for the
+    /// venue-equivalence gates below.
+    fn attack_policy(seed: u64) -> Box<dyn Policy> {
+        Box::new(SearchPolicy::new(
+            Box::new(BestFirstPlanner::new()),
+            Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+            SearchBudget::best_first(150, 6),
+            Handicap::default().imperfection,
+            seed,
+        ))
+    }
+
+    #[test]
+    fn sliced_and_blocking_venues_play_the_identical_game() {
+        // THE venue-swap gate: at the shipped operating point the sliced think
+        // completes inside the default reaction window (150 nodes at the wasm
+        // worst-case quantum of 16 is 10 polls of the 12 available), so swapping
+        // the blocking venue for the cooperative one changes *where* the work
+        // runs — never the game. Byte-identical engine snapshots over dozens of
+        // pieces (clears, chain state, and several imperfection draws included;
+        // 600 frames keeps the debug-build runtime reasonable — divergence would
+        // surface at the first differing decision anyway).
+        let reaction = Handicap::default().reaction;
+        let play = |mut controller: AiController| {
+            let mut engine = Engine::new(EngineConfig::default(), 42);
+            for _ in 0..600 {
+                let snap = engine.snapshot();
+                if snap.game_over.is_some() {
+                    break;
+                }
+                engine.step(controller.poll(&snap));
+            }
+            engine.snapshot()
+        };
+
+        let blocking = play(AiController::with_policy(attack_policy(7), reaction));
+        let sliced = play(AiController::with_runner(
+            Box::new(crate::ai::runner::SlicedRunner::with_quantum(
+                attack_policy(7),
+                16,
+            )),
+            reaction,
+        ));
+        assert_eq!(
+            blocking, sliced,
+            "the cooperative venue must reproduce the blocking venue's game"
+        );
+    }
+
+    #[test]
+    fn the_sliced_think_hides_inside_the_reaction_window() {
+        // The latency-hiding mechanism: with the cooperative venue the controller
+        // pumps a quantum per poll *during* the reaction delay, so the bot's
+        // first input lands on the same poll as with the blocking venue — the
+        // search costs no extra wall-clock, it just stops stalling a frame.
+        let reaction = Handicap::default().reaction;
+        let first_press_poll = |mut controller: AiController| {
+            let mut engine = Engine::new(EngineConfig::default(), 7);
+            engine.step(InputFrame::default()); // spawn the first piece
+            for poll in 1..200 {
+                let frame = controller.poll(&engine.snapshot());
+                if pressed_anything(&frame) {
+                    return poll;
+                }
+                engine.step(frame);
+            }
+            panic!("the bot never acted");
+        };
+
+        let blocking = first_press_poll(AiController::with_policy(attack_policy(7), reaction));
+        let sliced = first_press_poll(AiController::with_runner(
+            Box::new(crate::ai::runner::SlicedRunner::with_quantum(
+                attack_policy(7),
+                16,
+            )),
+            reaction,
+        ));
+        assert_eq!(
+            blocking, sliced,
+            "slicing must not delay the bot's first input past the reaction window"
+        );
     }
 }
