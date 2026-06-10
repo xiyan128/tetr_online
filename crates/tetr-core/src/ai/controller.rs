@@ -78,6 +78,22 @@ use crate::player::PlayerController;
 /// the two streams never accidentally align.
 pub const DEFAULT_AI_SEED: u64 = 0xA1_5E_ED;
 
+/// Total best-first node expansions per decision for [`AiController::attack`] —
+/// the interactive quality dial. Headless benches run far higher (quality scales
+/// with budget); this is the **window-capacity** point: the largest one-budget
+/// value whose sliced think still completes inside the default 200 ms reaction
+/// window on every platform, so the uplift from the sync-era 150 costs zero
+/// pace. The arithmetic (pinned by `attack_budget_fits_the_reaction_window`):
+/// the window is 12 polls at 60 Hz and the wasm worst-case quantum is 16
+/// nodes/poll ⇒ 12 × 16 = 192. Beyond this, wasm pace degrades (the bot keeps
+/// thinking past its reaction) — a conscious future operating-point decision,
+/// not a constant bump.
+const ATTACK_NODE_BUDGET: u32 = 192;
+
+/// Ply cap for [`AiController::attack`]; best-first is depth-capped by the
+/// visible queue, not width.
+const ATTACK_DEPTH: u8 = 6;
+
 /// An AI [`PlayerController`]: a model-agnostic shell that drives a
 /// [`Policy`](crate::ai::Policy) (via a [`DecisionRunner`]) and feeds its chosen
 /// placement to the engine one pulse per poll, with a reaction-delay handicap.
@@ -160,15 +176,6 @@ impl AiController {
     /// (reaction delay + imperfection) still apply, so even the strongest brain
     /// stays beatable on demand.
     pub fn attack(handicap: Handicap, seed: u64) -> Self {
-        /// Total best-first node expansions per decision — the quality dial.
-        /// Headless benches run far higher, where quality scales with budget;
-        /// this is the interactive point, sized so the sliced think completes
-        /// within the default 200 ms reaction window on every platform (at the
-        /// wasm quantum of 16/poll, 150 nodes is 10 polls of the 12 available).
-        const ATTACK_NODE_BUDGET: u32 = 150;
-        /// Ply cap; best-first is depth-capped by the visible queue, not width.
-        const ATTACK_DEPTH: u8 = 6;
-
         let policy = SearchPolicy::new(
             Box::new(BestFirstPlanner::new()),
             Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
@@ -583,23 +590,40 @@ mod tests {
         );
     }
 
-    /// An attack-shaped policy (the shipped interactive operating point) for the
-    /// venue-equivalence gates below.
+    /// An attack-shaped policy at the **shipped** operating point (the same
+    /// constants `AiController::attack` uses), so the venue gates below always
+    /// test reality: raising the budget past the reaction window would fail
+    /// them, forcing a conscious pace decision instead of a silent one.
     fn attack_policy(seed: u64) -> Box<dyn Policy> {
         Box::new(SearchPolicy::new(
             Box::new(BestFirstPlanner::new()),
             Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-            SearchBudget::best_first(150, 6),
+            SearchBudget::best_first(ATTACK_NODE_BUDGET, ATTACK_DEPTH),
             Handicap::default().imperfection,
             seed,
         ))
     }
 
     #[test]
+    fn attack_budget_fits_the_reaction_window() {
+        // The pace-neutrality invariant behind ATTACK_NODE_BUDGET: the sliced
+        // think must complete within the default reaction window on the slowest
+        // platform (the wasm quantum), or the strongest bot silently slows down
+        // on the web while looking fine natively.
+        let window_polls = (Handicap::default().reaction.as_secs_f32() / NOMINAL_DT).round() as u32;
+        assert!(
+            ATTACK_NODE_BUDGET <= window_polls * crate::ai::runner::sliced::WASM_QUANTUM,
+            "ATTACK_NODE_BUDGET ({ATTACK_NODE_BUDGET}) exceeds the wasm window \
+             capacity ({window_polls} polls x {} nodes)",
+            crate::ai::runner::sliced::WASM_QUANTUM,
+        );
+    }
+
+    #[test]
     fn sliced_and_blocking_venues_play_the_identical_game() {
         // THE venue-swap gate: at the shipped operating point the sliced think
-        // completes inside the default reaction window (150 nodes at the wasm
-        // worst-case quantum of 16 is 10 polls of the 12 available), so swapping
+        // completes inside the default reaction window (the window-capacity
+        // sizing pinned by attack_budget_fits_the_reaction_window), so swapping
         // the blocking venue for the cooperative one changes *where* the work
         // runs — never the game. Byte-identical engine snapshots over dozens of
         // pieces (clears, chain state, and several imperfection draws included;

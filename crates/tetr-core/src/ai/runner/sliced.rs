@@ -32,14 +32,19 @@ use crate::ai::runner::DecisionRunner;
 /// Nodes per poll on native: ≈3–5 ms of best-first search at the measured
 /// release-build rate (~6 node expansions/ms with the CC2 evaluator) —
 /// comfortably inside a 16.6 ms frame alongside rendering.
-#[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_QUANTUM: u32 = 32;
+pub const NATIVE_QUANTUM: u32 = 32;
 
 /// Nodes per poll on wasm: the browser main thread runs the same search ~2–4×
 /// slower and shares the frame with the renderer, so half the native quantum
-/// keeps the worst poll near ~5–10 ms.
+/// keeps the worst poll near ~5–10 ms. As the smaller of the two defaults this
+/// is also the **cross-platform worst case** that one-budget operating points
+/// size against (see `controller::ATTACK_NODE_BUDGET`).
+pub const WASM_QUANTUM: u32 = 16;
+
+#[cfg(not(target_arch = "wasm32"))]
+const DEFAULT_QUANTUM: u32 = NATIVE_QUANTUM;
 #[cfg(target_arch = "wasm32")]
-const DEFAULT_QUANTUM: u32 = 16;
+const DEFAULT_QUANTUM: u32 = WASM_QUANTUM;
 
 /// A [`DecisionRunner`] that thinks one bounded quantum per poll. Owns the
 /// [`Policy`] it drives.

@@ -11,6 +11,19 @@
 > evaluator seam takes a `ColumnView` + `EvalContext`, the queue is a `SmallVec`,
 > and the neural value net this design anticipated was later pruned
 > (`docs/value-net-postmortem.md`).
+>
+> **2026-06-10 addendum — the `Mind` seam.** The `Planner`/`PlannerStep` step-API
+> this record was written against became the anytime session trait `Mind`
+> (`reroot` / `think(quantum)` / `best` / `nodes_expanded`); see
+> `docs/adr-ai-compute-architecture.md` for the layering and rationale. Mapping
+> for readers of the sections below: "one generation per `plan` call, yielding
+> `NeedMoreBudget`" is now "one generation per `think` call (batch-grain),
+> reporting `Working`/`Exhausted`"; seeding moved into `reroot` (which
+> fingerprints the root + depth cap and makes `best()` immediately valid); the
+> drain-loop `SearchPolicy::plan_best` became the fused `Policy::decide` over the
+> verbs; and the cooperative venue this design anticipated exists
+> (`SlicedRunner`). Every determinism/back-up/speculation invariant recorded
+> below is unchanged and still pinned by the same tests.
 
 ---
 
