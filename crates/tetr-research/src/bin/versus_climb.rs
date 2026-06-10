@@ -35,6 +35,18 @@
 //! (~150-200 at these sizes), with SIGMA small (~0.08) so a rare false accept
 //! cannot teleport the walk.
 //!
+//! RUN RECORD v3 (same day, ACCEPT_MARGIN=150, SIGMA=0.08): the calibrated
+//! design behaved exactly as intended — 45 iters, ONE accept (+213.9 over a
+//! +0.0 incumbent block), and the first POSITIVE held-out validation: deaths
+//! 20-15, tiebreaks 32-28, margin +0.79. Not statistically significant
+//! (20-15 of 35 decisive ⇒ p ≈ 0.25 one-sided), so NOT shipped — but the
+//! candidate is a small, sane perturbation of attack_tuned worth a long SPRT:
+//! [-0.0036628882, -1.5733862, -0.19578815, -0.34977585, -1.5387586,
+//!  -5.149458, 0.3575636, 0.09665186, 1.550793, 4.4781384, 3.782923]
+//! Next: longer budgets (the bar means ~1 accept/hour — that is the honest
+//! pace of real progress), or an SPRT racer per proposal to spend matches
+//! adaptively instead of in fixed blocks.
+//!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
 //!      when rotating), VAL_SEEDS (32), ROTATE (1), ACCEPT_MARGIN (25),
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
