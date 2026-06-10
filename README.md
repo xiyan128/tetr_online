@@ -32,6 +32,12 @@ Try the web demo: https://www.xiyan.dev/tetr_online/
 
 - Three variants: **Marathon** (climb to the final level), **Sprint** (40 lines,
   fastest time), and **Ultra** (highest score in two minutes).
+- **Versus** — two boards, live garbage exchange under the guideline rules
+  (cancellation, capped rising, batch hole streams), with a pending-garbage
+  meter per board, gray garbage rows, a 3-2-1-GO countdown, and rematch flow.
+  Play against any model from the AI catalog, or seat two bots and watch them
+  duel; the seat interface is built for local/remote human-vs-human later
+  (see `docs/adr-versus-mode-ui.md`).
 - Title and menu flow, pause, persisted per-variant high-score tables, and an
   options screen for remappable keys, next-queue length, hold/ghost toggles,
   lock-down mode, and music/SFX volume.
@@ -136,7 +142,9 @@ It is gated off so it never compiles into the shipped game.
 - [x] **Engine** — pure, deterministic, guideline-correct, with a full acceptance suite.
 - [x] **Single-player** — Marathon / Sprint / Ultra, menus, options, high scores, pause.
 - [x] **AI player** — a model-agnostic bot with a tunable handicap and a sandbox mode.
-- [ ] **Local multiplayer** — human/AI vs human/AI on one machine, with attack and garbage.
+- [x] **Versus** — human-vs-AI and AI-vs-AI on one machine, with guideline attack and
+  garbage (engine-owned rules, garbage-aware search seams). Local human-vs-human
+  needs a second keymap on the same seat architecture.
 - [ ] **Online multiplayer** — deterministic lockstep over a relay server.
 - [ ] **Polish** — original assets, replays, spectating, larger formats.
 
