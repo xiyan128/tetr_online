@@ -424,9 +424,6 @@ fn detect_match_end(
 /// Restart the match in place (rematch): despawn the seat entities and rerun
 /// the spawn path. Used by the result overlay; a fresh seed is drawn (a
 /// rematch is a new deal).
-// TODO(versus overlay): the result banner's Rematch action is the production
-// caller; the allow comes off when it lands (this strike, flow pass).
-#[cfg_attr(not(test), allow(dead_code))]
 pub(crate) fn restart_match(world: &mut World) {
     let seats: Vec<Entity> = world
         .query_filtered::<Entity, With<Seat>>()
@@ -471,11 +468,25 @@ mod tests {
     /// phase to `Running` (skipping the countdown), and advance only via
     /// explicit fixed slices.
     fn headless_versus_app(config: VersusConfig) -> App {
+        let mut app = bare_versus_app(config);
+        app.world_mut()
+            .resource_mut::<NextState<VersusPhase>>()
+            .set(VersusPhase::Running);
+        app.update(); // apply the phase
+        app
+    }
+
+    /// The harness without the phase override: enters `Versus` and leaves the
+    /// match on its natural opening phase (the countdown).
+    fn bare_versus_app(config: VersusConfig) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
             .init_state::<GameState>()
             .insert_resource(ButtonInput::<KeyCode>::default())
+            // `focus_navigation` (the pause/result menus) reads the mouse
+            // accumulator that `bevy_input` provides in a real app.
+            .insert_resource(bevy::input::mouse::AccumulatedMouseMotion::default())
             .insert_resource(test_assets())
             .insert_resource(config)
             .add_plugins(VersusPlugin);
@@ -484,10 +495,6 @@ mod tests {
             .set(GameState::Versus);
         app.update(); // queue the transition
         app.update(); // apply Versus + run setup
-        app.world_mut()
-            .resource_mut::<NextState<VersusPhase>>()
-            .set(VersusPhase::Running);
-        app.update(); // apply the phase
         app
     }
 
@@ -522,6 +529,92 @@ mod tests {
             .collect();
         all.sort_by_key(|(i, _)| *i);
         all
+    }
+
+    #[test]
+    fn the_countdown_hands_off_to_running() {
+        // Enter Versus WITHOUT forcing the phase: the match must open on the
+        // countdown, hold the engines (no first spawn), and hand off to
+        // Running on its own once the beats elapse.
+        let mut app = bare_versus_app(bot_match(7));
+        assert_eq!(
+            app.world().resource::<State<VersusPhase>>().get(),
+            &VersusPhase::Countdown,
+            "a match opens on the countdown"
+        );
+
+        // 200 ms per frame (under `Time<Virtual>::max_delta`'s 250 ms clamp):
+        // the 2.6 s of beats elapse within 16 frames.
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+            200,
+        )));
+        for _ in 0..16 {
+            app.update();
+            let snaps = snapshots(&mut app);
+            if app.world().resource::<State<VersusPhase>>().get() == &VersusPhase::Countdown {
+                assert!(
+                    snaps[0].1.active.is_none(),
+                    "engines hold during the countdown (no first spawn)"
+                );
+            }
+        }
+        assert_eq!(
+            app.world().resource::<State<VersusPhase>>().get(),
+            &VersusPhase::Running,
+            "the countdown hands off to Running by itself"
+        );
+        app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
+        tick_fixed(&mut app, 1);
+        assert!(
+            snapshots(&mut app)[0].1.active.is_some(),
+            "the first piece spawns on the first Running slice"
+        );
+    }
+
+    #[test]
+    fn pause_freezes_the_match_and_esc_resumes() {
+        let mut app = headless_versus_app(bot_match(7));
+        tick_fixed(&mut app, 60);
+
+        // The pause keybind (Escape by default) freezes the whole match.
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::Escape);
+        app.update(); // pause_on_keybind queues Paused
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear_just_pressed(KeyCode::Escape);
+        app.update(); // the transition applies
+        assert_eq!(
+            app.world().resource::<State<VersusPhase>>().get(),
+            &VersusPhase::Paused
+        );
+
+        let frozen = snapshots(&mut app);
+        tick_fixed(&mut app, 30);
+        assert_eq!(
+            snapshots(&mut app),
+            frozen,
+            "a paused match must not advance either engine"
+        );
+
+        // Esc again resumes (the pause menu's Back action).
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Escape);
+            keys.clear_just_released(KeyCode::Escape);
+            keys.press(KeyCode::Escape);
+        }
+        app.update();
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .clear_just_pressed(KeyCode::Escape);
+        app.update();
+        assert_eq!(
+            app.world().resource::<State<VersusPhase>>().get(),
+            &VersusPhase::Running,
+            "Esc on the pause menu resumes the match"
+        );
     }
 
     #[test]
@@ -738,6 +831,31 @@ mod tests {
             .map(|(_, children)| children.len())
             .expect("seat 1 has a meter");
         assert_eq!(segments, 2, "two queued batches render as two segments");
+    }
+
+    #[test]
+    fn the_rematch_request_rebuilds_the_match() {
+        // The exact path the result banner's Rematch button takes: insert the
+        // request resource; the exclusive applier reseats the match.
+        let mut app = headless_versus_app(bot_match(7));
+        tick_fixed(&mut app, 240);
+        assert!(
+            snapshots(&mut app)[0].1.lines > 0 || !snapshots(&mut app)[0].1.board_cells.is_empty()
+        );
+
+        app.world_mut().insert_resource(overlay::RematchRequested);
+        app.update(); // the applier reseats and queues Countdown
+        app.update(); // the phase transition applies
+
+        let after = snapshots(&mut app);
+        assert!(
+            after[0].1.board_cells.is_empty() && after[0].1.lines == 0,
+            "a rematch deals a fresh match"
+        );
+        assert_eq!(
+            app.world().resource::<State<VersusPhase>>().get(),
+            &VersusPhase::Countdown
+        );
     }
 
     #[test]
