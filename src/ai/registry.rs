@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use crate::ai::{
     AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, Evaluator, Handicap, LinearEvaluator,
-    Planner, SearchBudget, SearchPolicy, DEFAULT_AI_SEED,
+    Mind, SearchBudget, SearchPolicy, DEFAULT_AI_SEED,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms
@@ -103,16 +103,16 @@ impl ModelRegistry {
     }
 }
 
-/// Wire a planner + evaluator into a fresh controller under the shared default
+/// Wire a mind + evaluator into a fresh controller under the shared default
 /// handicap — the one construction every Tier-2 entry shares, so an entry differs
-/// only by the (planner, evaluator, budget) triple it names.
+/// only by the (mind, evaluator, budget) triple it names.
 fn search_model(
-    planner: Box<dyn Planner>,
+    mind: Box<dyn Mind>,
     eval: Box<dyn Evaluator>,
     budget: SearchBudget,
 ) -> AiController {
     let h = Handicap::default();
-    let policy = SearchPolicy::new(planner, eval, budget, h.imperfection, DEFAULT_AI_SEED);
+    let policy = SearchPolicy::new(mind, eval, budget, h.imperfection, DEFAULT_AI_SEED);
     AiController::with_policy(Box::new(policy), h.reaction)
 }
 

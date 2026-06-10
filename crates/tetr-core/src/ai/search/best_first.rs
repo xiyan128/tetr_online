@@ -33,17 +33,9 @@ use rustc_hash::FxHashMap;
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
-    best_root_plan, hold_placements, score_child, Planner, PlannerStep, RootKey, SearchBudget,
+    best_root_plan, hold_placements, score_child, Mind, PlacementPlan, RootKey, ThinkProgress,
 };
 use crate::ai::state::SearchState;
-
-/// Nodes expanded per `plan` call before yielding — the cooperative time-slice unit,
-/// deliberately far below any real node budget (the shipped budget is 150, the bench
-/// default 4000) so an incremental runner actually observes
-/// [`PlannerStep::NeedMoreBudget`] instead of the whole search running in one call.
-/// The blocking [`SearchPolicy::plan_best`](crate::ai::SearchPolicy) just loops until
-/// `Done`, so slice size never changes a decision — only call granularity.
-const EXPAND_CHUNK: u32 = 64;
 
 /// Identity of a search state for transposition: same key ⇒ same future, so two paths
 /// reaching it are interchangeable. **Per-root** (`root_index` is part of the key) so a
@@ -101,36 +93,42 @@ impl PartialEq for Node {
 }
 impl Eq for Node {}
 
-/// The in-flight search carried between `plan` calls.
+/// The in-flight session carried between [`Mind::think`] calls.
 struct Run {
     /// Ply-1 placements in canonical movegen order; `root_index` indexes this.
+    /// Empty when the root state had no legal placement (topped out).
     roots: Vec<Placement>,
     /// Best leaf score seen per ply-1 root — the back-up target (`i32::MIN` = unseen).
     root_best: Vec<i32>,
     frontier: BinaryHeap<Node>,
     /// Per-root best score at which each distinct state was enqueued (transposition).
     table: FxHashMap<StateKey, i32>,
-    /// Nodes expanded so far this decision (against the node budget).
+    /// Nodes expanded so far on this root (the [`Mind::nodes_expanded`] meter).
     expanded: u32,
     next_order: u64,
-    /// State identity this run was seeded from (a `usize::MAX` root_index sentinel), to detect a
-    /// stale in-flight run when `plan` is called for a new decision.
-    fingerprint: StateKey,
+    /// State identity this run was seeded from — the [`Mind::reroot`] fingerprint
+    /// that keeps the session live across calls and discards it on a new root.
+    root: RootKey,
+    /// Ply cap the run was seeded under; part of the root identity (a different
+    /// cap is a different search).
+    max_depth: u8,
 }
 
-/// A deterministic best-first graph-search planner with per-root transposition.
+/// A deterministic best-first graph-search [`Mind`] with per-root transposition.
 ///
-/// The total node-expansion budget per decision comes from
-/// [`SearchBudget::nodes`] (see [`SearchBudget::best_first`]) — the planner itself
-/// only carries the in-flight run.
+/// Node-grain: [`Mind::think`] honors its quantum exactly, so the total
+/// node-expansion budget per decision is entirely the caller's meter (see
+/// [`SearchBudget::best_first`] and
+/// [`think_to_completion`](crate::ai::search::think_to_completion)) — the mind
+/// itself only carries the in-flight run.
 #[derive(Default)]
 pub struct BestFirstPlanner {
     run: Option<Run>,
 }
 
 impl BestFirstPlanner {
-    /// A fresh planner (no in-flight run). The node budget is supplied per call via
-    /// [`SearchBudget::best_first`].
+    /// A fresh planner (no in-flight run). The node budget is supplied by the
+    /// caller's meter via [`SearchBudget::best_first`].
     pub fn new() -> Self {
         Self::default()
     }
@@ -190,13 +188,12 @@ impl BestFirstPlanner {
         run.next_order += 1;
     }
 
-    /// Seed the run: the ply-1 root placements become the depth-1 frontier, each its own
-    /// `root_index`. `None` if the state has no legal placement (topped out).
-    fn seed(state: &SearchState, eval: &dyn Evaluator) -> Option<Run> {
+    /// Seed a fresh run for `state`: the ply-1 root placements become the depth-1
+    /// frontier, each its own `root_index`. A topped-out state (no legal
+    /// placement) seeds an *empty* run — the fingerprint still records it, so
+    /// re-rooting at the same dead state stays a no-op.
+    fn seed(state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> Run {
         let roots = hold_placements(state);
-        if roots.is_empty() {
-            return None;
-        }
         let mut run = Run {
             root_best: vec![i32::MIN; roots.len()],
             roots,
@@ -204,7 +201,8 @@ impl BestFirstPlanner {
             table: FxHashMap::default(),
             expanded: 0,
             next_order: 0,
-            fingerprint: StateKey::of(state, usize::MAX),
+            root: RootKey::of(state),
+            max_depth,
         };
         // Score the roots from the decision point's chain (same as the beam's seed).
         for (i, (child, score, acc)) in Self::children(state, Reward(0), eval)
@@ -213,24 +211,25 @@ impl BestFirstPlanner {
         {
             Self::admit(&mut run, child, score, acc, i, 1);
         }
-        Some(run)
+        run
     }
 
-    /// Expand up to `EXPAND_CHUNK` best nodes (or until the node budget / frontier is
-    /// exhausted). A node at `budget.max_depth`, or with an empty queue (no concrete
-    /// next piece — speculation past the visible queue is left to a future revision),
-    /// is a leaf: its score already credited its root, so it is simply dropped.
-    fn expand_chunk(run: &mut Run, eval: &dyn Evaluator, budget: SearchBudget) {
-        let mut this_call = 0u32;
-        while this_call < EXPAND_CHUNK && !budget_spent(run.expanded, budget) {
+    /// Expand up to `quantum` best nodes (or until the frontier drains). A node at
+    /// the run's depth cap, or with an empty queue (no concrete next piece —
+    /// speculation past the visible queue is left to a future revision), is a
+    /// leaf: its score already credited its root, so it is simply dropped without
+    /// counting against the quantum.
+    fn expand(run: &mut Run, quantum: u32, eval: &dyn Evaluator) {
+        let mut spent = 0u32;
+        while spent < quantum {
             let Some(node) = run.frontier.pop() else {
                 break;
             };
-            if node.depth >= budget.max_depth || node.state.queue.is_empty() {
+            if node.depth >= run.max_depth || node.state.queue.is_empty() {
                 continue; // leaf — already backed up
             }
             run.expanded += 1;
-            this_call += 1;
+            spent += 1;
             let child_depth = node.depth + 1;
             for (child, score, acc) in Self::children(&node.state, node.acc_reward, eval) {
                 Self::admit(run, child, score, acc, node.root_index, child_depth);
@@ -239,44 +238,41 @@ impl BestFirstPlanner {
     }
 }
 
-/// Whether `expanded` has consumed the decision's node budget (`nodes == 0` =
-/// uncapped: only depth / frontier exhaustion terminate).
-fn budget_spent(expanded: u32, budget: SearchBudget) -> bool {
-    budget.nodes != 0 && expanded >= budget.nodes
-}
-
-impl Planner for BestFirstPlanner {
-    fn plan(
-        &mut self,
-        state: &SearchState,
-        eval: &dyn Evaluator,
-        budget: SearchBudget,
-    ) -> PlannerStep {
-        // Drop a stale run from a previous, different decision.
-        if let Some(run) = &self.run {
-            if run.fingerprint != StateKey::of(state, usize::MAX) {
-                self.run = None;
-            }
+impl Mind for BestFirstPlanner {
+    fn reroot(&mut self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) {
+        let root = RootKey::of(state);
+        if self
+            .run
+            .as_ref()
+            .is_some_and(|run| run.root == root && run.max_depth == max_depth)
+        {
+            return; // already rooted here: the in-flight search continues
         }
+        self.run = Some(Self::seed(state, eval, max_depth));
+    }
 
-        let mut run = match self.run.take() {
-            None => match Self::seed(state, eval) {
-                Some(run) => run,
-                None => return PlannerStep::Done(None), // topped out
-            },
-            Some(run) => run,
+    fn think(&mut self, quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
+        let Some(run) = self.run.as_mut() else {
+            return ThinkProgress::Exhausted; // never rooted: nothing to think about
         };
-
-        Self::expand_chunk(&mut run, eval, budget);
-
-        if budget_spent(run.expanded, budget) || run.frontier.is_empty() {
-            let plan = best_root_plan(&run.roots, &run.root_best);
-            self.run = None;
-            PlannerStep::Done(Some(plan))
+        Self::expand(run, quantum, eval);
+        if run.frontier.is_empty() {
+            ThinkProgress::Exhausted
         } else {
-            self.run = Some(run);
-            PlannerStep::NeedMoreBudget
+            ThinkProgress::Working
         }
+    }
+
+    fn best(&self) -> Option<PlacementPlan> {
+        let run = self.run.as_ref()?;
+        if run.roots.is_empty() {
+            return None; // topped out: no legal placement existed at the root
+        }
+        Some(best_root_plan(&run.roots, &run.root_best))
+    }
+
+    fn nodes_expanded(&self) -> u32 {
+        self.run.as_ref().map_or(0, |run| run.expanded)
     }
 }
 
@@ -284,24 +280,8 @@ impl Planner for BestFirstPlanner {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::ai::search::{GreedyPlanner, PlacementPlan};
+    use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
     use crate::engine::{Engine, EngineConfig, InputFrame};
-
-    /// Drive a planner to a single `Done` plan (mirrors `SearchPolicy::plan_best`).
-    fn drive(
-        planner: &mut dyn Planner,
-        state: &SearchState,
-        eval: &dyn Evaluator,
-        budget: SearchBudget,
-    ) -> Option<PlacementPlan> {
-        for _ in 0..100_000 {
-            match planner.plan(state, eval, budget) {
-                PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => {}
-            }
-        }
-        panic!("planner never finished");
-    }
 
     /// A real engine snapshot after the first spawn (hold + full queue present).
     fn engine_state(seed: u64) -> SearchState {
@@ -318,8 +298,8 @@ mod tests {
         let mut a = BestFirstPlanner::new();
         let mut b = BestFirstPlanner::new();
         let budget = SearchBudget::best_first(2000, 4);
-        let pa = drive(&mut a, &state, &eval, budget).unwrap();
-        let pb = drive(&mut b, &state, &eval, budget).unwrap();
+        let pa = think_to_completion(&mut a, &state, &eval, budget).unwrap();
+        let pb = think_to_completion(&mut b, &state, &eval, budget).unwrap();
         assert_eq!(pa.placement.origin(), pb.placement.origin());
         assert_eq!(pa.placement.rotation(), pb.placement.rotation());
         assert_eq!(pa.placement.path, pb.placement.path);
@@ -334,36 +314,108 @@ mod tests {
         let eval = LinearEvaluator::default();
         let mut bf = BestFirstPlanner::new();
         let mut greedy = GreedyPlanner::new();
-        let bp = drive(&mut bf, &state, &eval, SearchBudget::best_first(2000, 1)).unwrap();
-        let gp = drive(&mut greedy, &state, &eval, SearchBudget::greedy()).unwrap();
+        let bp =
+            think_to_completion(&mut bf, &state, &eval, SearchBudget::best_first(2000, 1)).unwrap();
+        let gp = think_to_completion(&mut greedy, &state, &eval, SearchBudget::greedy()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
         assert_eq!(bp.placement.path, gp.placement.path);
     }
 
     #[test]
-    fn best_first_time_slices_at_the_production_budget() {
-        // The cooperative-yield contract: EXPAND_CHUNK (the per-call slice) sits below
-        // the shipped node budget, so the first `plan` call must yield NeedMoreBudget
-        // rather than running the whole decision — and the final plan must not depend
-        // on slice granularity (the sliced run equals a fresh full drive).
+    fn quantum_granularity_never_changes_the_decision() {
+        // The session contract a cooperative venue relies on: thinking the shipped
+        // 150-node budget in 16-node frame slices reaches the identical decision as
+        // one blocking 150-node call — the quantum only chooses suspension points.
         let state = engine_state(7);
         let eval = LinearEvaluator::default();
         let budget = SearchBudget::best_first(150, 6);
 
-        let mut sliced = BestFirstPlanner::new();
-        assert!(
-            matches!(
-                sliced.plan(&state, &eval, budget),
-                PlannerStep::NeedMoreBudget
-            ),
-            "a 150-node decision must span multiple {EXPAND_CHUNK}-node slices"
+        let mut fine = BestFirstPlanner::new();
+        fine.reroot(&state, &eval, budget.max_depth);
+        assert_eq!(
+            fine.think(16, &eval),
+            ThinkProgress::Working,
+            "a 150-node decision must span multiple 16-node slices"
         );
-        let sliced_plan = drive(&mut sliced, &state, &eval, budget).unwrap();
+        while fine.nodes_expanded() < budget.nodes {
+            let quantum = (budget.nodes - fine.nodes_expanded()).min(16);
+            if fine.think(quantum, &eval) == ThinkProgress::Exhausted {
+                break;
+            }
+        }
+        let fine_plan = fine.best().unwrap();
 
-        let full_plan = drive(&mut BestFirstPlanner::new(), &state, &eval, budget).unwrap();
-        assert_eq!(sliced_plan.placement.origin(), full_plan.placement.origin());
-        assert_eq!(sliced_plan.placement.path, full_plan.placement.path);
-        assert_eq!(sliced_plan.score, full_plan.score);
+        let coarse_plan =
+            think_to_completion(&mut BestFirstPlanner::new(), &state, &eval, budget).unwrap();
+        assert_eq!(fine_plan.placement.origin(), coarse_plan.placement.origin());
+        assert_eq!(fine_plan.placement.path, coarse_plan.placement.path);
+        assert_eq!(fine_plan.score, coarse_plan.score);
+    }
+
+    #[test]
+    fn best_is_anytime_valid_from_seeding_onward() {
+        // The anytime contract: `best()` is a legal root placement immediately after
+        // reroot (before any think), and after every quantum thereafter.
+        let state = engine_state(11);
+        let eval = LinearEvaluator::default();
+        let legal = hold_placements(&state);
+        let is_legal = |plan: &PlacementPlan| {
+            legal.iter().any(|p| {
+                p.origin() == plan.placement.origin()
+                    && p.rotation() == plan.placement.rotation()
+                    && p.path == plan.placement.path
+            })
+        };
+
+        let mut mind = BestFirstPlanner::new();
+        mind.reroot(&state, &eval, 6);
+        let seeded = mind.best().expect("best is valid right after seeding");
+        assert!(is_legal(&seeded), "seeded best is a real root placement");
+
+        for _ in 0..20 {
+            let progress = mind.think(16, &eval);
+            let current = mind.best().expect("best stays valid while thinking");
+            assert!(is_legal(&current), "anytime best is a real root placement");
+            if progress == ThinkProgress::Exhausted {
+                break;
+            }
+        }
+    }
+
+    #[test]
+    fn rerooting_the_same_state_continues_the_run() {
+        // The fingerprint contract: re-asserting the same (state, depth) preserves
+        // the in-flight search; a different state — or a different depth cap —
+        // discards it and re-seeds.
+        let state = engine_state(7);
+        let eval = LinearEvaluator::default();
+        let mut mind = BestFirstPlanner::new();
+
+        mind.reroot(&state, &eval, 6);
+        mind.think(32, &eval);
+        assert_eq!(mind.nodes_expanded(), 32);
+
+        mind.reroot(&state, &eval, 6);
+        assert_eq!(
+            mind.nodes_expanded(),
+            32,
+            "same (state, depth): the run must continue, not restart"
+        );
+
+        mind.reroot(&state, &eval, 4);
+        assert_eq!(
+            mind.nodes_expanded(),
+            0,
+            "a different depth cap is a different search"
+        );
+
+        mind.think(8, &eval);
+        mind.reroot(&engine_state(42), &eval, 4);
+        assert_eq!(
+            mind.nodes_expanded(),
+            0,
+            "a different root state discards the stale run"
+        );
     }
 }

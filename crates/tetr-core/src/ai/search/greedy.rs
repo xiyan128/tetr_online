@@ -8,8 +8,11 @@
 //!
 //! Despite its simplicity this is a genuinely strong baseline — a one-piece greedy
 //! search over a good linear evaluator is the classic Dellacherie controller
-//! (research finding [1]) — and it fits the [`Planner`] trait so a multi-ply Tier-2
-//! search can replace it later with no other change.
+//! (research finding [1]) — and it fits the [`Mind`] session seam so a multi-ply
+//! Tier-2 search can replace it with no other change. As a session it is the
+//! degenerate case: **all** of its work happens at [`Mind::reroot`] (seeding *is*
+//! the whole argmax), [`Mind::think`] is immediately exhausted, and
+//! [`Mind::best`] returns the cached decision.
 //!
 //! # How a placement is scored (mirrors the engine's lock path)
 //!
@@ -29,17 +32,26 @@
 use crate::ai::eval::{EvalContext, Evaluator};
 use crate::ai::movegen::{self, Placement};
 use crate::ai::search::{
-    hold_placements, score_placement, PlacementPlan, Planner, PlannerStep, SearchBudget,
+    hold_placements, score_placement, Mind, PlacementPlan, RootKey, ThinkProgress,
 };
 use crate::ai::state::SearchState;
 
-/// The greedy one-piece planner. Stateless; holds no search state between calls
-/// because it finishes every plan in a single call.
-#[derive(Clone, Copy, Debug)]
+/// The completed one-shot decision for the current root (greedy thinks entirely
+/// at [`Mind::reroot`] time): the root's identity plus its argmax plan (`None`
+/// inside when the root had no legal placement).
+struct GreedyRun {
+    root: RootKey,
+    plan: Option<PlacementPlan>,
+}
+
+/// The greedy one-piece planner: a [`Mind`] whose whole search is the seeding
+/// argmax, cached per root.
 pub struct GreedyPlanner {
     /// Whether to consider the hold swap (search the held/next piece too). On by
     /// default; exposed mainly so tests can isolate the no-hold placement set.
     consider_hold: bool,
+    /// The cached decision for the current root; `None` before the first reroot.
+    run: Option<GreedyRun>,
 }
 
 impl GreedyPlanner {
@@ -47,6 +59,7 @@ impl GreedyPlanner {
     pub fn new() -> Self {
         Self {
             consider_hold: true,
+            run: None,
         }
     }
 
@@ -54,6 +67,7 @@ impl GreedyPlanner {
     pub fn without_hold() -> Self {
         Self {
             consider_hold: false,
+            run: None,
         }
     }
 
@@ -75,34 +89,51 @@ impl Default for GreedyPlanner {
     }
 }
 
-impl Planner for GreedyPlanner {
-    fn plan(
-        &mut self,
-        state: &SearchState,
-        eval: &dyn Evaluator,
-        _budget: SearchBudget,
-    ) -> PlannerStep {
-        let candidates = self.candidates(state);
+impl Mind for GreedyPlanner {
+    /// Seeding **is** the greedy search: score every candidate and cache the
+    /// argmax. The depth cap is irrelevant (greedy is always exactly one ply), so
+    /// it is not part of the root identity.
+    fn reroot(&mut self, state: &SearchState, eval: &dyn Evaluator, _max_depth: u8) {
+        let root = RootKey::of(state);
+        if self.run.as_ref().is_some_and(|run| run.root == root) {
+            return; // already rooted here: the cached decision stands
+        }
 
         // Pick the highest-scoring placement, keeping the *first* maximum on a tie
         // (`score <= best` leaves the incumbent in place). Movegen's placement order
         // is canonical and stable, so this tie-break — and thus the whole plan — is
         // deterministic, no RNG involved.
-        let best = candidates
-            .into_iter()
-            .fold(None::<PlacementPlan>, |best, placement| {
-                let ctx = EvalContext {
-                    combo: state.combo,
-                    b2b: state.b2b,
-                };
-                let score = score_placement(state, &placement, eval, ctx);
-                match best {
-                    Some(plan) if score <= plan.score => Some(plan),
-                    _ => Some(PlacementPlan { placement, score }),
-                }
-            });
+        let plan =
+            self.candidates(state)
+                .into_iter()
+                .fold(None::<PlacementPlan>, |best, placement| {
+                    let ctx = EvalContext {
+                        combo: state.combo,
+                        b2b: state.b2b,
+                    };
+                    let score = score_placement(state, &placement, eval, ctx);
+                    match best {
+                        Some(plan) if score <= plan.score => Some(plan),
+                        _ => Some(PlacementPlan { placement, score }),
+                    }
+                });
 
-        PlannerStep::Done(best)
+        self.run = Some(GreedyRun { root, plan });
+    }
+
+    /// Greedy has no frontier: everything was decided at reroot.
+    fn think(&mut self, _quantum: u32, _eval: &dyn Evaluator) -> ThinkProgress {
+        ThinkProgress::Exhausted
+    }
+
+    fn best(&self) -> Option<PlacementPlan> {
+        self.run.as_ref().and_then(|run| run.plan.clone())
+    }
+
+    /// Greedy never *expands* (no lookahead) — the meter stays at zero, matching
+    /// its historical "ignores the node budget" contract.
+    fn nodes_expanded(&self) -> u32 {
+        0
     }
 }
 
@@ -120,10 +151,13 @@ mod tests {
     /// A planner plan, unwrapped, or a panic with context.
     fn plan_of(state: &SearchState, planner: &mut GreedyPlanner) -> PlacementPlan {
         let eval = LinearEvaluator::default();
-        match planner.plan(state, &eval, SearchBudget::greedy()) {
-            PlannerStep::Done(Some(plan)) => plan,
-            other => panic!("expected a plan, got {other:?}"),
-        }
+        crate::ai::search::think_to_completion(
+            planner,
+            state,
+            &eval,
+            crate::ai::search::SearchBudget::greedy(),
+        )
+        .expect("the state has a legal placement")
     }
 
     /// Absolute occupied cells of a placement, sorted.

@@ -1,7 +1,7 @@
-//! [`SearchPolicy`]: the search-based AI brain (greedy Tier-1 now, beam Tier-2
-//! later behind the same [`Planner`] seam).
+//! [`SearchPolicy`]: the search-based AI brain (any [`Mind`] paradigm — greedy,
+//! beam, best-first — behind the same seam).
 //!
-//! It wraps a [`Planner`] + [`Evaluator`] and owns the **deliberate-error model**:
+//! It wraps a [`Mind`] + [`Evaluator`] and owns the **deliberate-error model**:
 //! it plans the best placement, then with probability `imperfection` substitutes a
 //! plausible near-best — a top-N softmax over candidate placements — so a
 //! handicapped bot misplays like a human rather than flailing. This error model
@@ -24,7 +24,7 @@ use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy};
 use crate::ai::search::{
-    score_placement, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget,
+    score_placement, think_to_completion, GreedyPlanner, Mind, PlacementPlan, SearchBudget,
 };
 
 /// How many of the top placements the imperfection softmax samples from. A small
@@ -33,14 +33,14 @@ use crate::ai::search::{
 /// now.)
 const ERROR_SAMPLE_WINDOW: usize = 4;
 
-/// A search brain: a [`Planner`] over an [`Evaluator`] under a [`SearchBudget`],
+/// A search brain: a [`Mind`] over an [`Evaluator`] under a [`SearchBudget`],
 /// with a tunable `imperfection` that degrades it into a beatable opponent.
 ///
-/// Owns the planner + evaluator because [`Planner::plan`] takes `&mut self` (an
-/// incremental search carries state between calls), so it cannot be borrowed across
-/// the runner's poll boundary — the policy is its home.
+/// Owns the mind + evaluator because the mind carries an in-flight search between
+/// calls (`&mut self`), so it cannot be borrowed across the runner's poll
+/// boundary — the policy is its home.
 pub struct SearchPolicy {
-    planner: Box<dyn Planner>,
+    mind: Box<dyn Mind>,
     evaluator: Box<dyn Evaluator>,
     budget: SearchBudget,
     /// `0.0..=1.0`: probability of substituting a softmax-sampled near-best
@@ -51,17 +51,17 @@ pub struct SearchPolicy {
 }
 
 impl SearchPolicy {
-    /// Build a search policy from an explicit planner + evaluator + budget. `seed`
+    /// Build a search policy from an explicit mind + evaluator + budget. `seed`
     /// seeds the imperfection RNG (the determinism handle).
     pub fn new(
-        planner: Box<dyn Planner>,
+        mind: Box<dyn Mind>,
         evaluator: Box<dyn Evaluator>,
         budget: SearchBudget,
         imperfection: f32,
         seed: u64,
     ) -> Self {
         Self {
-            planner,
+            mind,
             evaluator,
             budget,
             imperfection,
@@ -81,19 +81,15 @@ impl SearchPolicy {
         )
     }
 
-    /// Run the planner to its final best placement. Loops while it asks for more
-    /// budget so a future incremental (Tier-2) planner works unchanged; greedy
-    /// returns [`PlannerStep::Done`] on the first call. Bounded so a misbehaving
-    /// incremental planner cannot spin forever.
+    /// Run the mind to its final best placement in one blocking call (the
+    /// direct-drive venue — see [`think_to_completion`]).
     fn plan_best(&mut self, obs: &Observation) -> Option<PlacementPlan> {
-        const MAX_STEPS: u32 = 100_000;
-        for _ in 0..MAX_STEPS {
-            match self.planner.plan(obs, self.evaluator.as_ref(), self.budget) {
-                PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => {}
-            }
-        }
-        None
+        think_to_completion(
+            self.mind.as_mut(),
+            obs,
+            self.evaluator.as_ref(),
+            self.budget,
+        )
     }
 
     /// Apply the imperfection handicap to the planner's `best`.

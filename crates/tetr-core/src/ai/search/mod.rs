@@ -1,31 +1,42 @@
-//! The placement planner: a paradigm-agnostic search seam (AI3.3).
+//! The placement search: an anytime, re-rootable session seam (AI3.3).
 //!
-//! A *planner* turns a [`SearchState`] into a decision: which placement to play
-//! next, and the [`Move`] path to execute it. The [`Planner`] trait is deliberately
-//! **search-paradigm-agnostic** — it says nothing about *how* the decision is made.
-//! The shipped [`greedy`] planner is a one-piece greedy search (Tier-1), but
-//! research finding [6] shows the strong reference bot (Cold Clear) uses a
-//! transposition-deduplicating DAG / Monte-Carlo search, so a future Tier-2 planner
-//! must be able to drop in behind this same trait with no rework of the evaluator,
-//! movegen, controller, or plan-to-input layers.
+//! A search turns a [`SearchState`] into a decision: which placement to play next,
+//! and the [`Move`] path to execute it. The [`Mind`] trait is the **session**
+//! contract every search paradigm implements — the one-shot greedy argmax, the
+//! batch-shaped beam, and the transposition best-first today; an MCGS or
+//! neural-guided search later (research finding [6]: the strong reference bot,
+//! Cold Clear, is a transposition-deduplicating DAG search) — so a stronger brain
+//! drops in with no rework of the evaluator, movegen, controller, or
+//! plan-to-input layers.
 //!
-//! # Why a node budget and an incremental step
+//! # Two currencies: work and time
 //!
-//! [`Planner::plan`] takes a [`SearchBudget`] (a node cap + a depth cap) and returns
-//! a [`PlannerStep`]: either [`PlannerStep::Done`] with a [`PlacementPlan`], or
-//! [`PlannerStep::NeedMoreBudget`] to be polled again. This shape exists for the
-//! cross-platform compute runner (AI3.5): on threadless WASM the search advances a
-//! bounded slice per frame (cooperative time-slicing), so a multi-ply Tier-2 search
-//! can yield and resume. The Tier-1 greedy planner always finishes in one call and
-//! returns [`PlannerStep::Done`] immediately, ignoring the node cap.
+//! A [`Mind`] measures effort in **nodes** ([`Mind::think`] spends a node quantum;
+//! [`Mind::nodes_expanded`] meters it) and never reads a clock. Callers own
+//! **time** — frames, reaction windows, deadlines — and convert it to work. That
+//! split is what lets every venue drive the same session:
+//!
+//! - the blocking drain ([`think_to_completion`]) for headless benchmarks, tests,
+//!   and the synchronous runner — exact budgets, reproducible decisions;
+//! - a cooperative interactive venue that spends a small quantum per frame on the
+//!   main thread (no per-piece hitch);
+//! - a thread/worker venue that thinks continuously and is asked for
+//!   [`Mind::best`] when the controller's deadline lands.
+//!
+//! [`Mind::best`] is **anytime**: valid as soon as [`Mind::reroot`] seeds the
+//! ply-1 roots, and refined by every [`Mind::think`]. Re-rooting at the state the
+//! session is already rooted at is a cheap fingerprint compare, so callers
+//! re-assert the root every poll and a stale in-flight search can never leak into
+//! a new decision.
 //!
 //! # Determinism
 //!
-//! Pure Rust, no Bevy, no RNG, no clock — like [`crate::engine`]. A planner is a
-//! deterministic function of `(state, evaluator, budget)`. Tie-breaking among
-//! equally-scored placements is resolved by movegen's canonical placement order
-//! (stable), never by randomness; any error injection the AI wants lives in the
-//! controller's own seeded RNG, never here.
+//! Pure Rust, no Bevy, no RNG, no clock — like [`crate::engine`]. A mind's
+//! decision is a deterministic function of `(state, evaluator, depth cap, total
+//! nodes thought)`; quantum *granularity* never changes the answer, only when it
+//! arrives. Tie-breaking among equally-scored placements is resolved by movegen's
+//! canonical placement order (stable), never by randomness; any error injection
+//! the AI wants lives in the policy's own seeded RNG, never here.
 
 pub mod beam;
 pub mod best_first;
@@ -42,20 +53,20 @@ use crate::ai::movegen::{generate_with_hold, spawn_piece, Move, Placement};
 use crate::ai::state::SearchState;
 use crate::engine::{classify_t_spin, LockOutcome, PieceType, TSpinKind};
 
-/// How much total work a planner may spend on one decision.
+/// How much total work one decision may spend.
 ///
-/// `max_depth` caps lookahead plies for every planner. `nodes` caps total node
-/// expansions per decision for the node-counted planner ([`BestFirstPlanner`]);
-/// the planners that bound their work another way ignore it — greedy finishes in
-/// one shot, and the beam is bounded by its width × depth. Time-slicing (how much
-/// of the budget runs per [`Planner::plan`] call before yielding
-/// [`PlannerStep::NeedMoreBudget`]) is each planner's own contract, not part of
-/// the budget.
+/// `max_depth` caps lookahead plies for every mind. `nodes` caps total node
+/// expansions per decision for the node-metered mind ([`BestFirstPlanner`]); the
+/// minds that bound their work another way effectively ignore it — greedy thinks
+/// in one shot, and the beam is bounded by its width × depth. The budget is the
+/// **caller's** meter (checked against [`Mind::nodes_expanded`], as
+/// [`think_to_completion`] does): the mind itself never sees it, only the
+/// per-call think quantum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchBudget {
-    /// Total node expansions per decision for node-counted planners (best-first).
+    /// Total node expansions per decision for node-metered minds (best-first).
     /// `0` means uncapped — the depth cap / frontier exhaustion alone terminates.
-    /// Ignored by greedy and the beam.
+    /// Effectively ignored by greedy and the beam.
     pub nodes: u32,
     /// Maximum lookahead plies (current piece = depth 1).
     pub max_depth: u8,
@@ -250,32 +261,92 @@ impl RootKey {
     }
 }
 
-/// The result of one [`Planner::plan`] call.
-///
-/// A one-shot planner returns [`PlannerStep::Done`] immediately. An incremental
-/// planner returns [`PlannerStep::NeedMoreBudget`] until its search converges, so a
-/// cooperative time-sliced runner can poll it across frames.
-#[derive(Clone, Debug)]
-pub enum PlannerStep {
-    /// The search produced a plan. `None` means the state had **no** legal
-    /// placement (e.g. the board is already topped out), which the controller
-    /// treats as "do nothing / game is lost".
-    Done(Option<PlacementPlan>),
-    /// The search needs to be polled again with more budget (incremental planners).
-    NeedMoreBudget,
+/// Progress report from [`Mind::think`]: whether more thinking can still matter.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThinkProgress {
+    /// Expandable work remains — more [`Mind::think`] can improve [`Mind::best`].
+    Working,
+    /// The search is exhausted (frontier drained / depth cap reached): further
+    /// `think` calls are no-ops and [`Mind::best`] is final for this root.
+    Exhausted,
 }
 
-/// A placement planner. Object-safe (`&mut dyn Planner`) so the controller can hold
-/// one behind a trait object and swap Tier-1 for Tier-2 without code changes.
+/// An anytime, re-rootable search session — the AI's thinking core.
 ///
-/// `Send + Sync` so the search may run off-thread on native targets (AI3.5).
-pub trait Planner: Send + Sync {
-    /// Plan the next placement from `state`, scoring candidates with `eval` under
-    /// `budget`. See [`PlannerStep`] for the one-shot vs incremental contract.
-    fn plan(
-        &mut self,
-        state: &SearchState,
-        eval: &dyn Evaluator,
-        budget: SearchBudget,
-    ) -> PlannerStep;
+/// One `Mind` owns one in-flight search (frontier, transposition table, per-root
+/// back-ups) and is driven through three verbs:
+///
+/// 1. [`reroot`](Self::reroot) — point the session at a decision state. A no-op
+///    when already rooted there (thinking continues across calls); otherwise the
+///    stale run is discarded and the ply-1 roots are seeded, which makes
+///    [`best`](Self::best) immediately valid.
+/// 2. [`think`](Self::think) — spend up to a quantum of node expansions.
+/// 3. [`best`](Self::best) — the best ply-1 plan found so far, at any time.
+///
+/// Object-safe (`&mut dyn Mind`) so a policy holds one behind a trait object and
+/// swaps paradigms without code changes; `Send + Sync` so a venue may move the
+/// session off-thread on native targets (AI3.5).
+pub trait Mind: Send + Sync {
+    /// Root the session at `state`, seeding the ply-1 placements (scored with
+    /// `eval`) under a `max_depth` ply cap. Re-rooting at the **same**
+    /// `(state, max_depth)` is a cheap fingerprint compare that preserves the
+    /// in-flight search; any other root discards it and re-seeds. After this call
+    /// [`best`](Self::best) reflects `state` (it is `Some` unless the state has
+    /// no legal placement).
+    fn reroot(&mut self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8);
+
+    /// Advance the current root's search by up to `quantum` node expansions.
+    ///
+    /// Node-grain minds honor `quantum` exactly; batch-grain minds may overshoot
+    /// by design (the beam expands one whole generation per call) and say so in
+    /// their docs. The quantum only chooses *suspension points*: schedules with
+    /// equal total work reach the identical [`best`](Self::best) regardless of
+    /// slicing. Without a rooted run this is a no-op reporting
+    /// [`ThinkProgress::Exhausted`].
+    fn think(&mut self, quantum: u32, eval: &dyn Evaluator) -> ThinkProgress;
+
+    /// The best ply-1 plan for the current root **right now** (anytime — backed
+    /// up from everything thought so far). `None` before any
+    /// [`reroot`](Self::reroot), or when the root has no legal placement (topped
+    /// out).
+    fn best(&self) -> Option<PlacementPlan>;
+
+    /// Node expansions spent on the current root so far — the meter a caller
+    /// checks against [`SearchBudget::nodes`]. Resets when a re-root discards
+    /// the run.
+    fn nodes_expanded(&self) -> u32;
+}
+
+/// Drive `mind` to its final decision for `state` in one blocking call: reroot,
+/// think until the node budget is spent or the search exhausts, return the best.
+///
+/// This is the **direct-drive** venue — headless benchmarks, tests, and the
+/// blocking [`SyncRunner`](crate::ai::runner::SyncRunner) — where exact budgets
+/// and zero pacing matter. Interactive venues instead spread the same total work
+/// across frames and read the same answer (quantum granularity never changes a
+/// decision).
+pub fn think_to_completion(
+    mind: &mut dyn Mind,
+    state: &SearchState,
+    eval: &dyn Evaluator,
+    budget: SearchBudget,
+) -> Option<PlacementPlan> {
+    // Bounded so a misbehaving mind (one that never exhausts under an uncapped
+    // budget) cannot spin forever; real minds finish in a few coarse calls.
+    const MAX_THINK_CALLS: u32 = 100_000;
+
+    mind.reroot(state, eval, budget.max_depth);
+    for _ in 0..MAX_THINK_CALLS {
+        let remaining = match budget.nodes {
+            0 => u32::MAX, // uncapped: depth / frontier exhaustion terminates
+            cap => cap.saturating_sub(mind.nodes_expanded()),
+        };
+        if remaining == 0 {
+            break;
+        }
+        if mind.think(remaining, eval) == ThinkProgress::Exhausted {
+            break;
+        }
+    }
+    mind.best()
 }

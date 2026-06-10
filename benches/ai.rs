@@ -13,8 +13,8 @@ use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criteri
 
 use common::{first_locked, first_placement, play_pieces, search_state, spawner, Scenario};
 use tetr_online::ai::{
-    movegen, Cc2Evaluator, EvalContext, Evaluator, GreedyPlanner, LinearEvaluator, Planner,
-    SearchBudget,
+    movegen, think_to_completion, Cc2Evaluator, EvalContext, Evaluator, GreedyPlanner,
+    LinearEvaluator, SearchBudget,
 };
 use tetr_online::engine::classify_t_spin;
 
@@ -128,7 +128,10 @@ fn bench_transition(c: &mut Criterion) {
 }
 
 /// The full greedy pick: movegen + per-candidate evaluate + argmax. This is the
-/// per-piece cost the controller pays each time it replans.
+/// per-piece cost the controller pays each time it replans. A fresh mind per
+/// iteration: the session caches a completed decision per root (re-rooting at the
+/// same state is a fingerprint no-op), and the quantity measured here is one
+/// *full* decision, not the cache hit.
 fn bench_plan(c: &mut Criterion) {
     let eval = LinearEvaluator::default();
     let budget = SearchBudget::greedy();
@@ -136,8 +139,14 @@ fn bench_plan(c: &mut Criterion) {
     for scenario in Scenario::ALL {
         let state = search_state(scenario);
         group.bench_function(BenchmarkId::from_parameter(scenario.name()), |b| {
-            let mut planner = GreedyPlanner::new();
-            b.iter(|| black_box(planner.plan(black_box(&state), &eval, budget)));
+            b.iter(|| {
+                black_box(think_to_completion(
+                    &mut GreedyPlanner::new(),
+                    black_box(&state),
+                    &eval,
+                    budget,
+                ))
+            });
         });
     }
     group.finish();

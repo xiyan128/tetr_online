@@ -336,7 +336,7 @@ mod tests {
         // simulated placement. (Plan-to-input pose fidelity is separately pinned by
         // `plan.rs`'s round-trip test; this proves the controller *sequences* it.)
         use crate::ai::eval::LinearEvaluator;
-        use crate::ai::search::{GreedyPlanner, Planner, PlannerStep, SearchBudget};
+        use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
         use crate::ai::SearchState;
         use crate::engine::{lock_and_clear, Board, CellKind};
 
@@ -349,14 +349,13 @@ mod tests {
         // Planner's intended board after placing the first piece (hold-aware, like
         // the controller's own policy).
         let state = SearchState::from_snapshot(&snapshot).unwrap();
-        let plan = match GreedyPlanner::new().plan(
+        let plan = think_to_completion(
+            &mut GreedyPlanner::new(),
             &state,
             &LinearEvaluator::default(),
             SearchBudget::greedy(),
-        ) {
-            PlannerStep::Done(Some(plan)) => plan,
-            other => panic!("expected a plan, got {other:?}"),
-        };
+        )
+        .expect("the first spawn has a legal placement");
         let mut intended = state.board.to_array2d();
         lock_and_clear(&plan.placement.piece, &mut intended);
 
