@@ -439,7 +439,7 @@ impl CellKind {
     pub fn unwrap(self) -> PieceType {
         match self {
             CellKind::Some(piece_type) => piece_type,
-            _ => panic!("CellKind is None or Wall"),
+            _ => panic!("CellKind carries no piece type (None, Wall, or Garbage)"),
         }
     }
 }

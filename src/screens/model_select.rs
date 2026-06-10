@@ -119,7 +119,7 @@ fn update_detail(
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<ModelSelectRoot>>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut registry: ResMut<ModelRegistry>,
     mut next: ResMut<NextState<GameState>>,
 ) {

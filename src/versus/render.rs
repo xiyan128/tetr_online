@@ -99,10 +99,14 @@ pub struct SeatHoldView {
     pub seat: usize,
 }
 
-/// The next-queue avatar container for a seat.
+/// The next-queue avatar container for a seat. The render cache lives ON the
+/// component (not a system `Local`) so it dies with the session — a `Local`
+/// would survive into the next match and skip the first rebuild whenever a
+/// pinned seed re-deals the identical opening queue.
 #[derive(Component)]
 pub struct SeatPreviewView {
     pub seat: usize,
+    cache: Option<Vec<PieceType>>,
 }
 
 /// The cumulative-attack readout under a seat's board.
@@ -243,7 +247,7 @@ fn setup_scene(
             .id();
         let preview = commands
             .spawn((
-                SeatPreviewView { seat },
+                SeatPreviewView { seat, cache: None },
                 Transform::from_translation(Vec3::new(
                     (VersusLayout::BOARD_W as f32 + 0.5) * block,
                     VersusLayout::BOARD_H as f32 * block,
@@ -577,18 +581,16 @@ fn reconcile_preview_views(
     mut commands: Commands,
     assets: Res<GameAssets>,
     seats: Query<(&Seat, &SeatSnapshot)>,
-    views: Query<(Entity, &SeatPreviewView)>,
-    mut cache: Local<[Option<Vec<PieceType>>; 2]>,
+    mut views: Query<(Entity, &mut SeatPreviewView)>,
 ) {
     for (seat, snapshot) in &seats {
-        let index = seat.index.min(1);
         let queue = &snapshot.0.next_queue;
-        if cache[index].as_ref() == Some(queue) {
-            continue;
-        }
-        let Some((view, _)) = views.iter().find(|(_, v)| v.seat == seat.index) else {
+        let Some((view, mut state)) = views.iter_mut().find(|(_, v)| v.seat == seat.index) else {
             continue;
         };
+        if state.cache.as_ref() == Some(queue) {
+            continue;
+        }
         commands.entity(view).despawn_related::<Children>();
         let gap = 0.5 * VersusLayout::BLOCK * VersusLayout::PREVIEW_SCALE;
         let mut y_top = 0.0;
@@ -596,7 +598,7 @@ fn reconcile_preview_views(
             let height = spawn_avatar(&mut commands, &assets, view, piece_type, y_top, false);
             y_top -= height + gap;
         }
-        cache[index] = Some(queue.clone());
+        state.cache = Some(queue.clone());
     }
 }
 

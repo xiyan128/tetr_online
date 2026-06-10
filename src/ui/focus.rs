@@ -139,14 +139,23 @@ pub fn read_nav_action(keys: &ButtonInput<KeyCode>, list: &FocusList) -> Option<
     None
 }
 
-/// The 0-based index of a focusable menu button being clicked (pressed) this
-/// frame, if any — the mouse counterpart to [`read_nav_action`]'s `Select`.
+/// The 0-based index of a focusable menu button clicked **this frame** — the
+/// mouse counterpart to [`read_nav_action`]'s `Select`.
 ///
 /// A screen's activation handler treats this exactly like a keyboard Select:
 /// `read_nav_action(..).or_else(|| clicked_focusable(&clicks).map(NavAction::Select))`.
 /// [`focus_navigation`] already moves the cursor to the hovered row, so the click
 /// and the highlight always agree.
-pub fn clicked_focusable(buttons: &Query<(&Focusable, &Interaction)>) -> Option<usize> {
+///
+/// The query is `Changed<Interaction>`-filtered, so this is **edge-triggered**:
+/// it reports the press once, on the frame `Interaction` becomes `Pressed`.
+/// `Interaction` is a level (it stays `Pressed` while the button is held), and
+/// most screens were masked from that only because their Select action left
+/// the screen — a Select that *stays* on the screen (the versus seat pickers,
+/// Rematch) would otherwise re-fire every frame of one physical click.
+pub fn clicked_focusable(
+    buttons: &Query<(&Focusable, &Interaction), Changed<Interaction>>,
+) -> Option<usize> {
     buttons.iter().find_map(|(focusable, interaction)| {
         (*interaction == Interaction::Pressed).then_some(focusable.index)
     })
@@ -176,5 +185,25 @@ mod tests {
         let mut list = FocusList::new(0);
         list.move_by(1);
         assert_eq!(list.index, 0);
+    }
+
+    /// A physical click holds `Interaction::Pressed` for several frames; a
+    /// Select that *stays on its screen* (the versus seat picker, Rematch)
+    /// must fire once per click, not once per frame — the `Changed` filter on
+    /// the query is what provides the edge.
+    #[test]
+    fn a_held_click_reports_exactly_once() {
+        let mut world = World::new();
+        world.spawn((Focusable::new(1), Interaction::Pressed));
+
+        fn probe(clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>) -> Option<usize> {
+            clicked_focusable(&clicks)
+        }
+
+        // Frame 1: the press edge (the component was just added ⇒ changed).
+        assert_eq!(world.run_system_cached(probe).unwrap(), Some(1));
+        // Frames 2..n: still held, unchanged — no re-fire.
+        assert_eq!(world.run_system_cached(probe).unwrap(), None);
+        assert_eq!(world.run_system_cached(probe).unwrap(), None);
     }
 }

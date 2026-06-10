@@ -170,7 +170,7 @@ fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<VersusSetupRoot>>,
     rows: Query<(&Focusable, Option<&SeatRow>, Has<StartRow>)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     registry: Res<ModelRegistry>,
     mut config: ResMut<VersusConfig>,
     mut next: ResMut<NextState<GameState>>,

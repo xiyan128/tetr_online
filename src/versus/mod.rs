@@ -183,10 +183,12 @@ impl Plugin for VersusPlugin {
             )
             .add_systems(
                 Update,
-                (advance_match_clock, detect_match_end)
-                    .chain()
-                    .run_if(in_state(VersusPhase::Running)),
+                advance_match_clock.run_if(in_state(VersusPhase::Running)),
             )
+            // A press latched in the same render frame as a pause (a frame
+            // that ran zero slices) must not fire on the first slice after a
+            // resume, minutes later.
+            .add_systems(OnEnter(VersusPhase::Running), reset_human_latch)
             .add_plugins(render::VersusRenderPlugin)
             .add_plugins(overlay::VersusOverlayPlugin)
             .add_plugins(feel::VersusFeelPlugin);
@@ -320,7 +322,25 @@ type SeatStepQuery<'w, 's> = Query<
     ),
 >;
 
-fn versus_step(mut seats: SeatStepQuery, mut bots: NonSendMut<VersusBots>) {
+fn versus_step(
+    mut seats: SeatStepQuery,
+    bots: Option<NonSendMut<VersusBots>>,
+    outcome: Option<Res<MatchOutcome>>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<VersusPhase>>,
+) {
+    // `Option`: every legal path into `Running` passes through the `OnEnter`
+    // that seats the bots, but a dev-inspector state poke does not — be inert
+    // rather than panic the app.
+    let Some(mut bots) = bots else {
+        return;
+    };
+    // The match ended in an earlier slice of this same render frame (the
+    // `Over` transition only applies between frames): the outcome is settled,
+    // so later slices must not keep playing into it.
+    if outcome.is_some() {
+        return;
+    }
     // Phase 1: step every seat with its participant's frame.
     let mut slice_events: [Vec<EngineEvent>; 2] = [Vec::new(), Vec::new()];
     for (seat, mut engine, snapshot, _, _, human) in &mut seats {
@@ -377,6 +397,30 @@ fn versus_step(mut seats: SeatStepQuery, mut bots: NonSendMut<VersusBots>) {
         snapshot.0 = engine.0.snapshot();
         events.0.extend(slice_events[seat.index].iter().cloned());
     }
+
+    // Phase 4: death check, **per slice** — several slices can run in one
+    // render frame (catch-up after a hitch), and the first death ends the
+    // match in *its* slice. A frame-granular check would keep both engines
+    // playing to the end of the frame and could score "both died this frame"
+    // as a draw when one seat in fact outlived the other; a draw is only a
+    // death in the *same slice*. The commands apply between slices, so the
+    // guard above freezes everything after this one.
+    let mut dead = [false; 2];
+    for (seat, _, snapshot, _, _, _) in &seats {
+        if seat.index < 2 {
+            dead[seat.index] = snapshot.0.game_over.is_some();
+        }
+    }
+    if dead[0] || dead[1] {
+        let winner = match (dead[0], dead[1]) {
+            (true, true) => None,
+            (true, false) => Some(1),
+            _ => Some(0),
+        };
+        info!("versus over: winner {winner:?}");
+        commands.insert_resource(MatchOutcome { winner });
+        next.set(VersusPhase::Over);
+    }
 }
 
 /// Total net attack in a slice's events.
@@ -395,32 +439,15 @@ fn advance_match_clock(time: Res<Time>, mut clock: ResMut<MatchClock>) {
     clock.0 += time.delta_secs();
 }
 
-/// End the match when a seat dies. Reads the published snapshots
-/// (authoritative) rather than racing the event list; both dead in the same
-/// slice is a draw.
-fn detect_match_end(
-    seats: Query<(&Seat, &SeatSnapshot)>,
-    mut commands: Commands,
-    mut next: ResMut<NextState<VersusPhase>>,
-) {
-    let mut dead = [false; 2];
-    for (seat, snapshot) in &seats {
-        if seat.index < 2 {
-            dead[seat.index] = snapshot.0.game_over.is_some();
-        }
+/// Drop any stale latched edges/held flags when the match (re)starts running —
+/// a hard drop pressed in the instant of pausing stays latched through the
+/// whole pause otherwise (the single-player latch has the same hazard; here it
+/// is closed).
+fn reset_human_latch(mut humans: Query<&mut HumanSeat>) {
+    for mut human in &mut humans {
+        human.edges.reset();
+        human.held = RawKeyboardFrame::default();
     }
-    if !dead[0] && !dead[1] {
-        return;
-    }
-    let winner = match (dead[0], dead[1]) {
-        (true, true) => None,
-        (true, false) => Some(1),
-        (false, true) => Some(0),
-        (false, false) => unreachable!(),
-    };
-    info!("versus over: winner {winner:?}");
-    commands.insert_resource(MatchOutcome { winner });
-    next.set(VersusPhase::Over);
 }
 
 /// Restart the match in place (rematch): despawn the seat entities and rerun
@@ -840,6 +867,47 @@ mod tests {
             .map(|(_, children)| children.len())
             .expect("seat 1 has a meter");
         assert_eq!(segments, 2, "two queued batches render as two segments");
+    }
+
+    #[test]
+    fn death_is_scored_in_its_slice_not_at_frame_end() {
+        // Several fixed slices run per render frame after a hitch; the first
+        // death must end the match in ITS slice. Bury both seats — they die a
+        // few slices apart (seat 1 carries extra board cells, so its bot
+        // plays a different, slower-dying game) — and the verdict must name a
+        // winner: under frame-granular detection both would read dead at the
+        // end of the chunk and mis-score a draw.
+        let mut app = headless_versus_app(bot_match(7));
+        {
+            let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
+            for (seat, mut engine) in query.iter_mut(app.world_mut()) {
+                for _ in 0..6 {
+                    engine.0.queue_garbage(8);
+                }
+                if seat.index == 1 {
+                    // A small asymmetry so the deaths land in different slices.
+                    engine.0.set_cell(
+                        0,
+                        0,
+                        crate::engine::CellKind::Some(crate::engine::PieceType::J),
+                    );
+                }
+            }
+        }
+        for _ in 0..60 {
+            tick_fixed(&mut app, 10); // multi-slice frames, like a hitch
+            if app.world().get_resource::<MatchOutcome>().is_some() {
+                break;
+            }
+        }
+        let outcome = *app
+            .world()
+            .get_resource::<MatchOutcome>()
+            .expect("both seats buried: someone must die");
+        assert!(
+            outcome.winner.is_some(),
+            "deaths slices apart in one frame must crown the survivor, not draw"
+        );
     }
 
     #[test]

@@ -88,7 +88,7 @@ fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut sandbox: ResMut<AiSandbox>,
     mut next: ResMut<NextState<GameState>>,
 ) {

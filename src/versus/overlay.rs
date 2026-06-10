@@ -32,10 +32,15 @@ impl Plugin for VersusOverlayPlugin {
                 Update,
                 tick_countdown.run_if(in_state(VersusPhase::Countdown)),
             )
-            // Pause
+            // Pause (and the countdown's escape hatch: Esc before GO returns
+            // to the setup screen — you can always leave a match).
             .add_systems(
                 Update,
                 pause_on_keybind.run_if(in_state(VersusPhase::Running)),
+            )
+            .add_systems(
+                Update,
+                countdown_escape.run_if(in_state(VersusPhase::Countdown)),
             )
             .add_systems(OnEnter(VersusPhase::Paused), spawn_pause_overlay)
             .add_systems(
@@ -54,7 +59,13 @@ impl Plugin for VersusOverlayPlugin {
             )
             .add_systems(
                 Update,
-                apply_rematch.run_if(resource_exists::<RematchRequested>),
+                apply_rematch.run_if(
+                    // The state gate is belt-and-braces: the only inserter is
+                    // Over-gated, but a stray request must never reseat a
+                    // match outside `Versus` (the seats would leak past their
+                    // DespawnOnExit and the phase would dangle).
+                    resource_exists::<RematchRequested>.and(in_state(GameState::Versus)),
+                ),
             );
     }
 }
@@ -128,6 +139,16 @@ fn tick_countdown(
     }
 }
 
+/// Esc during the countdown backs out to the setup screen. Pausing here would
+/// be wrong (entering `Paused` exits `Countdown`, despawning the count
+/// mid-beat), and being trapped for 2.6 s would be worse — the setup screen is
+/// where you were two seconds ago.
+fn countdown_escape(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<GameState>>) {
+    if keys.just_pressed(KeyCode::Escape) {
+        next.set(GameState::VersusSetup);
+    }
+}
+
 // ---------------------------------------------------------------------------
 // Pause
 // ---------------------------------------------------------------------------
@@ -187,7 +208,7 @@ fn pause_menu_activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<PauseRoot>>,
     actions: Query<(&Focusable, &PauseAction)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut next_phase: ResMut<NextState<VersusPhase>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
@@ -317,7 +338,7 @@ fn result_menu_activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<ResultRoot>>,
     actions: Query<(&Focusable, &ResultAction)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut commands: Commands,
     mut next_state: ResMut<NextState<GameState>>,
 ) {

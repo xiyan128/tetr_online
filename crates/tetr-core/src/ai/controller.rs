@@ -146,6 +146,12 @@ struct PieceSignature {
     /// changes `locked_cells`), so the total is a faithful change detector.
     /// Single-player and blinded bots always see `0` here: behaviour is
     /// byte-identical outside live versus.
+    ///
+    /// Known sharp edge for a future *aware* live bot (none ships yet): an
+    /// arrival mid-maneuver also cancels the remaining frames, and if the
+    /// piece is already grounded the re-paid reaction can race the lock-down
+    /// timer into a timeout lock at a transit pose. If that bites, defer the
+    /// pending-triggered replan until the plan queue is empty.
     pending_lines: u32,
 }
 

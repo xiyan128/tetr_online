@@ -32,14 +32,21 @@ pub struct VersusFeelPlugin;
 impl Plugin for VersusFeelPlugin {
     fn build(&self, app: &mut App) {
         app
-            // Idempotent: `ScreenShakePlugin` owns this in the full game; the
-            // init keeps a headless versus app (tests) self-sufficient.
+            // Idempotent: `ScreenShakePlugin`/`GamePlugin` own these in the
+            // full game; the inits keep a headless versus app self-sufficient.
             .init_resource::<ScreenShake>()
+            .init_resource::<crate::vfx::VfxToggles>()
             .add_systems(OnEnter(GameState::Versus), reset_versus_shake)
             .add_systems(
                 Update,
-                (emit_seat_audio, spawn_attack_pops, feed_versus_trauma)
-                    .run_if(in_state(VersusPhase::Running)),
+                (emit_seat_audio, spawn_attack_pops).run_if(in_state(VersusPhase::Running)),
+            )
+            // Same kill-switch as the single-player trauma feed (the dev VFX
+            // panel); the apply below keeps running and bleeds to rest.
+            .add_systems(
+                Update,
+                feed_versus_trauma
+                    .run_if(in_state(VersusPhase::Running).and(crate::vfx::shake_enabled)),
             )
             .add_systems(
                 Update,
@@ -67,7 +74,11 @@ fn emit_seat_audio(mut commands: Commands, seats: Query<(&SeatEvents, Option<&Hu
     for (events, human) in &seats {
         for event in &events.0 {
             match event {
-                EngineEvent::Locked { lines_cleared, .. } => {
+                // Clears sound for both seats; the no-clear lock thunk is a
+                // manoeuvre sound (a bot-vs-bot match would be a metronome).
+                EngineEvent::Locked { lines_cleared, .. }
+                    if *lines_cleared > 0 || human.is_some() =>
+                {
                     commands.trigger(AudioCue::Locked(*lines_cleared));
                 }
                 // The rise thunk: your board just got heavier.
