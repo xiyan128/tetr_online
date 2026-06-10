@@ -13,6 +13,18 @@
 //! end: wins by death, cap tiebreaks, and mean margin — climbed weights ship
 //! only if validation clears, never on the train objective.
 //!
+//! RUN RECORD (2026-06-10, 1h, defaults, rain 0): train objective 0 → +376.4
+//! over 127 iters / 7 accepts — and validation came back DEAD EVEN (deaths
+//! 19-19, tiebreaks 11-14, margin −0.9): pure seed overfitting from reusing 24
+//! CRN seeds across every candidate. The gate worked; nothing shipped. Two
+//! durable facts from the run: the paired objective is exactly fair (the
+//! identical-weights baseline evaluates to +0.0), and candidate-vs-incumbent
+//! matches are ~59% death-decisive even WITHOUT rain (asymmetric styles kill;
+//! only same-weights mirrors are bland) — the real format has live death
+//! signal. Next run's regularization: more/rotating train seeds, an
+//! acceptance bar above noise (re-evaluate the incumbent or SPRT per
+//! candidate), and a periodic held-out check during the climb.
+//!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train), VAL_SEEDS (32),
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
 //!      SIGMA (0.15), CLIMB_SEED (1).
