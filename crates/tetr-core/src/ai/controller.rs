@@ -57,10 +57,12 @@
 use core::time::Duration;
 use std::collections::VecDeque;
 
+use crate::ai::eval::{Cc2Evaluator, Cc2Weights};
 use crate::ai::handicap::Handicap;
 use crate::ai::plan::placement_to_inputs;
 use crate::ai::policy::{Decision, Policy, SearchPolicy};
 use crate::ai::runner::{DecisionRunner, SyncRunner};
+use crate::ai::search::{BestFirstPlanner, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{EngineSnapshot, InputFrame, PieceType};
 use crate::player::PlayerController;
@@ -128,6 +130,32 @@ impl AiController {
     /// default AI seed — the convenient construction for the game and sandbox.
     pub fn beatable() -> Self {
         Self::new(Handicap::default(), DEFAULT_AI_SEED)
+    }
+
+    /// The strongest shipped bot: a best-first graph search (per-root transposition)
+    /// over the Cold Clear 2 evaluator with the APP-climbed attack weights
+    /// ([`Cc2Weights::attack_tuned`]), at the interactive operating point below
+    /// (~25 ms/piece native release — watchable, and fine for wasm). This is the
+    /// **one home** for "the best model": the Watch-AI registry's best-first entry
+    /// and the wasm embed both build through here, so the operating point can never
+    /// fork between surfaces. The handicap dials (reaction delay + imperfection)
+    /// still apply, so even the strongest brain stays beatable on demand.
+    pub fn attack(handicap: Handicap, seed: u64) -> Self {
+        /// Total best-first node expansions per decision — the quality/latency dial.
+        /// Headless benches run far higher, where quality scales with budget at
+        /// proportional latency; this is the interactive point.
+        const ATTACK_NODE_BUDGET: u32 = 150;
+        /// Ply cap; best-first is depth-capped by the visible queue, not width.
+        const ATTACK_DEPTH: u8 = 6;
+
+        let policy = SearchPolicy::new(
+            Box::new(BestFirstPlanner::new()),
+            Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+            SearchBudget::best_first(ATTACK_NODE_BUDGET, ATTACK_DEPTH),
+            handicap.imperfection,
+            seed,
+        );
+        Self::with_policy(Box::new(policy), handicap.reaction)
     }
 
     /// A controller around an explicit [`Policy`], wrapped in the synchronous

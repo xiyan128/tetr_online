@@ -104,11 +104,15 @@ fn event_tag(e: &EngineEvent) -> Option<u8> {
     }
 }
 
-/// Build the AI controller for a fresh game — the linear DT-20 bot at the given
-/// handicap (reaction delay + imperfection), which defines the embed's "click to
-/// take over" / beatability contract.
+/// Build the AI controller for a fresh game — the strongest shipped bot
+/// ([`AiController::attack`]: best-first search over the tuned CC2 attack
+/// evaluator, the same brain as the game's "Best-First Attack" model) at the
+/// given handicap (reaction delay + imperfection), which still defines the
+/// embed's "click to take over" / beatability contract: the dials degrade even
+/// this brain into a beatable opponent, and at a fixed handicap the run stays
+/// byte-identical per seed (the search is deterministic — no RNG, no clock).
 fn make_ai(handicap: Handicap, seed: u32) -> AiController {
-    AiController::new(handicap, ai_seed(seed))
+    AiController::attack(handicap, ai_seed(seed))
 }
 
 /// Which controller is currently driving the engine.
