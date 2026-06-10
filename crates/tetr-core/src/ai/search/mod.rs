@@ -135,6 +135,13 @@ impl PlacementPlan {
     }
 }
 
+/// The backed-up score of a **dead** branch (lock-out, overflowing rise, or a
+/// blocked spawn — see [`SearchState::dead`]): far below any real evaluation so
+/// survival always outranks death, yet far above `i32::MIN` so summing path
+/// rewards onto it can never overflow. Death is absolute — accumulated rewards
+/// along the path cannot rescue a line the engine would end.
+pub(crate) const DEATH_SCORE: i32 = -100_000_000;
+
 /// Fork `parent`, classify the T-spin against the PRE-lock board (engine order), and
 /// commit `placement` into the clone via [`SearchState::commit_placement`] — **the** one
 /// place the per-child "fork → classify → commit" ritual lives. Returns the advanced
@@ -170,6 +177,12 @@ pub(crate) fn score_child(
     ctx: EvalContext,
 ) -> (SearchState, Value, Reward) {
     let (child, lock, t_spin) = commit_child(parent, placement);
+    if child.dead {
+        // The engine's game ends on this branch: the board the evaluator would
+        // read is the truncated remnant of a death, not a position — score it
+        // as death and skip the eval.
+        return (child, Value(DEATH_SCORE), Reward(0));
+    }
     let (value, reward) = eval.evaluate_cols(&lock, child.board.view(), t_spin, ctx);
     (child, value, reward)
 }

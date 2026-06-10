@@ -106,6 +106,19 @@ pub fn scenario_engine(scenario: Scenario) -> Engine {
     engine
 }
 
+/// A [`SearchState`] for `scenario` with `batches` one-line garbage batches
+/// queued against the player — the pressured-fixture variant: the per-child
+/// garbage transition (cancel on clears, capped rising on clear-less locks)
+/// only runs when pending is non-empty, so the plain fixtures never exercise
+/// its cost.
+pub fn pressured_search_state(scenario: Scenario, batches: u32) -> SearchState {
+    let mut engine = scenario_engine(scenario);
+    for _ in 0..batches {
+        engine.queue_garbage(1);
+    }
+    SearchState::from_snapshot(&engine.snapshot()).expect("scenario fixture has an active piece")
+}
+
 /// A [`SearchState`] for the given scenario — the universal fixture.
 ///
 /// `SearchState` exposes public `board` and `active` fields, so this one value

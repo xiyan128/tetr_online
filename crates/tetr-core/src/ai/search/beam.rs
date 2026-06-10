@@ -191,6 +191,12 @@ impl BeamPlanner {
         run.expanded += run.frontier.len() as u32;
 
         for parent in &run.frontier {
+            if parent.state.dead {
+                // A dead branch is terminal: its DEATH_SCORE back-up already
+                // credited its root; it expands to nothing (and never
+                // speculates).
+                continue;
+            }
             if parent.state.queue.is_empty() {
                 // Past the visible queue: speculate over the bag if enabled, else this
                 // node is terminal (no concrete next piece to advance the active). A
@@ -251,6 +257,13 @@ impl BeamPlanner {
 
         let mut next: Vec<BeamNode> = Vec::with_capacity(pending.len());
         for (p, (value, reward)) in pending.into_iter().zip(scores) {
+            // Death is absolute: override the batched eval (the truncated board
+            // it scored is a death remnant, not a position).
+            let (value, reward) = if p.state.dead {
+                (crate::ai::eval::Value(super::DEATH_SCORE), Reward(0))
+            } else {
+                (value, reward)
+            };
             // Discount this move's reward by the branch's speculative weight; the
             // board Value is kept whole (the resulting board is real regardless). A
             // concrete branch (weight 1.0) keeps the integer reward exactly, with no

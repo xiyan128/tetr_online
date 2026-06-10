@@ -153,6 +153,13 @@ pub struct SearchState {
     /// value combo attack for the *next* clear. Tracked along the path like [`b2b`];
     /// a search reads the pre-placement value to score a clear's combo bonus.
     pub combo: u32,
+    /// The engine's game ended on this path — a dying lock (lock-out), an
+    /// overflowing garbage rise, or a blocked spawn. The planners treat a dead
+    /// state as a terminal leaf scored at
+    /// [`DEATH_SCORE`](crate::ai::search::DEATH_SCORE) and never expand it:
+    /// without this, a death's truncated board can evaluate BETTER than a
+    /// cramped survival, and the search walks futures the engine forbids.
+    pub dead: bool,
     /// The pending-garbage queue against this player (oldest batch first),
     /// mirrored from the snapshot so the search models cancellation and rising
     /// exactly — see [`transition_garbage`](Self::transition_garbage). Inline
@@ -198,6 +205,7 @@ impl SearchState {
             bag,
             b2b: snapshot.back_to_back_active,
             combo: snapshot.combo, // resume the real in-game combo, so the search can value continuing it
+            dead: false,           // a snapshot with an active piece is a live game
             pending: snapshot.pending_garbage.iter().copied().collect(),
             garbage_cap: config.garbage_cap,
             board_width: config.board_width,
@@ -332,7 +340,7 @@ impl SearchState {
         // `placement.piece` — the swapped-in piece when `used_hold`, else the
         // current active at its resting pose. Locking the placement's piece (not
         // `self.active`) is what makes the swapped-in piece active without a deal.
-        self.lock_and_transition(&placement.piece.clone())
+        self.lock_and_transition(&placement.piece)
     }
 
     /// The engine-order lock shared by every commit path: classify the T-spin
@@ -344,9 +352,13 @@ impl SearchState {
         let t_spin = classify_t_spin(piece, &self.board);
         let lock_out = is_lock_out(piece.piece(), piece.origin(), self.visible_height);
         let outcome = self.board.lock_piece(piece);
-        // A dying lock moves no garbage (the engine's rule: death takes
-        // priority over offense — no cancellation, no rising).
-        if !lock_out {
+        if lock_out {
+            // A dying lock moves no garbage (the engine's rule: death takes
+            // priority over offense) and ends the branch.
+            self.dead = true;
+        } else if !self.pending.is_empty() {
+            // Empty queue: both transition branches are no-ops — skipping them
+            // keeps the solo / no-pressure hot path free of garbage overhead.
             self.transition_garbage(&outcome, t_spin);
         }
         self.update_b2b(&outcome, t_spin);
@@ -369,9 +381,16 @@ impl SearchState {
             let attack = attack_lines(action, b2b_bonus, self.combo, self.board.is_empty());
             garbage::cancel(&mut self.pending, attack);
         } else {
+            let mut overflow = false;
             for batch in garbage::rise(&mut self.pending, self.garbage_cap) {
-                self.board
+                overflow |= self
+                    .board
                     .insert_garbage_lines(batch.lines as usize, batch.hole_col);
+            }
+            if overflow {
+                // The engine latches a BlockOut on this same verdict: the rise
+                // forced the stack past the ceiling, the branch is dead.
+                self.dead = true;
             }
         }
     }
@@ -424,7 +443,13 @@ impl SearchState {
     /// convention), and the speculative commit paths deal the bag explicitly
     /// before spawning.
     fn spawn(&mut self, piece_type: crate::engine::PieceType) {
-        let origin = Piece::from(piece_type).spawn_coords(self.board_width, self.visible_height);
+        let piece = Piece::from(piece_type);
+        let origin = piece.spawn_coords(self.board_width, self.visible_height);
+        if piece.collide_with(&self.board, origin) {
+            // The engine's spawn block-out (`is_block_out`): the next piece has
+            // nowhere to appear — reachable in-search once garbage can rise.
+            self.dead = true;
+        }
         self.active = ActivePiece::new(piece_type, origin);
     }
 
@@ -451,6 +476,7 @@ impl SearchState {
             bag: BagState::full(),
             b2b: false,
             combo: 0,
+            dead: false,
             pending: BatchQueue::new(),
             garbage_cap: 8, // the engine default; garbage tests inject their own pending
             board_width,
@@ -1161,8 +1187,19 @@ mod tests {
 
             let after = engine.snapshot();
             if after.game_over.is_some() {
-                break; // a lock-out/block-out ended the real game: nothing to compare
+                // The strongest form of the gate: the engine died executing our
+                // placement (a rise overflow / blocked spawn), and the search's
+                // model must have seen that death coming.
+                assert!(
+                    predicted.dead,
+                    "the engine died at piece {piece_index} but the search predicted a live future"
+                );
+                break;
             }
+            assert!(
+                !predicted.dead,
+                "the search predicted death at piece {piece_index} but the engine plays on"
+            );
 
             let mut engine_cells: Vec<(isize, isize)> =
                 after.board_cells.iter().map(|c| (c.x, c.y)).collect();
@@ -1193,6 +1230,97 @@ mod tests {
         // cancellation MATH is pinned deterministically below instead).
         assert!(rises > 0, "the scenario never made garbage rise");
         let _ = sends;
+    }
+
+    /// A lock entirely above the skyline (lock-out) ends the engine's game:
+    /// the branch must be marked dead and move no garbage.
+    #[test]
+    fn a_dying_lock_marks_the_branch_dead() {
+        use crate::engine::GarbageBatch;
+        let board = Board::with_top_margin(10, 20, 20);
+        // An O resting on a pillar so high its cells sit at/above the skyline.
+        let mut state = SearchState::for_test(
+            board,
+            ActivePiece::new(crate::engine::PieceType::O, (3, 20)),
+            None,
+            std::iter::empty(),
+        );
+        state.pending.push(GarbageBatch {
+            lines: 2,
+            hole_col: 0,
+        });
+
+        state.commit();
+
+        assert!(state.dead, "a lock-out is terminal");
+        assert_eq!(
+            state.pending.len(),
+            1,
+            "a dying lock moves no garbage (no cancel, no rise)"
+        );
+    }
+
+    /// A rise that forces the stack past the ceiling is the engine's BlockOut:
+    /// the branch must be marked dead, not scored as a conveniently truncated
+    /// (lower!) board.
+    #[test]
+    fn an_overflowing_rise_marks_the_branch_dead() {
+        use crate::engine::GarbageBatch;
+        let mut board = Board::new(10, 12);
+        for y in 8..12 {
+            board.set(0, y, CellKind::Some(crate::engine::PieceType::J));
+        }
+        let active = crate::ai::movegen::spawn_piece(crate::engine::PieceType::O, 10, 12);
+        let mut state = SearchState::for_test(board, active, None, std::iter::empty());
+        state.pending.push(GarbageBatch {
+            lines: 8,
+            hole_col: 5,
+        });
+
+        // Drop the O to the floor (clear-less), triggering the rise.
+        while let Some(origin) = state.active.piece().try_move(
+            &state.board,
+            state.active.origin(),
+            crate::engine::MoveDirection::Down,
+        ) {
+            state
+                .active
+                .move_to(origin, crate::engine::PieceAction::Fall);
+        }
+        state.commit();
+
+        assert!(state.dead, "an overflowing rise is a BlockOut");
+    }
+
+    /// A spawn into occupied cells is the engine's BlockOut: the branch must be
+    /// marked dead instead of searching from an impossible pose.
+    #[test]
+    fn a_blocked_spawn_marks_the_branch_dead() {
+        let mut board = Board::new(10, 12);
+        // The top two visible rows filled except one column: not clearable,
+        // and any spawn pose collides.
+        for y in [10, 11] {
+            for x in 0..9 {
+                board.set(x, y, CellKind::Some(crate::engine::PieceType::J));
+            }
+        }
+        let active = crate::ai::movegen::spawn_piece(crate::engine::PieceType::O, 10, 12);
+        let mut state = SearchState::for_test(board, active, None, [crate::engine::PieceType::T]);
+
+        // Drop to the floor (no clear, no pending), then the T must spawn into
+        // the filled rows.
+        while let Some(origin) = state.active.piece().try_move(
+            &state.board,
+            state.active.origin(),
+            crate::engine::MoveDirection::Down,
+        ) {
+            state
+                .active
+                .move_to(origin, crate::engine::PieceAction::Fall);
+        }
+        state.commit();
+
+        assert!(state.dead, "spawning into the stack is a BlockOut");
     }
 
     /// Deterministic pin of the mirrored cancellation math: a Tetris that

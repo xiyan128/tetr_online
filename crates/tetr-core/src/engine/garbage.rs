@@ -49,9 +49,12 @@ pub struct GarbageBatch {
 }
 
 /// The batch list both rule owners share: the engine's live queue and the
-/// search's mirrored pending state. Inline up to 4 batches (the common case is
-/// 0-2), so the search's fork-per-placement clone stays off the heap.
-pub(crate) type BatchQueue = SmallVec<[GarbageBatch; 4]>;
+/// search's mirrored pending state. Inline up to 8 batches, so the search's
+/// fork-per-placement clone stays off the heap: under sustained fire a
+/// downstacking bot genuinely accumulates one batch per incoming attack
+/// (clears defer rising), and a heap spill would turn EVERY child clone into a
+/// malloc — measured at ~+38% per decision when it was capped at 4.
+pub(crate) type BatchQueue = SmallVec<[GarbageBatch; 8]>;
 
 /// Cancel pending garbage with `attack` lines, **oldest batch first**,
 /// line-for-line. Returns the attack left over after cancellation — the lines

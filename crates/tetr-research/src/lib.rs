@@ -19,8 +19,8 @@ use tetr_core::ai::{
     AiController, BeamPlanner, BestFirstPlanner, Handicap, Policy, SearchBudget, SearchPolicy,
 };
 use tetr_core::engine::{
-    attack_lines, CellKind, Engine, EngineConfig, EngineEvent, EngineScoreAction, GoalSystem,
-    PieceType, MAX_LEVEL,
+    attack_lines, CellKind, Engine, EngineConfig, EngineEvent, EngineScoreAction, EngineSnapshot,
+    GoalSystem, InputFrame, PieceType, MAX_LEVEL,
 };
 use tetr_core::player::{drive_engine, PlayerController};
 
@@ -749,6 +749,25 @@ pub fn evaluate_versus(
         mean_attack_a,
         mean_attack_b,
         outcomes,
+    }
+}
+
+/// A controller wrapper that hides the pending-garbage queue from its inner
+/// bot: the snapshot it forwards has `pending_garbage` emptied, so the bot
+/// plans as if no attack were queued — the *blind* arm of the
+/// garbage-awareness A/B. Everything else (weights, search, venue, seeds) stays
+/// identical, so a win-rate gap between a wrapped and an unwrapped copy of the
+/// same bot measures exactly the value of seeing (and modeling) the queue.
+pub struct BlindToGarbage(pub Box<dyn PlayerController>);
+
+impl PlayerController for BlindToGarbage {
+    fn poll(&mut self, snapshot: &EngineSnapshot) -> InputFrame {
+        if snapshot.pending_garbage.is_empty() {
+            return self.0.poll(snapshot); // nothing to hide: skip the clone
+        }
+        let mut blinded = snapshot.clone();
+        blinded.pending_garbage.clear();
+        self.0.poll(&blinded)
     }
 }
 
