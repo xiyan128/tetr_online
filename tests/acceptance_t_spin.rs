@@ -276,6 +276,9 @@ fn zero_line_t_spin_preserves_existing_b2b() {
                     total_score: 800,
                     back_to_back_bonus: false,
                 },
+                // Tetris (4) + perfect clear (10): versus attack now reported
+                // in-band (nothing pending, so net == gross).
+                EngineEvent::AttackSent { lines: 14 },
                 EngineEvent::Spawned { .. },
             ]
         ),
@@ -386,6 +389,8 @@ fn mini_t_spin_double_scores_400_and_starts_back_to_back() {
                     total_score: 400,
                     back_to_back_bonus: false, // first qualifying clear: starts, not continues
                 },
+                // Mini T-Spin Double base attack (1 line, the unified table).
+                EngineEvent::AttackSent { lines: 1 },
                 EngineEvent::Spawned { .. },
             ]
         ),

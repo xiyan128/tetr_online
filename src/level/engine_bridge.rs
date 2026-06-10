@@ -140,6 +140,9 @@ pub fn engine_config_from_level(config: &LevelConfig) -> EngineConfig {
         lock_down_seconds: config.locking_duration.as_secs_f32(),
         starting_level: crate::engine::MIN_LEVEL,
         goal_system: crate::engine::GoalSystem::Fixed,
+        // Single-player: nothing feeds the garbage queue, so the cap is inert
+        // until a versus mode arms it. The engine default is the standard 8.
+        garbage_cap: EngineConfig::default().garbage_cap,
     }
 }
 
