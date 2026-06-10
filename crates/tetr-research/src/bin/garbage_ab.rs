@@ -69,11 +69,18 @@ fn main() {
     let make: Box<dyn Fn(u64) -> Box<dyn PlayerController>> = match bot.as_str() {
         "bf" => {
             let depth = if depth < 4 { 6 } else { depth };
+            // WEIGHTS=attack raises the duel to the shipped operating point's
+            // attack output — the pressure regime where deaths (the verdict
+            // awareness exists for) actually occur.
+            let weights = match std::env::var("WEIGHTS").as_deref() {
+                Ok("attack") => Cc2Weights::attack_tuned(),
+                _ => Cc2Weights::DEFAULT,
+            };
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies",
                 seeds.len()
             );
-            Box::new(move |s| bestfirst_cc2_weights_bot(s, nodes, depth, Cc2Weights::DEFAULT))
+            Box::new(move |s| bestfirst_cc2_weights_bot(s, nodes, depth, weights))
         }
         _ => {
             eprintln!(
