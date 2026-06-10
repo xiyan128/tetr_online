@@ -82,7 +82,16 @@ impl BitBoard {
     }
 
     /// Pack an engine [`Board`]'s occupancy into a `BitBoard` (colour discarded).
+    ///
+    /// The mirror's envelope is [`MAX_WIDTH`] × 64 rows; a larger board would be
+    /// silently truncated by the clamps below, so it is rejected in debug builds.
     pub fn from_board(board: &Board) -> Self {
+        debug_assert!(
+            board.width() <= MAX_WIDTH && board.backing_rows() <= 64,
+            "BitBoard mirrors boards up to {MAX_WIDTH}x64; a {}x{} board would be truncated",
+            board.width(),
+            board.backing_rows(),
+        );
         let mut bb = Self::empty(board.width(), board.height(), board.backing_rows());
         for (x, col) in board.column_bits().iter().enumerate().take(MAX_WIDTH) {
             bb.cols[x] = *col;
@@ -282,6 +291,11 @@ impl ColumnView<'_> {
 /// behind [`BitBoard::full_rows`] and the engine's [`lock_and_clear`](super::lock_and_clear),
 /// so the search bitboard and the engine board can never disagree on what cleared.
 pub(crate) fn full_rows(cols: &[u64]) -> Vec<isize> {
+    // A zero-width board AND-folds to `!0` ("all 64 rows full"); there are no
+    // columns, so there are no rows to clear — not 64 phantom ones.
+    if cols.is_empty() {
+        return Vec::new();
+    }
     // AND-fold every column: a row is full iff its bit is set in all columns.
     let full = cols.iter().fold(!0u64, |acc, &c| acc & c);
     // Hot common case — nothing full (most locks clear no line): skip the per-row scan

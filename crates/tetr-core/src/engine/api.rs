@@ -255,13 +255,15 @@ impl Engine {
         self.board.is_empty()
     }
 
-    /// Test-only seam: paint a single board cell, bypassing the per-frame loop.
+    /// Board-setup seam: paint a single board cell, bypassing the per-frame loop.
     ///
     /// Returns `true` if `(x, y)` is inside the board. Exists so the acceptance
-    /// suite (`tests/acceptance_*.rs`) can construct board preconditions that are
-    /// not reachable deterministically through [`Engine::step`] alone — the same
-    /// thing the in-crate unit tests do via the private `board` field. It only
-    /// forwards to [`Board::set`]; it adds no rule behavior of its own.
+    /// suite (`tests/acceptance_*.rs`) and the research harness (`tetr-research`'s
+    /// crafted cheese boards) can construct board preconditions that are not
+    /// reachable deterministically through [`Engine::step`] alone — the same thing
+    /// the in-crate unit tests do via the private `board` field. It only forwards
+    /// to [`Board::set`]; it adds no rule behavior of its own. Hidden from docs
+    /// because it is a harness seam, not part of the game-facing API.
     #[doc(hidden)]
     pub fn set_cell(&mut self, x: isize, y: isize, cell: CellKind) -> bool {
         self.board.set(x, y, cell)
@@ -270,14 +272,19 @@ impl Engine {
     /// Raise the stack by `count` garbage rows (each row full except `hole_col`) —
     /// the versus-garbage mechanic. Returns `true` if this tops the player out: the
     /// stack is forced past the ceiling, or the active piece is now buried. On a
-    /// top-out the engine latches [`GameOverStatus::BlockOut`] so the next
-    /// [`step`](Self::step) is a no-op, mirroring the spawn-collision path.
+    /// top-out the engine drops the (buried) active piece and latches
+    /// [`GameOverStatus::BlockOut`] so the next [`step`](Self::step) is a no-op —
+    /// the same end state the spawn-collision path leaves. Because this mutation
+    /// runs out-of-band of [`step`](Self::step) there is no event sink: the `bool`
+    /// return (and the latched game-over in the snapshot) is the caller's signal,
+    /// not an [`EngineEvent::GameOver`].
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
         let overflow = self.board.insert_garbage_lines(count, hole_col);
         let buried = self.active.as_ref().is_some_and(|active| {
             active.piece().collide_with(&self.board, active.origin())
         });
         if overflow || buried {
+            self.active = None;
             self.game_over = Some(GameOverStatus::BlockOut);
         }
         overflow || buried
@@ -1404,5 +1411,27 @@ mod tests {
                 .map(|(x, y)| (x - 1, y))
                 .collect::<Vec<_>>()
         );
+    }
+
+    #[test]
+    fn garbage_burying_the_active_piece_tops_out_like_a_spawn_block_out() {
+        let mut engine = Engine::new(EngineConfig::default(), 42);
+        engine.step(InputFrame::default()); // spawn the first piece
+        assert!(engine.snapshot().active.is_some());
+
+        // Enough garbage to bury any spawn pose (the hole sits at column 0, away
+        // from the spawn columns).
+        let topped = engine.insert_garbage(25, 0);
+
+        assert!(topped);
+        let snapshot = engine.snapshot();
+        assert_eq!(snapshot.game_over, Some(GameOverStatus::BlockOut));
+        assert!(
+            snapshot.active.is_none(),
+            "the buried piece is dropped, matching the spawn-collision end state"
+        );
+        // The latched game-over makes the next step a no-op: no respawn happens.
+        engine.step(InputFrame::default());
+        assert!(engine.snapshot().active.is_none());
     }
 }
