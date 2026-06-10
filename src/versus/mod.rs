@@ -696,6 +696,51 @@ mod tests {
     }
 
     #[test]
+    fn the_renderer_mirrors_both_seats() {
+        use render::{BoardRoot, LayerSeat, SeatMeter, VsLayer};
+
+        let mut app = headless_versus_app(bot_match(7));
+        // Queue garbage against seat 1 so the meter has something to show.
+        {
+            let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
+            for (seat, mut engine) in query.iter_mut(app.world_mut()) {
+                if seat.index == 1 {
+                    engine.0.queue_garbage(3);
+                    engine.0.queue_garbage(2);
+                }
+            }
+        }
+        tick_fixed(&mut app, 2); // spawn pieces; run the reconcilers
+
+        let roots = app
+            .world_mut()
+            .query::<&BoardRoot>()
+            .iter(app.world())
+            .count();
+        assert_eq!(roots, 2, "one board root per seat");
+
+        // Each seat's falling layer carries the 4 cells of its active piece.
+        let mut layers = app.world_mut().query::<(&VsLayer, &LayerSeat, &Children)>();
+        for seat in 0..2 {
+            let falling_cells = layers
+                .iter(app.world())
+                .find(|(l, s, _)| **l == VsLayer::Falling && s.0 == seat)
+                .map(|(_, _, children)| children.len())
+                .expect("each seat has a falling layer");
+            assert_eq!(falling_cells, 4, "seat {seat}'s active piece renders");
+        }
+
+        // Seat 1's meter shows its two pending batches as two segments.
+        let mut meters = app.world_mut().query::<(&SeatMeter, &Children)>();
+        let segments = meters
+            .iter(app.world())
+            .find(|(m, _)| m.seat == 1)
+            .map(|(_, children)| children.len())
+            .expect("seat 1 has a meter");
+        assert_eq!(segments, 2, "two queued batches render as two segments");
+    }
+
+    #[test]
     fn leaving_versus_tears_down_seats_and_bots() {
         let mut app = headless_versus_app(bot_match(7));
         assert!(app.world().get_non_send_resource::<VersusBots>().is_some());
