@@ -139,7 +139,7 @@ fn activate(
     settings: Res<GameSettings>,
     lists: Query<&FocusList, With<PauseRoot>>,
     actions: Query<(&Focusable, &PauseAction)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut pause: ResMut<NextState<PauseState>>,
     mut game: ResMut<NextState<GameState>>,
 ) {

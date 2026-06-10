@@ -63,7 +63,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<ModeSelectRoot>>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut active: ResMut<ActiveVariant>,
     mut next: ResMut<NextState<GameState>>,
 ) {

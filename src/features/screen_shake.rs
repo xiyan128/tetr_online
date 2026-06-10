@@ -51,9 +51,40 @@ pub struct ScreenShake {
 }
 
 impl ScreenShake {
-    /// Add `amount` of trauma, saturating at the `1.0` ceiling.
-    fn add(&mut self, amount: f32) {
+    /// Add `amount` of trauma, saturating at the `1.0` ceiling. `pub(crate)`:
+    /// the versus mode feeds the same resource from its own per-seat events
+    /// (its apply runs only in `Versus`, this module's only in `Playing`, so
+    /// the two movers never fight over a camera).
+    pub(crate) fn add(&mut self, amount: f32) {
         self.trauma = (self.trauma + amount).clamp(0.0, 1.0);
+    }
+
+    /// Zero the trauma (a fresh session starts calm).
+    pub(crate) fn reset(&mut self) {
+        self.trauma = 0.0;
+    }
+
+    /// Camera pose for the current trauma around `rest`, and bleed trauma off
+    /// by `dt`. The one home of the noise/decay math, shared by the
+    /// single-player and versus apply systems (each gated to its own state).
+    pub(crate) fn pose_and_decay(
+        &mut self,
+        elapsed_secs: f32,
+        dt: f32,
+        rest: Vec3,
+    ) -> (Vec3, Quat) {
+        let amount = self.trauma.powf(TRAUMA_EXPONENT);
+        let pose = if amount <= f32::EPSILON {
+            (rest, Quat::IDENTITY)
+        } else {
+            let phase = elapsed_secs * NOISE_FREQUENCY;
+            let dx = value_noise(phase) * amount * MAX_OFFSET;
+            let dy = value_noise(phase + 137.0) * amount * MAX_OFFSET;
+            let roll = value_noise(phase + 731.0) * amount * MAX_ANGLE;
+            (rest + Vec3::new(dx, dy, 0.0), Quat::from_rotation_z(roll))
+        };
+        self.trauma = (self.trauma - TRAUMA_DECAY_PER_SEC * dt).max(0.0);
+        pose
     }
 }
 
@@ -92,7 +123,7 @@ impl Plugin for ScreenShakePlugin {
 
 /// Zero the trauma so each new game starts from a still camera.
 fn reset_shake(mut shake: ResMut<ScreenShake>) {
-    shake.trauma = 0.0;
+    shake.reset();
 }
 
 /// Bump trauma from this frame's engine events. Severity scales with how
@@ -123,7 +154,8 @@ fn accumulate_trauma(frame_events: Res<FrameEvents>, mut shake: ResMut<ScreenSha
 
 /// Trauma contributed by a scoring clear. Drop / no-clear actions contribute
 /// nothing here (their feel comes from the hard-drop kick instead).
-fn trauma_for_clear(action: EngineScoreAction, back_to_back: bool) -> f32 {
+/// `pub(crate)`: the versus feel pass scales clears identically.
+pub(crate) fn trauma_for_clear(action: EngineScoreAction, back_to_back: bool) -> f32 {
     let base = match action {
         EngineScoreAction::Single => 0.16,
         EngineScoreAction::Double => 0.26,
@@ -164,31 +196,20 @@ fn apply_shake(
     mut shake: ResMut<ScreenShake>,
     mut cameras: Query<&mut Transform, With<GameplayCamera>>,
 ) {
-    let amount = shake.trauma.powf(TRAUMA_EXPONENT);
-    let rest = camera_center(&config);
-
     // Compute the pose once, then write it to the gameplay camera(s). Iterating
     // (rather than `single_mut`) keeps trauma bleeding off even on the frames the
     // camera is briefly absent, and never leaves a stray camera stuck off-center.
-    let (translation, rotation) = if amount <= f32::EPSILON {
-        // Resting: dead-center and level.
-        (rest, Quat::IDENTITY)
-    } else {
-        let phase = time.elapsed_secs() * NOISE_FREQUENCY;
-        // Decorrelated channels: distinct domain offsets keep x / y / roll from
-        // moving in lockstep.
-        let dx = value_noise(phase) * amount * MAX_OFFSET;
-        let dy = value_noise(phase + 137.0) * amount * MAX_OFFSET;
-        let roll = value_noise(phase + 731.0) * amount * MAX_ANGLE;
-        (rest + Vec3::new(dx, dy, 0.0), Quat::from_rotation_z(roll))
-    };
+    // (Decay happens inside `pose_and_decay`, after the pose, so a fresh jolt
+    // shows at full strength this frame.)
+    let (translation, rotation) = shake.pose_and_decay(
+        time.elapsed_secs(),
+        time.delta_secs(),
+        camera_center(&config),
+    );
     for mut transform in &mut cameras {
         transform.translation = translation;
         transform.rotation = rotation;
     }
-
-    // Bleed off *after* applying, so a fresh jolt shows at full strength this frame.
-    shake.trauma = (shake.trauma - TRAUMA_DECAY_PER_SEC * time.delta_secs()).max(0.0);
 }
 
 // ---------------------------------------------------------------------------

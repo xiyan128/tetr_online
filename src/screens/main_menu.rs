@@ -39,14 +39,16 @@ struct MainMenuRoot;
 #[reflect(Component)]
 enum MainMenuAction {
     Play,
+    Versus,
     WatchAi,
     Options,
     Help,
     HighScores,
 }
 
-const ITEMS: [(MainMenuAction, &str); 5] = [
+const ITEMS: [(MainMenuAction, &str); 6] = [
     (MainMenuAction::Play, "Play"),
+    (MainMenuAction::Versus, "Versus"),
     (MainMenuAction::WatchAi, "Watch AI"),
     (MainMenuAction::Options, "Options"),
     (MainMenuAction::Help, "Help"),
@@ -86,7 +88,7 @@ fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
-    clicks: Query<(&Focusable, &Interaction)>,
+    clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut sandbox: ResMut<AiSandbox>,
     mut next: ResMut<NextState<GameState>>,
 ) {
@@ -111,6 +113,8 @@ fn activate(
                 *sandbox = AiSandbox(false);
                 next.set(GameState::ModeSelect);
             }
+            // Versus has its own setup screen and never reads the sandbox flag.
+            MainMenuAction::Versus => next.set(GameState::VersusSetup),
             MainMenuAction::WatchAi => {
                 *sandbox = AiSandbox(true);
                 // Watch-AI picks a model first, then the mode.

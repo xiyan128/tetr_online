@@ -133,7 +133,14 @@ pub enum GameOverStatus {
 pub struct SnapshotCell {
     pub x: isize,
     pub y: isize,
+    /// The colour identity of the cell. For a garbage cell this is a legacy
+    /// fill (`I`) kept so colour-by-piece consumers keep working; check
+    /// [`garbage`](Self::garbage) first — a versus renderer paints garbage
+    /// neutral, not cyan.
     pub piece_type: PieceType,
+    /// True for a garbage-row cell ([`CellKind::Garbage`]); always `false` for
+    /// active-piece and ghost cells.
+    pub garbage: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -762,6 +769,13 @@ impl Engine {
                     x: cell.coords().0,
                     y: cell.coords().1,
                     piece_type,
+                    garbage: false,
+                }),
+                CellKind::Garbage => Some(SnapshotCell {
+                    x: cell.coords().0,
+                    y: cell.coords().1,
+                    piece_type: PieceType::I, // legacy fill colour; see SnapshotCell::piece_type
+                    garbage: true,
                 }),
                 CellKind::None | CellKind::Wall => None,
             })
@@ -812,6 +826,7 @@ fn piece_snapshot_cells(piece: &Piece, origin: (isize, isize)) -> Vec<SnapshotCe
             x: x + origin.0,
             y: y + origin.1,
             piece_type: piece.piece_type(),
+            garbage: false,
         })
         .collect()
 }
@@ -1673,7 +1688,19 @@ mod tests {
         assert!(events.contains(&EngineEvent::GarbageInserted { lines: 3 }));
         assert_eq!(engine.snapshot().pending_garbage_total(), 0);
         // 3 garbage rows of 9 cells (one hole each) plus the locked O.
-        assert_eq!(engine.snapshot().board_cells.len(), 3 * 9 + 4);
+        let cells = engine.snapshot().board_cells;
+        assert_eq!(cells.len(), 3 * 9 + 4);
+        // The snapshot tells attack from stack: risen rows (y < 3) carry the
+        // garbage flag, the player's own locked piece does not.
+        for cell in &cells {
+            assert_eq!(
+                cell.garbage,
+                cell.y < 3,
+                "garbage flag wrong at ({}, {})",
+                cell.x,
+                cell.y
+            );
+        }
     }
 
     #[test]

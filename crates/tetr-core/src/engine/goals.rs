@@ -13,6 +13,12 @@ use crate::engine::t_spin::TSpinKind;
 pub enum GoalSystem {
     Fixed,
     Variable,
+    /// No goal and no level progression: the level (and so gravity and the
+    /// score multiplier) stays at the starting level forever. The versus
+    /// convention — pressure comes from the opponent, not the clock. The goal
+    /// is permanently `0` lines remaining, which [`GoalProgress::award`]
+    /// already treats as "nothing to advance".
+    None,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -86,6 +92,7 @@ pub fn goal_for_level(system: GoalSystem, start_level: u8, level: u8) -> usize {
     match system {
         GoalSystem::Fixed => fixed_goal_for_level(start_level, level),
         GoalSystem::Variable => variable_goal_for_level(level),
+        GoalSystem::None => 0,
     }
 }
 
@@ -218,6 +225,17 @@ mod tests {
         assert_eq!(progress.award(2), 1);
         assert_eq!(progress.level(), 5);
         assert_eq!(progress.remaining(), 9);
+    }
+
+    #[test]
+    fn none_goal_system_never_levels() {
+        let mut progress = GoalProgress::new(GoalSystem::None, 1);
+
+        assert_eq!(progress.remaining(), 0, "no goal exists to chase");
+        // A marathon's worth of clears advances nothing.
+        assert_eq!(progress.award(200), 0);
+        assert_eq!(progress.level(), 1, "the level is pinned at the start");
+        assert_eq!(progress.remaining(), 0);
     }
 
     #[test]

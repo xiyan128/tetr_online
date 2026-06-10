@@ -225,6 +225,7 @@ impl ScoreState {
         let goal_units = match goal_system {
             GoalSystem::Fixed => lines_cleared,
             GoalSystem::Variable => variable_goal_units(t_spin, lines_cleared, back_to_back_bonus),
+            GoalSystem::None => 0,
         };
         self.goal_progress.award(goal_units);
         self.score += score;

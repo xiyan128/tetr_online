@@ -405,7 +405,14 @@ mod tests {
         for y in 0..(h + margin) as isize {
             for x in 0..w as isize {
                 if rng.below(100) < fill_pct {
-                    board.set(x, y, CellKind::Some(PieceType::I));
+                    // Mix piece and garbage cells: occupancy must be identical
+                    // regardless of which filled kind a cell carries.
+                    let kind = if rng.below(5) == 0 {
+                        CellKind::Garbage
+                    } else {
+                        CellKind::Some(PieceType::I)
+                    };
+                    board.set(x, y, kind);
                 }
             }
         }
@@ -426,7 +433,9 @@ mod tests {
                         engine_blocked,
                         "blocked mismatch at ({x},{y})"
                     );
-                    let engine_occupied = matches!(board.get_cell_kind(x, y), CellKind::Some(_));
+                    // `is_some()` — the engine's own occupancy predicate — so a
+                    // garbage cell counts filled exactly like a piece cell.
+                    let engine_occupied = board.get_cell_kind(x, y).is_some();
                     assert_eq!(bb.occupied(x, y), engine_occupied, "occupied at ({x},{y})");
                 }
             }

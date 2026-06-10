@@ -170,12 +170,9 @@ impl Board {
 
     /// Insert `count` garbage rows at the bottom, shifting the whole stack up —
     /// the inverse of [`clear_line`](Self::clear_line). Each new row is full except
-    /// `hole_col`. Returns `true` if any filled cell was forced past the backing
-    /// top (a garbage-induced top-out for the caller to act on).
-    ///
-    /// Garbage has no dedicated [`CellKind`] (keeping the cell enum — and every
-    /// match on it — unchanged), so rows are filled with an arbitrary piece colour;
-    /// only occupancy matters to line clears and collision.
+    /// `hole_col`, painted [`CellKind::Garbage`] so a renderer can tell attack
+    /// from the player's own stack. Returns `true` if any filled cell was forced
+    /// past the backing top (a garbage-induced top-out for the caller to act on).
     pub fn insert_garbage_lines(&mut self, count: usize, hole_col: usize) -> bool {
         if count == 0 {
             return false;
@@ -192,7 +189,9 @@ impl Board {
             for x in 0..self.width {
                 let kind = self.cells[(y, x)].cell_kind;
                 self.set(x as isize, y as isize, CellKind::None);
-                if let CellKind::Some(_) = kind {
+                // `is_some`, not a `Some(_)` pattern: rows risen by an earlier
+                // call are `Garbage` cells and must shift up like any others.
+                if kind.is_some() {
                     let ny = y + count;
                     if ny < backing {
                         self.set(x as isize, ny as isize, kind);
@@ -206,7 +205,7 @@ impl Board {
         for y in 0..count {
             for x in 0..self.width {
                 if x != hole_col {
-                    self.set(x as isize, y as isize, CellKind::Some(GARBAGE_FILL));
+                    self.set(x as isize, y as isize, CellKind::Garbage);
                 }
             }
         }
@@ -223,10 +222,6 @@ impl Board {
     }
 }
 
-/// Colour used to paint garbage cells. Garbage has no dedicated [`CellKind`]
-/// variant (see [`Board::insert_garbage_lines`]); occupancy is all that matters.
-const GARBAGE_FILL: PieceType = PieceType::I;
-
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Render top row first so the output reads like the on-screen board.
@@ -234,6 +229,7 @@ impl Display for Board {
             for cell in row {
                 f.write_str(match cell.cell_kind {
                     CellKind::Some(_) => "X",
+                    CellKind::Garbage => "G",
                     CellKind::None => "#",
                     CellKind::Wall => " ",
                 })?;
@@ -250,6 +246,12 @@ pub enum CellKind {
     Some(PieceType),
     None,
     Wall,
+    /// A garbage-row cell (versus). Occupied exactly like `Some` — it collides,
+    /// fills rows, and clears — but carries no piece identity, so a renderer
+    /// can paint it neutral instead of a piece colour. Occupancy predicates go
+    /// through [`CellKind::is_some`] / [`CellKind::is_none`], which treat it as
+    /// filled.
+    Garbage,
 }
 
 #[cfg(test)]
@@ -338,7 +340,7 @@ mod tests {
             let expected = if x == 2 {
                 CellKind::None
             } else {
-                CellKind::Some(GARBAGE_FILL)
+                CellKind::Garbage
             };
             assert_eq!(board.get_cell_kind(x, 0), expected, "col {x}");
         }
@@ -359,8 +361,8 @@ mod tests {
             .iter()
             .all(|c| c.cell_kind != CellKind::Some(PieceType::T)));
         assert_eq!(board.get_cell_kind(0, 0), CellKind::None);
-        assert_eq!(board.get_cell_kind(1, 0), CellKind::Some(GARBAGE_FILL));
-        assert_eq!(board.get_cell_kind(1, 1), CellKind::Some(GARBAGE_FILL));
+        assert_eq!(board.get_cell_kind(1, 0), CellKind::Garbage);
+        assert_eq!(board.get_cell_kind(1, 1), CellKind::Garbage);
     }
 
     #[test]
@@ -423,8 +425,11 @@ mod tests {
 }
 
 impl CellKind {
+    /// A filled mino cell — a locked piece or a garbage cell. This is the
+    /// "counts toward a full row / collides / tops out" predicate; `Wall` is
+    /// not `some`.
     pub fn is_some(&self) -> bool {
-        matches!(self, CellKind::Some(_))
+        matches!(self, CellKind::Some(_) | CellKind::Garbage)
     }
 
     pub fn is_none(&self) -> bool {
@@ -434,7 +439,7 @@ impl CellKind {
     pub fn unwrap(self) -> PieceType {
         match self {
             CellKind::Some(piece_type) => piece_type,
-            _ => panic!("CellKind is None or Wall"),
+            _ => panic!("CellKind carries no piece type (None, Wall, or Garbage)"),
         }
     }
 }
