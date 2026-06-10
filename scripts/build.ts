@@ -86,7 +86,7 @@ async function buildWasm(outDir: string, optimize: boolean): Promise<void> {
     const name = bundleName(renderer);
     const cargoArgs = CARGO_ARGS[renderer];
     console.log(`==> [${name}] cargo build`);
-    await $`cargo build --profile web --target wasm32-unknown-unknown ${cargoArgs}`;
+    await $`cargo build --locked --profile web --target wasm32-unknown-unknown ${cargoArgs}`;
 
     console.log(`==> [${name}] wasm-bindgen`);
     await $`wasm-bindgen --no-typescript --target web --out-dir ${outDir} --out-name ${name} ${WASM_IN}`;
@@ -139,7 +139,7 @@ const EMBED_WASM_IN = `target/wasm32-unknown-unknown/web/${EMBED_NAME}.wasm`;
 async function buildEmbedWasm(outDir: string, optimize: boolean): Promise<void> {
   await $`mkdir -p ${outDir}`;
   console.log(`==> [${EMBED_NAME}] cargo build (no Bevy)`);
-  await $`cargo build -p tetr-embed --profile web --target wasm32-unknown-unknown`;
+  await $`cargo build --locked -p tetr-embed --profile web --target wasm32-unknown-unknown`;
 
   console.log(`==> [${EMBED_NAME}] wasm-bindgen`);
   await $`wasm-bindgen --no-typescript --target web --out-dir ${outDir} --out-name ${EMBED_NAME} ${EMBED_WASM_IN}`;

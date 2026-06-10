@@ -1,0 +1,45 @@
+# The quality gate: formatting, lints, and the full test suite on every push.
+#
+# The deploy workflow (web.yml) only proves the wasm bundles BUILD; nothing else
+# stops a regression from reaching master. This gate runs what a developer runs:
+# fmt --check, clippy -D warnings, and the workspace tests under both feature
+# combinations (default, and the `arena` play-evaluation harness).
+#
+# The toolchain comes from rust-toolchain.toml (actions-rust-lang reads it), so
+# CI compiles with the same pinned compiler as every local checkout — the same
+# reproducibility contract the toml documents for the wasm bundles.
+name: CI
+
+on:
+  push:
+  workflow_dispatch:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Reads rust-toolchain.toml for the channel + targets, and caches builds.
+      - name: Install Rust (pinned toolchain)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
+
+      # Bevy's Linux build dependencies (audio + windowing), needed because the
+      # workspace tests compile the full game crate.
+      - name: Install Bevy system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install --no-install-recommends -y libasound2-dev libudev-dev
+
+      - name: Formatting
+        run: cargo fmt --all -- --check
+
+      - name: Clippy
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Tests (workspace)
+        run: cargo test --workspace --locked
+
+      - name: Tests (arena harness)
+        run: cargo test --features arena --locked

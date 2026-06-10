@@ -31,10 +31,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Install Rust (stable + wasm target)
-        uses: dtolnay/rust-toolchain@stable
+      # Reads rust-toolchain.toml (pinned channel + the wasm target), so the
+      # deployed bundles are built by the SAME compiler the repo pins — the
+      # reproducibility the toml documents. (The previous dtolnay@stable setup
+      # exported RUSTUP_TOOLCHAIN=stable, silently overriding the pin.)
+      - name: Install Rust (pinned toolchain + wasm target)
+        uses: actions-rust-lang/setup-rust-toolchain@v1
         with:
-          targets: wasm32-unknown-unknown
+          cache: false # Swatinem/rust-cache below already owns caching
 
       - name: Cache cargo build
         uses: Swatinem/rust-cache@v2
