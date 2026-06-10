@@ -494,7 +494,12 @@ fn rebuild_board(snapshot: &EngineSnapshot) -> Board {
         config.buffer_height,
     );
     for cell in &snapshot.board_cells {
-        board.set(cell.x, cell.y, CellKind::Some(cell.piece_type));
+        let kind = if cell.garbage {
+            CellKind::Garbage
+        } else {
+            CellKind::Some(cell.piece_type)
+        };
+        board.set(cell.x, cell.y, kind);
     }
     board
 }
