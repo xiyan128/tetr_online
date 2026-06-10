@@ -16,7 +16,7 @@ mod bit_board;
 mod board;
 mod constants;
 mod game_over;
-mod garbage;
+pub(crate) mod garbage; // crate-visible: the search mirrors its rules (one home)
 mod generator;
 mod goals;
 mod gravity;

@@ -34,9 +34,11 @@
 use smallvec::SmallVec;
 
 use crate::ai::movegen::Placement;
+use crate::engine::garbage::{self, BatchQueue};
 use crate::engine::{
-    breaks_back_to_back, classify_t_spin, qualifies_for_back_to_back, ActivePiece, BitBoard, Board,
-    CellKind, EngineSnapshot, LockOutcome, Piece, TSpinKind,
+    attack_lines, breaks_back_to_back, classify_t_spin, is_lock_out, qualifies_for_back_to_back,
+    ActivePiece, BitBoard, Board, CellKind, EngineScoreAction, EngineSnapshot, LockOutcome, Piece,
+    TSpinKind,
 };
 
 /// The remainder of the current 7-bag: which tetrominoes have **not** yet been
@@ -151,6 +153,13 @@ pub struct SearchState {
     /// value combo attack for the *next* clear. Tracked along the path like [`b2b`];
     /// a search reads the pre-placement value to score a clear's combo bonus.
     pub combo: u32,
+    /// The pending-garbage queue against this player (oldest batch first),
+    /// mirrored from the snapshot so the search models cancellation and rising
+    /// exactly — see [`transition_garbage`](Self::transition_garbage). Inline
+    /// storage: forking a child never allocates for the common 0-4 batches.
+    pub pending: BatchQueue,
+    /// The per-lock rising cap, captured from the snapshot config.
+    garbage_cap: u32,
     /// Board geometry captured from the snapshot config, needed to rebuild the
     /// board and to spawn freshly dealt pieces at the correct origin.
     board_width: usize,
@@ -189,6 +198,8 @@ impl SearchState {
             bag,
             b2b: snapshot.back_to_back_active,
             combo: snapshot.combo, // resume the real in-game combo, so the search can value continuing it
+            pending: snapshot.pending_garbage.iter().copied().collect(),
+            garbage_cap: config.garbage_cap,
             board_width: config.board_width,
             visible_height: config.visible_height,
         })
@@ -234,11 +245,7 @@ impl SearchState {
     /// next active piece comes from (the queue front vs a speculative deal).
     fn lock_active(&mut self) -> LockOutcome {
         let piece = self.active.clone();
-        let t_spin = classify_t_spin(&piece, &self.board);
-        let outcome = self.board.lock_piece(&piece);
-        self.update_b2b(&outcome, t_spin);
-        self.update_combo(&outcome);
-        outcome
+        self.lock_and_transition(&piece)
     }
 
     /// Advance through a [`Placement`] from [`generate_with_hold`], honouring a hold
@@ -325,11 +332,48 @@ impl SearchState {
         // `placement.piece` — the swapped-in piece when `used_hold`, else the
         // current active at its resting pose. Locking the placement's piece (not
         // `self.active`) is what makes the swapped-in piece active without a deal.
-        let t_spin = classify_t_spin(&placement.piece, &self.board);
-        let outcome = self.board.lock_piece(&placement.piece);
+        self.lock_and_transition(&placement.piece.clone())
+    }
+
+    /// The engine-order lock shared by every commit path: classify the T-spin
+    /// and the lock-out against the PRE-lock state, lock, mirror the garbage
+    /// transition, then advance the B2B / combo chains. Exactly
+    /// `Engine::lock_active_piece`'s order, so the search's imagined future and
+    /// the engine's real one cannot drift.
+    fn lock_and_transition(&mut self, piece: &ActivePiece) -> LockOutcome {
+        let t_spin = classify_t_spin(piece, &self.board);
+        let lock_out = is_lock_out(piece.piece(), piece.origin(), self.visible_height);
+        let outcome = self.board.lock_piece(piece);
+        // A dying lock moves no garbage (the engine's rule: death takes
+        // priority over offense — no cancellation, no rising).
+        if !lock_out {
+            self.transition_garbage(&outcome, t_spin);
+        }
         self.update_b2b(&outcome, t_spin);
         self.update_combo(&outcome);
         outcome
+    }
+
+    /// Mirror the engine's lock-path garbage rules, via the SAME shared rule
+    /// functions (`engine::garbage::{cancel, rise}`) the engine itself calls:
+    /// a clear's attack (same award action, same pre-update B2B/combo inputs,
+    /// same post-lock perfect-clear check) cancels pending oldest-first; a
+    /// clear-less lock lets pending rise onto the board up to the per-lock cap,
+    /// with the hole columns the snapshot exported. An overflowing rise tops
+    /// the real game out; the search just sees the (terrible) resulting board.
+    fn transition_garbage(&mut self, outcome: &LockOutcome, t_spin: Option<TSpinKind>) {
+        let lines = outcome.cleared_rows.len();
+        if lines > 0 {
+            let action = EngineScoreAction::from_lock_result(t_spin, lines);
+            let b2b_bonus = qualifies_for_back_to_back(t_spin, lines) && self.b2b;
+            let attack = attack_lines(action, b2b_bonus, self.combo, self.board.is_empty());
+            garbage::cancel(&mut self.pending, attack);
+        } else {
+            for batch in garbage::rise(&mut self.pending, self.garbage_cap) {
+                self.board
+                    .insert_garbage_lines(batch.lines as usize, batch.hole_col);
+            }
+        }
     }
 
     /// Pop the next revealed piece from the front of the queue (or `None` if the
@@ -407,6 +451,8 @@ impl SearchState {
             bag: BagState::full(),
             b2b: false,
             combo: 0,
+            pending: BatchQueue::new(),
+            garbage_cap: 8, // the engine default; garbage tests inject their own pending
             board_width,
             visible_height,
         }
@@ -1054,5 +1100,207 @@ mod tests {
             s.bag.contains(PieceType::Z),
             "undealt pieces remain available"
         );
+    }
+
+    // ---- The garbage-mirror gold gate ----
+
+    #[test]
+    fn search_transition_predicts_the_engine_under_garbage_pressure() {
+        // THE differential gate for garbage awareness: across a real game with
+        // attack queued against the player, committing the chosen placement on
+        // the SearchState must predict the engine's actual post-lock world —
+        // board occupancy (rises included, exact hole columns), the pending
+        // meter (cancellation included), and the B2B/combo chains. Any drift
+        // between the two models shows up here as a board mismatch.
+        use crate::ai::plan::placement_to_inputs;
+        use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
+        use crate::engine::{Engine, EngineConfig, InputFrame};
+
+        let mut engine = Engine::new(EngineConfig::default(), 21);
+        engine.step(InputFrame::default()); // spawn the first piece
+        let eval = crate::ai::eval::LinearEvaluator::default();
+        let mut planner = GreedyPlanner::new();
+        let (mut rises, mut sends) = (0u32, 0u32);
+
+        for piece_index in 0..50 {
+            // Periodic pressure: 1-3 lines queued every couple of pieces, so the
+            // game exercises queue/cancel/rise (greedy clears often enough that
+            // both branches run).
+            if piece_index % 2 == 0 {
+                engine.queue_garbage(1 + (piece_index / 2) % 3);
+            }
+
+            let snapshot = engine.snapshot();
+            if snapshot.game_over.is_some() {
+                break;
+            }
+            let state = SearchState::from_snapshot(&snapshot).expect("active piece");
+
+            let Some(plan) =
+                think_to_completion(&mut planner, &state, &eval, SearchBudget::greedy())
+            else {
+                break; // no legal placement: the engine will top out shortly
+            };
+
+            // The search's imagined future.
+            let mut predicted = state.clone();
+            predicted.commit_placement(&plan.placement);
+
+            // The engine's real future: execute the same plan.
+            let frames =
+                placement_to_inputs(&state.board.to_array2d(), &state.active, &plan.placement);
+            for frame in frames {
+                for event in engine.step(frame) {
+                    match event {
+                        crate::engine::EngineEvent::GarbageInserted { .. } => rises += 1,
+                        crate::engine::EngineEvent::AttackSent { .. } => sends += 1,
+                        _ => {}
+                    }
+                }
+            }
+
+            let after = engine.snapshot();
+            if after.game_over.is_some() {
+                break; // a lock-out/block-out ended the real game: nothing to compare
+            }
+
+            let mut engine_cells: Vec<(isize, isize)> =
+                after.board_cells.iter().map(|c| (c.x, c.y)).collect();
+            engine_cells.sort_unstable();
+            let mut predicted_cells = predicted.board.cell_coords();
+            predicted_cells.sort_unstable();
+            assert_eq!(
+                predicted_cells, engine_cells,
+                "board diverged at piece {piece_index} (incl. garbage rises/holes)"
+            );
+            assert_eq!(
+                predicted.pending.iter().map(|b| b.lines).sum::<u32>(),
+                after.pending_garbage_total(),
+                "pending meter diverged at piece {piece_index} (cancellation)"
+            );
+            assert_eq!(
+                predicted.b2b, after.back_to_back_active,
+                "B2B diverged at piece {piece_index}"
+            );
+            assert_eq!(
+                predicted.combo, after.combo,
+                "combo diverged at piece {piece_index}"
+            );
+        }
+
+        // The duel is only meaningful if rising actually ran (greedy's clears
+        // are mostly 0-attack Singles, so net sends are seed luck — the
+        // cancellation MATH is pinned deterministically below instead).
+        assert!(rises > 0, "the scenario never made garbage rise");
+        let _ = sends;
+    }
+
+    /// Deterministic pin of the mirrored cancellation math: a Tetris that
+    /// perfect-clears (4 + 10 attack, no B2B, no combo) against pending
+    /// [3, 12] must kill the first batch and eat 11 lines of the second —
+    /// exactly the engine's oldest-first, line-for-line rule.
+    #[test]
+    fn mirrored_cancellation_matches_the_attack_table() {
+        use crate::engine::{GarbageBatch, PieceRotation, RotationDirection};
+
+        // The 4-wide Tetris well: cols 0-2 filled four rows high.
+        let mut board = Board::new(4, 12);
+        for y in 0..4 {
+            for x in 0..3 {
+                board.set(x, y, CellKind::Some(crate::engine::PieceType::O));
+            }
+        }
+        let mut vertical_i = ActivePiece::new(crate::engine::PieceType::I, (1, 0));
+        vertical_i.rotate_to(
+            PieceRotation::R90,
+            (1, 0),
+            RotationDirection::Clockwise,
+            1,
+            false,
+        );
+        let mut state = SearchState::for_test(board, vertical_i, None, std::iter::empty());
+        state.pending.push(GarbageBatch {
+            lines: 3,
+            hole_col: 1,
+        });
+        state.pending.push(GarbageBatch {
+            lines: 12,
+            hole_col: 2,
+        });
+
+        state.commit();
+
+        assert!(state.board.is_empty(), "the Tetris perfect-cleared");
+        assert_eq!(
+            state.pending.as_slice(),
+            [GarbageBatch {
+                lines: 1,
+                hole_col: 2
+            }],
+            "14 attack cancels 3 then 11 of 12, oldest first"
+        );
+    }
+
+    /// Deterministic pin of mirrored rising and deferral: a clear-less lock
+    /// raises pending rows (cap respected, snapshot hole columns), while a
+    /// clearing lock defers rising entirely.
+    #[test]
+    fn mirrored_rise_obeys_cap_and_clears_defer() {
+        use crate::engine::GarbageBatch;
+
+        // Clear-less lock: an O dropped on an empty board.
+        let board = Board::new(10, 24);
+        let active = crate::ai::movegen::spawn_piece(crate::engine::PieceType::O, 10, 24);
+        let mut state = SearchState::for_test(board, active, None, std::iter::empty());
+        state.garbage_cap = 4;
+        state.pending.push(GarbageBatch {
+            lines: 6,
+            hole_col: 3,
+        });
+
+        // Drop to the floor, then lock.
+        while state
+            .active
+            .piece()
+            .try_move(
+                &state.board,
+                state.active.origin(),
+                crate::engine::MoveDirection::Down,
+            )
+            .is_some()
+        {
+            let origin = state
+                .active
+                .piece()
+                .try_move(
+                    &state.board,
+                    state.active.origin(),
+                    crate::engine::MoveDirection::Down,
+                )
+                .unwrap();
+            state
+                .active
+                .move_to(origin, crate::engine::PieceAction::Fall);
+        }
+        state.commit();
+
+        // 4 of 6 lines rose (cap), hole col 3; remainder stays pending.
+        assert_eq!(
+            state.pending.as_slice(),
+            [GarbageBatch {
+                lines: 2,
+                hole_col: 3
+            }]
+        );
+        let cells = state.board.cell_coords();
+        for y in 0..4 {
+            let row: Vec<isize> = cells
+                .iter()
+                .filter(|&&(_, cy)| cy == y)
+                .map(|&(x, _)| x)
+                .collect();
+            assert_eq!(row.len(), 9, "garbage row {y} is full except the hole");
+            assert!(!row.contains(&3), "hole col 3 in garbage row {y}");
+        }
     }
 }

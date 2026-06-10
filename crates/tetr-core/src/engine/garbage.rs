@@ -26,10 +26,9 @@
 //! rising batches through the same `Board::insert_garbage_lines` primitive the
 //! out-of-band harness seam uses.
 
-use std::collections::VecDeque;
-
 use rand::rngs::StdRng;
 use rand::{RngExt, SeedableRng};
+use smallvec::SmallVec;
 
 /// Decorrelates the hole stream from the piece generator: both are seeded from
 /// the engine seed, and identical streams would let a player predict holes from
@@ -49,11 +48,61 @@ pub struct GarbageBatch {
     pub hole_col: usize,
 }
 
+/// The batch list both rule owners share: the engine's live queue and the
+/// search's mirrored pending state. Inline up to 4 batches (the common case is
+/// 0-2), so the search's fork-per-placement clone stays off the heap.
+pub(crate) type BatchQueue = SmallVec<[GarbageBatch; 4]>;
+
+/// Cancel pending garbage with `attack` lines, **oldest batch first**,
+/// line-for-line. Returns the attack left over after cancellation — the lines
+/// that actually leave the board. The ONE home of the offset rule: the engine's
+/// lock path and the search's mirrored transition both call this, so the two
+/// models cannot drift.
+pub(crate) fn cancel(batches: &mut BatchQueue, mut attack: u32) -> u32 {
+    while attack > 0 {
+        let Some(front) = batches.first_mut() else {
+            break;
+        };
+        let cancelled = front.lines.min(attack);
+        front.lines -= cancelled;
+        attack -= cancelled;
+        if front.lines == 0 {
+            batches.remove(0);
+        }
+    }
+    attack
+}
+
+/// Take the batches that rise after a clear-less lock: oldest first, at most
+/// `cap` total lines. A batch split by the cap leaves its remainder (same hole
+/// column) at the front. The ONE home of the rising rule, like [`cancel`].
+pub(crate) fn rise(batches: &mut BatchQueue, cap: u32) -> BatchQueue {
+    let mut rising = BatchQueue::new();
+    let mut budget = cap;
+    while budget > 0 {
+        let Some(front) = batches.first_mut() else {
+            break;
+        };
+        if front.lines <= budget {
+            budget -= front.lines;
+            rising.push(batches.remove(0));
+        } else {
+            front.lines -= budget;
+            rising.push(GarbageBatch {
+                lines: budget,
+                hole_col: front.hole_col,
+            });
+            budget = 0;
+        }
+    }
+    rising
+}
+
 /// The pending-garbage queue plus the receiver-owned hole stream.
 pub(crate) struct PendingGarbage {
     /// FIFO of queued batches, oldest at the front — cancellation and rising
     /// both consume from the front (oldest attack lands or is offset first).
-    batches: VecDeque<GarbageBatch>,
+    batches: BatchQueue,
     /// Seeded hole stream; advanced once per queued batch.
     rng: StdRng,
 }
@@ -61,7 +110,7 @@ pub(crate) struct PendingGarbage {
 impl PendingGarbage {
     pub(crate) fn new(engine_seed: u64) -> Self {
         Self {
-            batches: VecDeque::new(),
+            batches: BatchQueue::new(),
             rng: StdRng::seed_from_u64(engine_seed ^ HOLE_SALT),
         }
     }
@@ -74,25 +123,12 @@ impl PendingGarbage {
             return;
         }
         let hole_col = self.rng.random_range(0..board_width.max(1));
-        self.batches.push_back(GarbageBatch { lines, hole_col });
+        self.batches.push(GarbageBatch { lines, hole_col });
     }
 
-    /// Cancel pending garbage with `attack` lines of outgoing attack, oldest
-    /// batch first, line-for-line. Returns the attack left over after
-    /// cancellation — the lines that actually leave the board.
-    pub(crate) fn cancel(&mut self, mut attack: u32) -> u32 {
-        while attack > 0 {
-            let Some(front) = self.batches.front_mut() else {
-                break;
-            };
-            let cancelled = front.lines.min(attack);
-            front.lines -= cancelled;
-            attack -= cancelled;
-            if front.lines == 0 {
-                self.batches.pop_front();
-            }
-        }
-        attack
+    /// Cancellation, delegated to the shared rule (see [`cancel`]).
+    pub(crate) fn cancel(&mut self, attack: u32) -> u32 {
+        cancel(&mut self.batches, attack)
     }
 
     /// The queued batches, oldest first (what the snapshot exports).
@@ -100,29 +136,9 @@ impl PendingGarbage {
         self.batches.iter().copied()
     }
 
-    /// Take the batches that rise after a clear-less lock: oldest first, at most
-    /// `cap` total lines. A batch split by the cap leaves its remainder (same
-    /// hole column) at the front of the queue.
-    pub(crate) fn rise(&mut self, cap: u32) -> Vec<GarbageBatch> {
-        let mut rising = Vec::new();
-        let mut budget = cap;
-        while budget > 0 {
-            let Some(front) = self.batches.front_mut() else {
-                break;
-            };
-            if front.lines <= budget {
-                budget -= front.lines;
-                rising.push(self.batches.pop_front().expect("front exists"));
-            } else {
-                front.lines -= budget;
-                rising.push(GarbageBatch {
-                    lines: budget,
-                    hole_col: front.hole_col,
-                });
-                budget = 0;
-            }
-        }
-        rising
+    /// Rising, delegated to the shared rule (see [`rise`]).
+    pub(crate) fn rise(&mut self, cap: u32) -> BatchQueue {
+        rise(&mut self.batches, cap)
     }
 }
 
@@ -139,7 +155,7 @@ mod tests {
     fn queued(batches: &[(u32, usize)]) -> PendingGarbage {
         let mut q = PendingGarbage::new(7);
         for &(lines, hole) in batches {
-            q.batches.push_back(GarbageBatch {
+            q.batches.push(GarbageBatch {
                 lines,
                 hole_col: hole,
             });
@@ -153,7 +169,7 @@ mod tests {
         // 5 lines of attack: kills the 3-batch, eats 2 of the 4-batch.
         assert_eq!(q.cancel(5), 0);
         assert_eq!(total(&q), 2);
-        assert_eq!(q.batches.front().unwrap().hole_col, 2);
+        assert_eq!(q.batches.first().unwrap().hole_col, 2);
 
         // 7 attack against the remaining 2: 5 lines leave the board.
         assert_eq!(q.cancel(7), 5);
@@ -166,8 +182,8 @@ mod tests {
         let rising = q.rise(5);
         // 3 from the first batch + 2 split off the second, hole preserved.
         assert_eq!(
-            rising,
-            vec![
+            rising.as_slice(),
+            [
                 GarbageBatch {
                     lines: 3,
                     hole_col: 1
@@ -180,7 +196,7 @@ mod tests {
         );
         // The remainder of the split batch stays queued, same hole.
         assert_eq!(total(&q), 4);
-        assert_eq!(q.batches.front().unwrap().hole_col, 4);
+        assert_eq!(q.batches.first().unwrap().hole_col, 4);
     }
 
     #[test]
@@ -190,7 +206,7 @@ mod tests {
             (0..32)
                 .map(|_| {
                     q.queue(1, 10);
-                    q.batches.back().unwrap().hole_col
+                    q.batches.last().unwrap().hole_col
                 })
                 .collect::<Vec<_>>()
         };

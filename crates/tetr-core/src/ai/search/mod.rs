@@ -242,6 +242,9 @@ pub(crate) struct RootKey {
     b2b: bool,
     combo: u32,
     board: SmallVec<[u64; 16]>,
+    /// Pending garbage is part of a state's future (it decides when and where
+    /// rows rise), so two states differing only here must never transpose.
+    pending: crate::engine::garbage::BatchQueue,
 }
 
 impl RootKey {
@@ -257,6 +260,7 @@ impl RootKey {
             b2b: state.b2b,
             combo: state.combo,
             board: state.board.columns().into(),
+            pending: state.pending.clone(),
         }
     }
 }
