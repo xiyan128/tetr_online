@@ -288,9 +288,10 @@ impl Engine {
     /// not an [`EngineEvent::GameOver`].
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
         let overflow = self.board.insert_garbage_lines(count, hole_col);
-        let buried = self.active.as_ref().is_some_and(|active| {
-            active.piece().collide_with(&self.board, active.origin())
-        });
+        let buried = self
+            .active
+            .as_ref()
+            .is_some_and(|active| active.piece().collide_with(&self.board, active.origin()));
         if overflow || buried {
             self.active = None;
             self.game_over = Some(GameOverStatus::BlockOut);
@@ -1452,8 +1453,9 @@ mod tests {
         // `i / 7`. Exercised across several bag boundaries and a hold (which
         // consumes one extra deal when the hold slot is empty).
         for seed in [0u64, 7, 42] {
-            let stream: Vec<PieceType> =
-                crate::engine::PieceGenerator::with_seed(seed).take(64).collect();
+            let stream: Vec<PieceType> = crate::engine::PieceGenerator::with_seed(seed)
+                .take(64)
+                .collect();
             // Tall field so naive center hard-drops never top out; bag accounting
             // is board-independent.
             let config = EngineConfig {

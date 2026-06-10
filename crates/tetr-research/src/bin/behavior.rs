@@ -90,7 +90,11 @@ fn main() {
             "cc2" => evaluate_scenario(&|s| beam_cc2_bot(s, width, depth), &seeds, scenario),
             "cc2custom" => {
                 let w = cc2_custom_weights();
-                evaluate_scenario(&|s| beam_cc2_weights_bot(s, width, depth, w), &seeds, scenario)
+                evaluate_scenario(
+                    &|s| beam_cc2_weights_bot(s, width, depth, w),
+                    &seeds,
+                    scenario,
+                )
             }
             "lincustom" => {
                 let w = linear_custom_weights();

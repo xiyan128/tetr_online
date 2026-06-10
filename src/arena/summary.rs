@@ -87,11 +87,13 @@ pub struct Evaluation {
 /// or how the games are scheduled. The seed-set size is the reliability knob:
 /// more seeds, tighter spread.
 pub fn evaluate(contender: &Contender, setup: &GameSetup, seeds: &[u64]) -> Evaluation {
-    let games: Vec<GameOutcome> = seeds.iter().map(|&seed| play(contender, setup, seed)).collect();
+    let games: Vec<GameOutcome> = seeds
+        .iter()
+        .map(|&seed| play(contender, setup, seed))
+        .collect();
 
-    let metric = |f: fn(&GameOutcome) -> f64| {
-        MetricSummary::of(&games.iter().map(f).collect::<Vec<_>>())
-    };
+    let metric =
+        |f: fn(&GameOutcome) -> f64| MetricSummary::of(&games.iter().map(f).collect::<Vec<_>>());
 
     let topout_rate = if games.is_empty() {
         0.0

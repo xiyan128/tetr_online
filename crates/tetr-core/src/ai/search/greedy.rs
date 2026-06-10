@@ -110,9 +110,7 @@ impl Planner for GreedyPlanner {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::engine::{
-        ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType,
-    };
+    use crate::engine::{ActivePiece, Board, CellKind, EngineConfig, EngineSnapshot, PieceType};
 
     /// Build a `SearchState` from a crafted board + active piece (no hold/queue).
     fn state_with(board: Board, active: ActivePiece) -> SearchState {

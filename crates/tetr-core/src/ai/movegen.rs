@@ -205,7 +205,9 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
 
     while let Some((piece, path)) = frontier.pop_front() {
         // If this pose rests on ground, it is a candidate final placement.
-        if is_resting(board, &piece) && emitted.insert((pose_key(&piece), classification_key(&piece, board))) {
+        if is_resting(board, &piece)
+            && emitted.insert((pose_key(&piece), classification_key(&piece, board)))
+        {
             let mut full_path = path.clone();
             if used_hold {
                 full_path.insert(0, Move::Hold);
@@ -297,7 +299,11 @@ fn shift<B: Occupancy>(board: &B, piece: &ActivePiece, dir: MoveDirection) -> Op
 ///
 /// Returns `None` for a no-op (kick number `0`, the O piece) or a pose that does
 /// not actually change `(origin, rotation)`, so the BFS does not loop.
-fn rotate<B: Occupancy>(board: &B, piece: &ActivePiece, dir: RotationDirection) -> Option<ActivePiece> {
+fn rotate<B: Occupancy>(
+    board: &B,
+    piece: &ActivePiece,
+    dir: RotationDirection,
+) -> Option<ActivePiece> {
     let target = match dir {
         RotationDirection::Clockwise => piece.rotation() + PieceRotation::R90,
         RotationDirection::Counterclockwise => piece.rotation() + PieceRotation::R270,
@@ -315,14 +321,19 @@ fn rotate<B: Occupancy>(board: &B, piece: &ActivePiece, dir: RotationDirection) 
     // classifies Full and SURVIVES later non-rotation moves (§12.4) — which is what
     // the engine will do when this path is replayed. Without it, movegen would
     // undervalue every kick-5 spin that shifts before locking.
-    let entered_t_slot_with_kick_5 =
-        kick_number == 5 && piece.piece_type() == PieceType::T && {
-            let mut probe = piece.clone();
-            probe.rotate_to(rotation, origin, dir, kick_number, false);
-            is_t_slot(&probe, board)
-        };
+    let entered_t_slot_with_kick_5 = kick_number == 5 && piece.piece_type() == PieceType::T && {
+        let mut probe = piece.clone();
+        probe.rotate_to(rotation, origin, dir, kick_number, false);
+        is_t_slot(&probe, board)
+    };
     let mut rotated = piece.clone();
-    rotated.rotate_to(rotation, origin, dir, kick_number, entered_t_slot_with_kick_5);
+    rotated.rotate_to(
+        rotation,
+        origin,
+        dir,
+        kick_number,
+        entered_t_slot_with_kick_5,
+    );
     Some(rotated)
 }
 
@@ -450,7 +461,11 @@ mod tests {
             let n = keys.len();
             keys.sort();
             keys.dedup();
-            assert_eq!(keys.len(), n, "{piece_type:?} produced duplicate (pose, class) placements");
+            assert_eq!(
+                keys.len(),
+                n,
+                "{piece_type:?} produced duplicate (pose, class) placements"
+            );
         }
     }
 
@@ -629,9 +644,7 @@ mod tests {
                 .any(|p| p.used_hold && p.piece_type() == PieceType::I),
             "an empty hold should offer the next (I) piece"
         );
-    
-}
-
+    }
 
     #[test]
     fn shift_final_arrival_does_not_shadow_a_spin_arrival() {
@@ -696,7 +709,11 @@ mod tests {
         let piece = ActivePiece::at_pose(PieceType::T, (4, 5), PieceRotation::R0);
 
         let rotated = apply_move(&board, &piece, Move::Cw).expect("the kick-5 rotation resolves");
-        assert_eq!(rotated.last_rotation_kick_number(), Some(5), "resolves via SRS test 5");
+        assert_eq!(
+            rotated.last_rotation_kick_number(),
+            Some(5),
+            "resolves via SRS test 5"
+        );
         assert!(
             rotated.used_kick_5_into_t_slot(),
             "kick-5 into a T-slot must set the sticky flag, exactly as the engine does"
@@ -725,9 +742,9 @@ mod tests {
         use crate::engine::{Engine, EngineConfig, EngineEvent, EngineScoreAction};
 
         let fixtures: [&[(isize, isize)]; 4] = [
-            &[],                                     // empty board: no spins anywhere
-            &[(1, 0), (3, 0), (1, 2)],               // the slide-or-spin slot above
-            &[(5, 5), (4, 7), (3, 5), (3, 3)],       // the engine's kick-5 fixture
+            &[],                                               // empty board: no spins anywhere
+            &[(1, 0), (3, 0), (1, 2)],                         // the slide-or-spin slot above
+            &[(5, 5), (4, 7), (3, 5), (3, 3)],                 // the engine's kick-5 fixture
             &[(1, 0), (3, 0), (1, 2), (5, 0), (7, 0), (5, 2)], // two slots
         ];
 
@@ -760,7 +777,8 @@ mod tests {
                         }
                     }
                     assert_eq!(
-                        awarded, predicted,
+                        awarded,
+                        predicted,
                         "fixture {i}, {piece_type:?} placement at {:?} rot {:?} path {:?}: \
                          engine awarded {awarded:?} but movegen predicted {predicted:?}",
                         placement.origin(),

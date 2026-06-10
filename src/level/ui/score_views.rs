@@ -243,8 +243,7 @@ fn dominant_color(types: &[ScoreType]) -> Color {
 /// Map a clear's labels to its tiered [`CalloutStyle`]. Everything escalates
 /// along the normalised excitement `t`.
 fn callout_style(types: &[ScoreType]) -> CalloutStyle {
-    let t =
-        ((excitement(types) - 1.0) / (CALLOUT_MAX_EXCITEMENT - 1.0)).clamp(0.0, 1.0);
+    let t = ((excitement(types) - 1.0) / (CALLOUT_MAX_EXCITEMENT - 1.0)).clamp(0.0, 1.0);
     let lerp = |a: f32, b: f32| a + (b - a) * t;
     CalloutStyle {
         color: dominant_color(types),
@@ -352,8 +351,11 @@ mod tests {
     fn style_escalates_then_saturates() {
         let single = callout_style(&[ScoreType::Single]);
         let tetris = callout_style(&[ScoreType::Tetris]);
-        let huge =
-            callout_style(&[ScoreType::Tetris, ScoreType::BackToBack, ScoreType::Combo(6)]);
+        let huge = callout_style(&[
+            ScoreType::Tetris,
+            ScoreType::BackToBack,
+            ScoreType::Combo(6),
+        ]);
 
         // Bigger wins => bigger font, more shake, harder pop, longer linger.
         assert!(single.font_size < tetris.font_size);

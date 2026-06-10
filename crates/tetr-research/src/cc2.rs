@@ -45,10 +45,16 @@ pub struct TbpMove {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 enum BotMsg {
-    Info { name: String },
+    Info {
+        name: String,
+    },
     Ready,
-    Error { reason: Option<String> },
-    Suggestion { moves: Vec<TbpMove> },
+    Error {
+        reason: Option<String>,
+    },
+    Suggestion {
+        moves: Vec<TbpMove>,
+    },
     #[serde(other)]
     Unknown,
 }
@@ -85,7 +91,9 @@ impl Cc2 {
         bot.send(json!({ "type": "rules" }))?;
         match bot.recv()? {
             BotMsg::Ready => Ok(bot),
-            BotMsg::Error { reason } => Err(protocol_err(format!("bot rejected rules: {reason:?}"))),
+            BotMsg::Error { reason } => {
+                Err(protocol_err(format!("bot rejected rules: {reason:?}")))
+            }
             other => Err(protocol_err(format!("expected ready, got {other:?}"))),
         }
     }
@@ -99,7 +107,10 @@ impl Cc2 {
         loop {
             let mut line = String::new();
             if self.stdout.read_line(&mut line)? == 0 {
-                return Err(io::Error::new(io::ErrorKind::UnexpectedEof, "CC2 closed stdout"));
+                return Err(io::Error::new(
+                    io::ErrorKind::UnexpectedEof,
+                    "CC2 closed stdout",
+                ));
             }
             let line = line.trim();
             if line.is_empty() {

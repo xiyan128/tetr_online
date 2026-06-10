@@ -281,7 +281,10 @@ mod tests {
 
         // Clearing it back to None restores emptiness (a perfect clear).
         assert!(board.set(4, 25, CellKind::None));
-        assert!(board.is_empty(), "clearing the only cell restores emptiness");
+        assert!(
+            board.is_empty(),
+            "clearing the only cell restores emptiness"
+        );
     }
 
     #[test]
@@ -403,9 +406,17 @@ mod tests {
         fill_row(&mut board, 5, PieceType::I); // a full row, entirely in the buffer
         assert!(board.set(0, 6, CellKind::Some(PieceType::T))); // a lone sentinel above it
 
-        assert_eq!(board.clear_lines(), 1, "the full buffer row clears and is counted");
+        assert_eq!(
+            board.clear_lines(),
+            1,
+            "the full buffer row clears and is counted"
+        );
 
-        assert_eq!(board.get_cell_kind(0, 5), CellKind::Some(PieceType::T), "sentinel fell one row");
+        assert_eq!(
+            board.get_cell_kind(0, 5),
+            CellKind::Some(PieceType::T),
+            "sentinel fell one row"
+        );
         assert_eq!(board.get_cell_kind(0, 6), CellKind::None);
         assert_eq!(board.cells().len(), 1, "only the sentinel remains");
     }

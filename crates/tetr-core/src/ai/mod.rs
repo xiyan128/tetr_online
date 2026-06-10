@@ -31,8 +31,8 @@
 //! engine-agnostic core — keeping `tetr-core` free of Bevy.
 
 pub mod controller;
-pub mod handicap;
 pub mod eval;
+pub mod handicap;
 pub mod movegen;
 pub mod plan;
 pub mod policy;
@@ -41,10 +41,10 @@ pub mod search;
 pub mod state;
 
 pub use controller::{AiController, DEFAULT_AI_SEED};
-pub use handicap::Handicap;
 pub use eval::{
     Cc2Evaluator, Cc2Weights, EvalContext, Evaluator, LinearEvaluator, Reward, Value, Weights,
 };
+pub use handicap::Handicap;
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};

@@ -100,10 +100,8 @@ mod tests {
     /// the AI sandbox (AI3.6) and future N-player local games (M3) use.
     #[test]
     fn drive_engine_runs_a_boxed_controller_to_place_pieces() {
-        let mut controller: Box<dyn PlayerController> = Box::new(AiController::new(
-            Handicap::perfect(),
-            DEFAULT_AI_SEED,
-        ));
+        let mut controller: Box<dyn PlayerController> =
+            Box::new(AiController::new(Handicap::perfect(), DEFAULT_AI_SEED));
         let mut engine = Engine::new(EngineConfig::default(), 7);
 
         let mut placed = false;

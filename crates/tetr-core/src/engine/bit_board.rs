@@ -379,7 +379,11 @@ mod tests {
             for y in -2..62 {
                 for x in -2..12 {
                     let engine_blocked = !matches!(board.get_cell_kind(x, y), CellKind::None);
-                    assert_eq!(bb.blocked(x, y), engine_blocked, "blocked mismatch at ({x},{y})");
+                    assert_eq!(
+                        bb.blocked(x, y),
+                        engine_blocked,
+                        "blocked mismatch at ({x},{y})"
+                    );
                     let engine_occupied = matches!(board.get_cell_kind(x, y), CellKind::Some(_));
                     assert_eq!(bb.occupied(x, y), engine_occupied, "occupied at ({x},{y})");
                 }
@@ -402,7 +406,11 @@ mod tests {
             bb.clear_full_rows();
             board.clear_lines();
             let engine_after = BitBoard::from_board(&board);
-            assert_eq!(bb.columns(), engine_after.columns(), "post-clear occupancy mismatch");
+            assert_eq!(
+                bb.columns(),
+                engine_after.columns(),
+                "post-clear occupancy mismatch"
+            );
             assert_eq!(bb.highest_y(), engine_after.highest_y(), "skyline mismatch");
         }
     }
@@ -433,9 +441,18 @@ mod tests {
 
         bb.clear_full_rows();
 
-        assert!(bb.full_rows().is_empty(), "both full rows (visible and buffer) are gone");
-        assert!(bb.occupied(0, 28), "the sentinel fell by the two cleared rows (30 -> 28)");
-        assert!(!bb.occupied(0, 29) && !bb.occupied(0, 30), "nothing left above it");
+        assert!(
+            bb.full_rows().is_empty(),
+            "both full rows (visible and buffer) are gone"
+        );
+        assert!(
+            bb.occupied(0, 28),
+            "the sentinel fell by the two cleared rows (30 -> 28)"
+        );
+        assert!(
+            !bb.occupied(0, 29) && !bb.occupied(0, 30),
+            "nothing left above it"
+        );
     }
 
     #[test]
@@ -449,7 +466,10 @@ mod tests {
         }
         bb.clear_full_rows(); // must not panic
         assert!(bb.full_rows().is_empty(), "the top row cleared");
-        assert!((0..4).all(|x| !bb.occupied(x, 63)), "nothing left at the top");
+        assert!(
+            (0..4).all(|x| !bb.occupied(x, 63)),
+            "nothing left at the top"
+        );
     }
 
     #[test]
@@ -459,7 +479,10 @@ mod tests {
         let b = a; // Copy
         a.set(4, 6);
         assert!(b.occupied(3, 5));
-        assert!(!b.occupied(4, 6), "the copy must not see mutations to the original");
+        assert!(
+            !b.occupied(4, 6),
+            "the copy must not see mutations to the original"
+        );
     }
 
     #[test]

@@ -14,12 +14,9 @@ use std::time::Duration;
 
 use std::collections::VecDeque;
 
-use tetr_core::ai::eval::{
-    Cc2Evaluator, Cc2Weights, Evaluator, LinearEvaluator, Weights,
-};
+use tetr_core::ai::eval::{Cc2Evaluator, Cc2Weights, Evaluator, LinearEvaluator, Weights};
 use tetr_core::ai::{
-    AiController, BeamPlanner, BestFirstPlanner, Handicap, Policy, SearchBudget,
-    SearchPolicy,
+    AiController, BeamPlanner, BestFirstPlanner, Handicap, Policy, SearchBudget, SearchPolicy,
 };
 use tetr_core::engine::{
     attack_lines, CellKind, Engine, EngineConfig, EngineEvent, EngineScoreAction, GoalSystem,
@@ -96,7 +93,11 @@ pub(crate) struct ClearInfo {
 /// only — a hard drop emits its own `ScoreAwarded` that must NOT bump it — and resets
 /// on a clear-less lock.
 /// Callers still do their own piece counting / top-out / stats from the same event.
-pub(crate) fn fold_combo(event: &EngineEvent, engine: &Engine, combo: &mut u32) -> Option<ClearInfo> {
+pub(crate) fn fold_combo(
+    event: &EngineEvent,
+    engine: &Engine,
+    combo: &mut u32,
+) -> Option<ClearInfo> {
     match event {
         EngineEvent::Locked { lines_cleared, .. } => {
             if *lines_cleared == 0 {
@@ -822,7 +823,12 @@ pub fn bestfirst_cc2_weights_bot(
     max_depth: u8,
     weights: Cc2Weights,
 ) -> Box<dyn PlayerController> {
-    bestfirst_bot(seed, node_budget, max_depth, Box::new(Cc2Evaluator::new(weights)))
+    bestfirst_bot(
+        seed,
+        node_budget,
+        max_depth,
+        Box::new(Cc2Evaluator::new(weights)),
+    )
 }
 
 /// A best-first bot over the linear evaluator with explicit [`Weights`] — the
@@ -835,7 +841,12 @@ pub fn bestfirst_weights_bot(
     max_depth: u8,
     weights: Weights,
 ) -> Box<dyn PlayerController> {
-    bestfirst_bot(seed, node_budget, max_depth, Box::new(LinearEvaluator::new(weights)))
+    bestfirst_bot(
+        seed,
+        node_budget,
+        max_depth,
+        Box::new(LinearEvaluator::new(weights)),
+    )
 }
 
 /// The Tier-2 beam bot: a deterministic `BeamPlanner` over the **same** linear
@@ -846,7 +857,12 @@ pub fn bestfirst_weights_bot(
 /// (`max_depth == 1` reproduces the greedy decision exactly — the seam-faithful
 /// gate). Bag speculation past the visible queue is on (the `BeamPlanner` default).
 pub fn beam_linear_bot(seed: u64, beam_width: usize, max_depth: u8) -> Box<dyn PlayerController> {
-    beam_bot(seed, beam_width, max_depth, Box::new(LinearEvaluator::default()))
+    beam_bot(
+        seed,
+        beam_width,
+        max_depth,
+        Box::new(LinearEvaluator::default()),
+    )
 }
 
 /// **Cold Clear 2's evaluator, ported** ([`Cc2Evaluator`]) on our beam — CC2's
@@ -856,7 +872,12 @@ pub fn beam_linear_bot(seed: u64, beam_width: usize, max_depth: u8) -> Box<dyn P
 /// harness on our engine with real garbage — the comparison the TBP bridge could
 /// not give (CC2 has no garbage message). This is the baseline to hillclimb past.
 pub fn beam_cc2_bot(seed: u64, beam_width: usize, max_depth: u8) -> Box<dyn PlayerController> {
-    beam_bot(seed, beam_width, max_depth, Box::new(Cc2Evaluator::default()))
+    beam_bot(
+        seed,
+        beam_width,
+        max_depth,
+        Box::new(Cc2Evaluator::default()),
+    )
 }
 
 /// A beam bot over an explicit linear [`Weights`] set — lets a head-to-head vary
@@ -869,7 +890,12 @@ pub fn beam_weights_bot(
     max_depth: u8,
     weights: Weights,
 ) -> Box<dyn PlayerController> {
-    beam_bot(seed, beam_width, max_depth, Box::new(LinearEvaluator::new(weights)))
+    beam_bot(
+        seed,
+        beam_width,
+        max_depth,
+        Box::new(LinearEvaluator::new(weights)),
+    )
 }
 
 /// Like [`beam_cc2_bot`] but with **custom** CC2 weights — the hillclimb's
@@ -880,7 +906,12 @@ pub fn beam_cc2_weights_bot(
     max_depth: u8,
     weights: Cc2Weights,
 ) -> Box<dyn PlayerController> {
-    beam_bot(seed, beam_width, max_depth, Box::new(Cc2Evaluator::new(weights)))
+    beam_bot(
+        seed,
+        beam_width,
+        max_depth,
+        Box::new(Cc2Evaluator::new(weights)),
+    )
 }
 
 #[cfg(test)]

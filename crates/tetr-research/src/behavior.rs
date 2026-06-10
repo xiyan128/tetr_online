@@ -12,9 +12,7 @@
 
 use std::time::Instant;
 
-use tetr_core::engine::{
-    CellKind, Engine, EngineEvent, EngineScoreAction, PieceType, TSpinKind,
-};
+use tetr_core::engine::{CellKind, Engine, EngineEvent, EngineScoreAction, PieceType, TSpinKind};
 use tetr_core::player::{drive_engine, PlayerController};
 
 use crate::{

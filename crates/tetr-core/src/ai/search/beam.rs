@@ -32,7 +32,6 @@ use crate::ai::search::{
 use crate::ai::state::SearchState;
 use crate::engine::{ColumnView, LockOutcome, PieceType, TSpinKind};
 
-
 /// Multiplicative pessimism applied to a speculative branch's *reward* contribution
 /// per speculative ply (BEAM.md §5): we cannot rely on a piece we have not seen, so
 /// its reward is discounted while the resulting board's static [`Value`] is kept
@@ -287,8 +286,7 @@ impl BeamPlanner {
             for placement in &placements {
                 let mut child = parent.state.clone();
                 // Classify against the pre-lock board, like the concrete path.
-                let t_spin =
-                    crate::engine::classify_t_spin(&placement.piece, &child.board);
+                let t_spin = crate::engine::classify_t_spin(&placement.piece, &child.board);
                 // The hold-aware speculative transition: the same `used_hold` swap as
                 // the concrete path, but dealing `next_piece` (the visible queue is
                 // exhausted at a speculative node) as the new active rather than the
@@ -366,10 +364,10 @@ fn sort_desc_by_score(nodes: &mut [BeamNode]) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::movegen;
-    use crate::ai::search::PlacementPlan;
     use crate::ai::eval::LinearEvaluator;
+    use crate::ai::movegen;
     use crate::ai::search::GreedyPlanner;
+    use crate::ai::search::PlacementPlan;
     use crate::engine::{Board, CellKind, Engine, EngineConfig, InputFrame};
 
     fn linear() -> LinearEvaluator {
@@ -542,7 +540,10 @@ mod tests {
 
         let mut beam = BeamPlanner::new(16);
         let plan = drive(&mut beam, &state, &linear(), SearchBudget::beam(1)).unwrap();
-        assert!(plan.uses_hold(), "beam should hold to bring in the well-clearing I");
+        assert!(
+            plan.uses_hold(),
+            "beam should hold to bring in the well-clearing I"
+        );
         assert_eq!(plan.placement.piece_type(), PieceType::I);
         assert_eq!(plan.placement.path.first(), Some(&movegen::Move::Hold));
     }

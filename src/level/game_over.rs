@@ -163,7 +163,10 @@ fn button_system(
 /// Keyboard fallback so the game-over screen behaves like every other screen:
 /// Enter/Space restarts the run, Esc returns to the main menu. (The buttons
 /// above are mouse-driven; this makes the screen keyboard-navigable.)
-fn keyboard_nav(keys: Res<ButtonInput<KeyCode>>, mut next_game_state: ResMut<NextState<GameState>>) {
+fn keyboard_nav(
+    keys: Res<ButtonInput<KeyCode>>,
+    mut next_game_state: ResMut<NextState<GameState>>,
+) {
     if keys.just_pressed(KeyCode::Escape) {
         next_game_state.set(GameState::MainMenu);
     } else if keys.just_pressed(KeyCode::Enter)

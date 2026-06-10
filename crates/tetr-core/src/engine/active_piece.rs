@@ -69,11 +69,7 @@ impl ActivePiece {
     /// wrongly enable T-spin classification for a piece whose true last action
     /// is unknown. Spawn-fresh history is the conservative truth: it never
     /// classifies a spin the engine might not award.
-    pub fn at_pose(
-        piece_type: PieceType,
-        origin: (isize, isize),
-        rotation: PieceRotation,
-    ) -> Self {
+    pub fn at_pose(piece_type: PieceType, origin: (isize, isize), rotation: PieceRotation) -> Self {
         let mut active = Self::new(piece_type, origin);
         active.piece.rotate_to(rotation);
         active

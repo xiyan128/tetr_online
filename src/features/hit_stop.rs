@@ -212,11 +212,16 @@ mod tests {
             .init_resource::<FrameEvents>()
             // Advance the real clock by a fixed 16 ms per update, independent of
             // wall time, so the countdown is deterministic.
-            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(16)))
+            .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
+                16,
+            )))
             .add_systems(Update, (trigger_hit_stop, tick_hit_stop).chain());
 
         // Frame 1: a Tetris award is on the event bus → freeze begins.
-        app.world_mut().resource_mut::<FrameEvents>().0.push(tetris_award());
+        app.world_mut()
+            .resource_mut::<FrameEvents>()
+            .0
+            .push(tetris_award());
         app.update();
         assert!(
             app.world().resource::<Time<Virtual>>().is_paused(),

@@ -9,9 +9,7 @@ mod common;
 
 use std::hint::black_box;
 
-use criterion::{
-    criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput,
-};
+use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 
 use common::{first_locked, first_placement, play_pieces, search_state, spawner, Scenario};
 use tetr_online::ai::{
@@ -33,24 +31,37 @@ fn bench_movegen(c: &mut Criterion) {
         let no_hold = movegen::generate(&state.board, &state.active).len() as u64;
         group.throughput(Throughput::Elements(no_hold.max(1)));
         group.bench_function(BenchmarkId::new("generate", scenario.name()), |b| {
-            b.iter(|| black_box(movegen::generate(black_box(&state.board), black_box(&state.active))));
-        });
-
-        let with_hold =
-            movegen::generate_with_hold(&state.board, &state.active, state.hold, queue_front, &spawn)
-                .len() as u64;
-        group.throughput(Throughput::Elements(with_hold.max(1)));
-        group.bench_function(BenchmarkId::new("generate_with_hold", scenario.name()), |b| {
             b.iter(|| {
-                black_box(movegen::generate_with_hold(
+                black_box(movegen::generate(
                     black_box(&state.board),
                     black_box(&state.active),
-                    state.hold,
-                    queue_front,
-                    &spawn,
                 ))
             });
         });
+
+        let with_hold = movegen::generate_with_hold(
+            &state.board,
+            &state.active,
+            state.hold,
+            queue_front,
+            &spawn,
+        )
+        .len() as u64;
+        group.throughput(Throughput::Elements(with_hold.max(1)));
+        group.bench_function(
+            BenchmarkId::new("generate_with_hold", scenario.name()),
+            |b| {
+                b.iter(|| {
+                    black_box(movegen::generate_with_hold(
+                        black_box(&state.board),
+                        black_box(&state.active),
+                        state.hold,
+                        queue_front,
+                        &spawn,
+                    ))
+                });
+            },
+        );
     }
     group.finish();
 }

@@ -37,7 +37,6 @@ use crate::ai::search::{
 };
 use crate::ai::state::SearchState;
 
-
 /// Nodes expanded per `plan` call before yielding — the cooperative time-slice unit,
 /// deliberately far below any real node budget (the shipped budget is 150, the bench
 /// default 4000) so an incremental runner actually observes
@@ -163,7 +162,14 @@ impl BestFirstPlanner {
 
     /// Record a child: credit its root's back-up, then enqueue it unless the
     /// transposition table already holds an equal-or-better path to the same state.
-    fn admit(run: &mut Run, child: SearchState, score: i32, acc: Reward, root_index: usize, depth: u8) {
+    fn admit(
+        run: &mut Run,
+        child: SearchState,
+        score: i32,
+        acc: Reward,
+        root_index: usize,
+        depth: u8,
+    ) {
         // `>`: the first maximum wins (canonical order), matching the beam / greedy.
         if score > run.root_best[root_index] {
             run.root_best[root_index] = score;
@@ -201,7 +207,10 @@ impl BestFirstPlanner {
             fingerprint: StateKey::of(state, usize::MAX),
         };
         // Score the roots from the decision point's chain (same as the beam's seed).
-        for (i, (child, score, acc)) in Self::children(state, Reward(0), eval).into_iter().enumerate() {
+        for (i, (child, score, acc)) in Self::children(state, Reward(0), eval)
+            .into_iter()
+            .enumerate()
+        {
             Self::admit(&mut run, child, score, acc, i, 1);
         }
         Some(run)
@@ -344,7 +353,10 @@ mod tests {
 
         let mut sliced = BestFirstPlanner::new();
         assert!(
-            matches!(sliced.plan(&state, &eval, budget), PlannerStep::NeedMoreBudget),
+            matches!(
+                sliced.plan(&state, &eval, budget),
+                PlannerStep::NeedMoreBudget
+            ),
             "a 150-node decision must span multiple {EXPAND_CHUNK}-node slices"
         );
         let sliced_plan = drive(&mut sliced, &state, &eval, budget).unwrap();

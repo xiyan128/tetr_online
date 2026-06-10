@@ -39,9 +39,7 @@
 use core::time::Duration;
 
 use tetr_core::ai::{AiController, Handicap};
-use tetr_core::engine::{
-    Engine, EngineConfig, EngineEvent, EngineSnapshot, SnapshotCell,
-};
+use tetr_core::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot, SnapshotCell};
 use tetr_core::player::{drive_engine, KeyboardController, RawKeyboardFrame};
 use wasm_bindgen::prelude::*;
 
@@ -204,7 +202,11 @@ impl Game {
         // from a bad `performance.now()` delta) must be dropped to 0, not clamped:
         // `NaN.clamp(..)` yields NaN, which would poison `acc` permanently (every
         // `acc >= SIM_DT` then false) and silently freeze the game forever.
-        let dt = if dt_seconds.is_finite() { dt_seconds.clamp(0.0, 0.25) } else { 0.0 };
+        let dt = if dt_seconds.is_finite() {
+            dt_seconds.clamp(0.0, 0.25)
+        } else {
+            0.0
+        };
         self.acc += dt;
         let mut steps = 0;
         while self.acc >= SIM_DT && steps < MAX_STEPS_PER_TICK {
@@ -300,7 +302,11 @@ impl Game {
     /// The next-queue piece indices.
     #[must_use]
     pub fn next_queue(&self) -> Vec<u8> {
-        self.snap.next_queue.iter().map(|p| p.render_index()).collect()
+        self.snap
+            .next_queue
+            .iter()
+            .map(|p| p.render_index())
+            .collect()
     }
 
     /// The held piece index, or `-1` if the hold slot is empty.

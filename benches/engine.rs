@@ -70,7 +70,12 @@ fn bench_primitives(c: &mut Criterion) {
         });
 
         group.bench_function(BenchmarkId::new("classify_t_spin", scenario.name()), |b| {
-            b.iter(|| black_box(classify_t_spin(black_box(&placement.piece), black_box(&state.board))));
+            b.iter(|| {
+                black_box(classify_t_spin(
+                    black_box(&placement.piece),
+                    black_box(&state.board),
+                ))
+            });
         });
     }
     group.finish();

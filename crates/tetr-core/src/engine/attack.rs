@@ -75,7 +75,11 @@ pub fn attack_lines(
 
     let b2b_bonus = u32::from(back_to_back);
     let combo_bonus = COMBO_TABLE[(combo as usize).min(COMBO_TABLE.len() - 1)];
-    let pc_bonus = if perfect_clear { PERFECT_CLEAR_ATTACK } else { 0 };
+    let pc_bonus = if perfect_clear {
+        PERFECT_CLEAR_ATTACK
+    } else {
+        0
+    };
 
     base + b2b_bonus + combo_bonus + pc_bonus
 }
@@ -127,7 +131,10 @@ mod tests {
     #[test]
     fn non_clears_send_nothing() {
         assert_eq!(attack_lines(EngineScoreAction::NoClear, false, 0, false), 0);
-        assert_eq!(attack_lines(EngineScoreAction::SoftDrop, false, 0, false), 0);
+        assert_eq!(
+            attack_lines(EngineScoreAction::SoftDrop, false, 0, false),
+            0
+        );
         assert_eq!(
             attack_lines(EngineScoreAction::HardDrop { cells: 5 }, false, 0, false),
             0

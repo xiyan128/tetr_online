@@ -322,8 +322,7 @@ fn tetris_well(cols: &[u64], heights: &[i32], stack_height: i32) -> i32 {
     let mut depth = 0;
     let mut y = heights[well] as isize;
     while y < stack_height as isize {
-        let complete_except_well =
-            (0..width).all(|x| x == well || filled(cols, x as isize, y));
+        let complete_except_well = (0..width).all(|x| x == well || filled(cols, x as isize, y));
         if !complete_except_well {
             break;
         }

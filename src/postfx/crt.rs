@@ -88,7 +88,12 @@ impl CrtConfig {
     /// through untouched (the node still runs, but as a no-op blit).
     fn to_settings(self, time: f32, enabled: bool) -> CrtSettings {
         CrtSettings {
-            params_a: Vec4::new(time, self.curvature, self.scanline_intensity, self.aberration),
+            params_a: Vec4::new(
+                time,
+                self.curvature,
+                self.scanline_intensity,
+                self.aberration,
+            ),
             params_b: Vec4::new(
                 self.vignette,
                 self.mask_intensity,

@@ -234,7 +234,10 @@ mod tests {
     fn every_entry_has_a_detail() {
         let reg = ModelRegistry::default();
         for i in 0..reg.labels().len() {
-            assert!(!reg.detail(i).is_empty(), "entry {i} is missing its detail blurb");
+            assert!(
+                !reg.detail(i).is_empty(),
+                "entry {i} is missing its detail blurb"
+            );
         }
         assert_eq!(reg.detail(usize::MAX), "", "out of range reads empty");
     }

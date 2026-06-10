@@ -178,11 +178,7 @@ mod tests {
         // Two frames is far too few for the idle controller to lock a piece, so
         // neither the budget nor a top-out is reached first.
         let setup = GameSetup::standard("standard", 1_000).with_frame_cap(2);
-        let outcome = play(
-            &Contender::new("idle", |_seed| Box::new(Idle)),
-            &setup,
-            7,
-        );
+        let outcome = play(&Contender::new("idle", |_seed| Box::new(Idle)), &setup, 7);
         assert_eq!(outcome.termination, Termination::HitFrameCap);
         assert_eq!(outcome.frames, 2);
     }

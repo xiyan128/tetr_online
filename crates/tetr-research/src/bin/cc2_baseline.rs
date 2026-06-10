@@ -97,7 +97,9 @@ struct Sim {
 
 impl Sim {
     fn new() -> Self {
-        Self { rows: vec![0u16; 40] }
+        Self {
+            rows: vec![0u16; 40],
+        }
     }
 
     /// A board pre-filled with `rows` of seeded cheese (each row full except its
@@ -143,7 +145,10 @@ impl Sim {
     /// Place the four cells, then clear full rows; returns lines cleared.
     fn place_and_clear(&mut self, cells: &[(i32, i32); 4]) -> u32 {
         for &(x, y) in cells {
-            assert!((0..WIDTH).contains(&x) && (0..40).contains(&y), "cell out of bounds: ({x},{y})");
+            assert!(
+                (0..WIDTH).contains(&x) && (0..40).contains(&y),
+                "cell out of bounds: ({x},{y})"
+            );
             self.rows[y as usize] |= 1 << x;
         }
         let before = self.rows.len();
@@ -200,8 +205,14 @@ fn sim_to_tbp_board(sim: &Sim) -> TbpBoard {
 /// `EngineScoreAction` for CC2's reported (spin, lines) — feeds the attack table.
 fn action_for(spin: &str, lines: usize) -> EngineScoreAction {
     match spin {
-        "full" => EngineScoreAction::TSpin { kind: TSpinKind::Full, lines },
-        "mini" => EngineScoreAction::TSpin { kind: TSpinKind::Mini, lines },
+        "full" => EngineScoreAction::TSpin {
+            kind: TSpinKind::Full,
+            lines,
+        },
+        "mini" => EngineScoreAction::TSpin {
+            kind: TSpinKind::Mini,
+            lines,
+        },
         _ => match lines {
             1 => EngineScoreAction::Single,
             2 => EngineScoreAction::Double,
@@ -237,7 +248,10 @@ fn advance_queue_hold(
     } else {
         let to_hold = queue.pop_front().unwrap();
         let next = queue.pop_front().unwrap();
-        assert_eq!(placed, next, "empty-hold placed piece mismatch (seed {seed})");
+        assert_eq!(
+            placed, next,
+            "empty-hold placed piece mismatch (seed {seed})"
+        );
         *hold = Some(to_hold);
     }
 }
@@ -246,13 +260,7 @@ fn advance_queue_hold(
 /// is the rows the placement cleared (0 ⇒ no clear: the combo breaks and no attack is
 /// sent). The B2B eligibility is computed **once** and reused for both the bonus gate
 /// (against the *incoming* `b2b`) and the new chain state. Returns the attack sent.
-fn score_cc2_clear(
-    sim: &Sim,
-    spin: &str,
-    lines: usize,
-    combo: &mut u32,
-    b2b: &mut bool,
-) -> u32 {
+fn score_cc2_clear(sim: &Sim, spin: &str, lines: usize, combo: &mut u32, b2b: &mut bool) -> u32 {
     if lines == 0 {
         *combo = 0;
         return 0;
@@ -274,7 +282,10 @@ fn run_one(bin: &str, seed: u64, pieces: usize, think: Duration) -> std::io::Res
 
     let mut cc2 = Cc2::spawn(bin)?;
     let queue_letters: Vec<String> = queue.iter().map(|&p| piece_letter(p).to_string()).collect();
-    let bag: Vec<String> = PieceType::all().iter().map(|&p| piece_letter(p).to_string()).collect();
+    let bag: Vec<String> = PieceType::all()
+        .iter()
+        .map(|&p| piece_letter(p).to_string())
+        .collect();
     cc2.start(&empty_tbp_board(), &queue_letters, None, 0, false, &bag)?;
 
     let mut sim = Sim::new();
@@ -320,8 +331,18 @@ fn run_downstack(
 
     let mut cc2 = Cc2::spawn(bin)?;
     let queue_letters: Vec<String> = queue.iter().map(|&p| piece_letter(p).to_string()).collect();
-    let bag: Vec<String> = PieceType::all().iter().map(|&p| piece_letter(p).to_string()).collect();
-    cc2.start(&cheese_tbp_board(seed, rows), &queue_letters, None, 0, false, &bag)?;
+    let bag: Vec<String> = PieceType::all()
+        .iter()
+        .map(|&p| piece_letter(p).to_string())
+        .collect();
+    cc2.start(
+        &cheese_tbp_board(seed, rows),
+        &queue_letters,
+        None,
+        0,
+        false,
+        &bag,
+    )?;
 
     let mut sim = Sim::with_cheese(seed, rows);
     let mut pieces = 0u32;
@@ -371,9 +392,13 @@ fn run_versus(
     let mut gen = PieceGenerator::with_seed(seed);
     let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE).map(|_| gen.next().unwrap()).collect();
     let mut hold: Option<PieceType> = None;
-    let bag: Vec<String> = PieceType::all().iter().map(|&p| piece_letter(p).to_string()).collect();
-    let q_letters =
-        |q: &VecDeque<PieceType>| -> Vec<String> { q.iter().map(|&p| piece_letter(p).to_string()).collect() };
+    let bag: Vec<String> = PieceType::all()
+        .iter()
+        .map(|&p| piece_letter(p).to_string())
+        .collect();
+    let q_letters = |q: &VecDeque<PieceType>| -> Vec<String> {
+        q.iter().map(|&p| piece_letter(p).to_string()).collect()
+    };
     let mut cc2 = Cc2::spawn(bin)?;
     cc2.start(&empty_tbp_board(), &q_letters(&queue), None, 0, false, &bag)?;
     let mut sim = Sim::new();
@@ -496,7 +521,11 @@ fn main() -> std::io::Result<()> {
                 cc2_cleared += 1;
             }
         }
-        let cc2_mean = if cc2_cleared > 0 { cc2_sum / cc2_cleared as f64 } else { 0.0 };
+        let cc2_mean = if cc2_cleared > 0 {
+            cc2_sum / cc2_cleared as f64
+        } else {
+            0.0
+        };
         println!(
             "downstack {garbage_rows} rows — pieces-to-clear (lower=better): OURS {:.2} ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
             ours.mean_pieces_to_clear,
@@ -534,7 +563,9 @@ fn main() -> std::io::Result<()> {
         }
         let n = seeds.len().max(1) as f64;
         println!("versus_ours_win_rate {:.2}", ours_wins as f64 / n);
-        eprintln!("  !! NOT FAIR: CC2 is crippled by TBP re-sync (see source); treat as infra only.");
+        eprintln!(
+            "  !! NOT FAIR: CC2 is crippled by TBP re-sync (see source); treat as infra only."
+        );
         eprintln!(
             "VERSUS ours vs CC2 | OURS {ours_wins} / CC2 {cc2_wins} / draw {draws} | mean attack ours {:.1} cc2 {:.1} | {} seeds, {max_plies} plies, {think:?}/move",
             ours_atk_sum as f64 / n,

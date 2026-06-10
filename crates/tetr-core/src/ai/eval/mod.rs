@@ -147,7 +147,12 @@ pub trait Evaluator: Send + Sync {
     /// [`evaluate_cols`](Self::evaluate_cols) over the same inputs.
     fn evaluate_batch(
         &self,
-        inputs: &[(&LockOutcome, crate::engine::ColumnView, Option<TSpinKind>, EvalContext)],
+        inputs: &[(
+            &LockOutcome,
+            crate::engine::ColumnView,
+            Option<TSpinKind>,
+            EvalContext,
+        )],
     ) -> Vec<(Value, Reward)> {
         inputs
             .iter()
@@ -190,7 +195,10 @@ impl LinearEvaluator {
         let features = BoardFeatures::extract_cols(cols, lock);
         let value = Value(self.weights.board.dot(&features));
         let board_is_empty = cols.iter().all(|&c| c == 0);
-        (value, reward_for(&self.weights.reward, lock, board_is_empty, t_spin, ctx))
+        (
+            value,
+            reward_for(&self.weights.reward, lock, board_is_empty, t_spin, ctx),
+        )
     }
 }
 
@@ -452,7 +460,8 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(3, 0, CellKind::Some(PieceType::O)); // not a perfect clear
-        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Full), EvalContext::default());
+        let (_v, reward) =
+            eval.evaluate(&lock, &board, Some(TSpinKind::Full), EvalContext::default());
         // tspin2 (410) + b2b (104) = 514.
         assert_eq!(reward, Reward(514));
     }
@@ -481,7 +490,8 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(3, 0, CellKind::Some(PieceType::O));
-        let (_v, reward) = eval.evaluate(&lock, &board, Some(TSpinKind::Mini), EvalContext::default());
+        let (_v, reward) =
+            eval.evaluate(&lock, &board, Some(TSpinKind::Mini), EvalContext::default());
         // mini_tspin (-158) + b2b (104) = -54.
         assert_eq!(reward, Reward(-54));
     }
@@ -498,15 +508,27 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
-        let neutral = compute_reward(&RewardWeights::SURVIVAL, &lock, &board, None, EvalContext::default());
+        let neutral = compute_reward(
+            &RewardWeights::SURVIVAL,
+            &lock,
+            &board,
+            None,
+            EvalContext::default(),
+        );
         let with_chain = compute_reward(
             &RewardWeights::SURVIVAL,
             &lock,
             &board,
             None,
-            EvalContext { combo: 5, b2b: true },
+            EvalContext {
+                combo: 5,
+                b2b: true,
+            },
         );
-        assert_eq!(neutral, with_chain, "attack=0 ⇒ reward independent of combo/B2B");
+        assert_eq!(
+            neutral, with_chain,
+            "attack=0 ⇒ reward independent of combo/B2B"
+        );
     }
 
     #[test]
@@ -521,12 +543,19 @@ mod tests {
         };
         let mut board = Board::new(4, 6);
         board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
-        let ctx = EvalContext { combo: 3, b2b: true };
+        let ctx = EvalContext {
+            combo: 3,
+            b2b: true,
+        };
         let mut with_attack = RewardWeights::SURVIVAL;
         with_attack.attack = 10.0;
         let base = compute_reward(&RewardWeights::SURVIVAL, &lock, &board, None, ctx);
         let scaled = compute_reward(&with_attack, &lock, &board, None, ctx);
-        assert_eq!(scaled.0 - base.0, 60, "delta = w.attack(10) * attack_lines(6)");
+        assert_eq!(
+            scaled.0 - base.0,
+            60,
+            "delta = w.attack(10) * attack_lines(6)"
+        );
     }
 
     #[test]
@@ -552,7 +581,10 @@ mod tests {
             (&stacked, &clear_lock, None),
             (&empty, &clear_lock, Some(TSpinKind::Full)),
         ] {
-            let ctx = EvalContext { combo: 2, b2b: true };
+            let ctx = EvalContext {
+                combo: 2,
+                b2b: true,
+            };
             let bb = crate::engine::BitBoard::from_board(board);
             assert_eq!(
                 eval.evaluate_cols(lock, bb.view(), t_spin, ctx),
@@ -578,8 +610,26 @@ mod tests {
         let mut w = RewardWeights::SURVIVAL;
         w.attack = 10.0;
         let spin = Some(TSpinKind::Mini);
-        let chained = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: true });
-        let fresh = compute_reward(&w, &lock, &board, spin, EvalContext { combo: 0, b2b: false });
+        let chained = compute_reward(
+            &w,
+            &lock,
+            &board,
+            spin,
+            EvalContext {
+                combo: 0,
+                b2b: true,
+            },
+        );
+        let fresh = compute_reward(
+            &w,
+            &lock,
+            &board,
+            spin,
+            EvalContext {
+                combo: 0,
+                b2b: false,
+            },
+        );
         assert_eq!(
             chained.0 - fresh.0,
             10,
@@ -633,7 +683,12 @@ mod tests {
         let bb_a = crate::engine::BitBoard::from_board(&board_a);
         let bb_b = crate::engine::BitBoard::from_board(&board_b);
         let bb_c = crate::engine::BitBoard::from_board(&board_c);
-        let inputs: Vec<(&LockOutcome, crate::engine::ColumnView, Option<TSpinKind>, EvalContext)> = vec![
+        let inputs: Vec<(
+            &LockOutcome,
+            crate::engine::ColumnView,
+            Option<TSpinKind>,
+            EvalContext,
+        )> = vec![
             (&lock_a, bb_a.view(), t_a, ctx),
             (&lock_b, bb_b.view(), t_b, ctx),
             (&lock_c, bb_c.view(), t_c, ctx),

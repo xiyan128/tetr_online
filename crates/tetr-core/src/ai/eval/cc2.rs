@@ -454,7 +454,8 @@ mod tests {
     fn cc2_with_board_params_is_positional() {
         // Distinct value per slot ⇒ a swapped index is caught; non-board fields
         // (e.g. the reward `perfect_clear`) must be left untouched.
-        let p: [f32; Cc2Weights::BOARD_PARAM_COUNT] = std::array::from_fn(|i| (i as f32 + 1.0) * 2.0);
+        let p: [f32; Cc2Weights::BOARD_PARAM_COUNT] =
+            std::array::from_fn(|i| (i as f32 + 1.0) * 2.0);
         let w = Cc2Weights::DEFAULT.with_board_params(&p);
         assert_eq!(w.board_params(), p);
         assert_eq!(w.perfect_clear, Cc2Weights::DEFAULT.perfect_clear);
@@ -467,8 +468,18 @@ mod tests {
         // finite / deterministic.
         let eval = Cc2Evaluator::default();
         let board = Board::new(10, 20);
-        let (v1, r1) = eval.evaluate(&no_clear_lock(PieceType::O), &board, None, EvalContext::default());
-        let (v2, r2) = eval.evaluate(&no_clear_lock(PieceType::O), &board, None, EvalContext::default());
+        let (v1, r1) = eval.evaluate(
+            &no_clear_lock(PieceType::O),
+            &board,
+            None,
+            EvalContext::default(),
+        );
+        let (v2, r2) = eval.evaluate(
+            &no_clear_lock(PieceType::O),
+            &board,
+            None,
+            EvalContext::default(),
+        );
         assert_eq!((v1, r1), (v2, r2), "evaluation is deterministic");
         assert_eq!(r1, Reward(0), "a no-clear non-T lock earns no reward");
     }
@@ -482,8 +493,18 @@ mod tests {
         let mut holey = Board::new(10, 20);
         holey.set(0, 1, CellKind::Some(PieceType::I)); // cell at y=1 with empty y=0 below
 
-        let (clean_v, _) = eval.evaluate(&no_clear_lock(PieceType::O), &clean, None, EvalContext::default());
-        let (holey_v, _) = eval.evaluate(&no_clear_lock(PieceType::O), &holey, None, EvalContext::default());
+        let (clean_v, _) = eval.evaluate(
+            &no_clear_lock(PieceType::O),
+            &clean,
+            None,
+            EvalContext::default(),
+        );
+        let (holey_v, _) = eval.evaluate(
+            &no_clear_lock(PieceType::O),
+            &holey,
+            None,
+            EvalContext::default(),
+        );
         assert!(
             holey_v < clean_v,
             "a covered hole must reduce Value: holey {holey_v:?} vs clean {clean_v:?}"
@@ -514,7 +535,10 @@ mod tests {
             "Tetris {tetris_r:?} must out-reward a single {single_r:?}"
         );
         assert!(tetris_r.0 > 0, "a Tetris is a positive reward");
-        assert!(single_r.0 < 0, "a single is penalised (CC2 normal_clears[1] < 0)");
+        assert!(
+            single_r.0 < 0,
+            "a single is penalised (CC2 normal_clears[1] < 0)"
+        );
     }
 
     #[test]
@@ -522,7 +546,12 @@ mod tests {
         let eval = Cc2Evaluator::default();
         let board = Board::new(10, 20);
         // A T that clears nothing: wasted.
-        let (_, r) = eval.evaluate(&no_clear_lock(PieceType::T), &board, None, EvalContext::default());
+        let (_, r) = eval.evaluate(
+            &no_clear_lock(PieceType::T),
+            &board,
+            None,
+            EvalContext::default(),
+        );
         // wasted_t = -1.5 (× SCALE).
         assert_eq!(r, Reward((-1.5 * SCALE).round() as i32));
     }
@@ -535,7 +564,12 @@ mod tests {
         for x in 0..9 {
             board.set(x, 0, CellKind::Some(PieceType::I));
         }
-        let (v, _r) = dyn_eval.evaluate(&no_clear_lock(PieceType::O), &board, None, EvalContext::default());
+        let (v, _r) = dyn_eval.evaluate(
+            &no_clear_lock(PieceType::O),
+            &board,
+            None,
+            EvalContext::default(),
+        );
         assert!(v.0.abs() < 1_000_000, "value stays in a sane range: {v:?}");
     }
 
@@ -555,15 +589,34 @@ mod tests {
             cleared_rows: vec![0],
             top_y_after_lock: None,
         };
-        let reward = |combo: u32| eval.evaluate(&clear, &board, None, EvalContext { combo, b2b: false }).1 .0;
+        let reward = |combo: u32| {
+            eval.evaluate(&clear, &board, None, EvalContext { combo, b2b: false })
+                .1
+                 .0
+        };
 
         // floor((combo - 1) / 2) == 0 for combo 0, 1, 2 (and combo 0 must not underflow
         // the u32 subtraction).
-        assert_eq!(reward(0), reward(1), "combo 0 and 1 add the same combo attack (0)");
-        assert_eq!(reward(1), reward(2), "combo 2 still adds 0 -- floor((combo-1)/2), not combo/2");
+        assert_eq!(
+            reward(0),
+            reward(1),
+            "combo 0 and 1 add the same combo attack (0)"
+        );
+        assert_eq!(
+            reward(1),
+            reward(2),
+            "combo 2 still adds 0 -- floor((combo-1)/2), not combo/2"
+        );
         // Steps up at 3 (floor(2/2) = 1), flat at 4, steps again at 5 (floor(4/2) = 2).
-        assert!(reward(3) > reward(2), "combo 3 adds the first combo-attack step");
-        assert_eq!(reward(3), reward(4), "the staircase is flat between odd combos");
+        assert!(
+            reward(3) > reward(2),
+            "combo 3 adds the first combo-attack step"
+        );
+        assert_eq!(
+            reward(3),
+            reward(4),
+            "the staircase is flat between odd combos"
+        );
         assert!(reward(5) > reward(3), "combo 5 adds a second step");
     }
 
@@ -578,9 +631,25 @@ mod tests {
         let lock = no_clear_lock(PieceType::O);
         let value = |ctx| eval.evaluate(&lock, &board, None, ctx).0 .0;
 
-        let base = value(EvalContext { combo: 0, b2b: false });
-        assert!(value(EvalContext { combo: 0, b2b: true }) > base, "b2b raises Value");
-        assert_eq!(value(EvalContext { combo: 5, b2b: false }), base, "combo does not affect Value");
+        let base = value(EvalContext {
+            combo: 0,
+            b2b: false,
+        });
+        assert!(
+            value(EvalContext {
+                combo: 0,
+                b2b: true
+            }) > base,
+            "b2b raises Value"
+        );
+        assert_eq!(
+            value(EvalContext {
+                combo: 5,
+                b2b: false
+            }),
+            base,
+            "combo does not affect Value"
+        );
     }
 
     #[test]
@@ -618,7 +687,10 @@ mod tests {
             (no_clear_lock(PieceType::T), None),
             (clear_lock, Some(TSpinKind::Full)),
         ] {
-            let ctx = EvalContext { combo: 3, b2b: true };
+            let ctx = EvalContext {
+                combo: 3,
+                b2b: true,
+            };
             let bb = crate::engine::BitBoard::from_board(&board);
             assert_eq!(
                 eval.evaluate_cols(&lock, bb.view(), t_spin, ctx),
@@ -656,7 +728,10 @@ mod tests {
     fn tslot_detectors_ignore_a_flat_or_plain_well_board() {
         // Flat surface: no notch anywhere.
         assert_eq!(well_known_tslot_left(&cols_from(&[&[0], &[0], &[0]])), None);
-        assert_eq!(well_known_tslot_right(&cols_from(&[&[0], &[0], &[0]])), None);
+        assert_eq!(
+            well_known_tslot_right(&cols_from(&[&[0], &[0], &[0]])),
+            None
+        );
         // A plain 1-wide well with no lid is a Tetris well, not a T-slot.
         let well = cols_from(&[&[0, 1], &[], &[0, 1]]);
         assert_eq!(well_known_tslot_left(&well), None);

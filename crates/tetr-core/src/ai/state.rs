@@ -35,8 +35,8 @@ use smallvec::SmallVec;
 
 use crate::ai::movegen::Placement;
 use crate::engine::{
-    breaks_back_to_back, classify_t_spin, qualifies_for_back_to_back, ActivePiece, BitBoard,
-    Board, CellKind, EngineSnapshot, LockOutcome, Piece, TSpinKind,
+    breaks_back_to_back, classify_t_spin, qualifies_for_back_to_back, ActivePiece, BitBoard, Board,
+    CellKind, EngineSnapshot, LockOutcome, Piece, TSpinKind,
 };
 
 /// The remainder of the current 7-bag: which tetrominoes have **not** yet been
@@ -698,8 +698,7 @@ mod tests {
                         });
                         consumed += 1;
                     }
-                    let state =
-                        SearchState::from_snapshot(&engine.snapshot()).unwrap();
+                    let state = SearchState::from_snapshot(&engine.snapshot()).unwrap();
                     let dealt_this_bag = &stream[(consumed / 7) * 7..consumed];
                     for pt in PieceType::all() {
                         assert_eq!(
@@ -820,7 +819,11 @@ mod tests {
     fn commit_placement_with_occupied_hold_swaps() {
         // hold = Some(I), active = O; committing a used_hold placement swaps the
         // active O into hold and locks the swapped-in I at its resting pose.
-        let state = crafted_state(PieceType::O, Some(PieceType::I), &[PieceType::T, PieceType::Z]);
+        let state = crafted_state(
+            PieceType::O,
+            Some(PieceType::I),
+            &[PieceType::T, PieceType::Z],
+        );
         let queue_len_before = state.queue.len();
         let next_up = state.queue.first().copied().unwrap();
         let bag_before = state.bag;
@@ -842,7 +845,10 @@ mod tests {
         // The displaced active (O) is now held; the I's cells are on the board.
         assert_eq!(s.hold, Some(PieceType::O));
         for (x, y) in &locked_cells {
-            assert!(s.board.occupied(*x, *y), "I cell ({x}, {y}) should be occupied");
+            assert!(
+                s.board.occupied(*x, *y),
+                "I cell ({x}, {y}) should be occupied"
+            );
         }
         // An occupied hold does NOT pull the queue: the swap consumed no queued
         // piece, so the only advance is the next piece becoming active.
@@ -882,10 +888,7 @@ mod tests {
         assert_eq!(s.hold, Some(old_active));
         // Queue advanced by TWO: the swap pulled A, the spawn pulled B → C active.
         assert_eq!(s.active.piece_type(), queue[1]);
-        assert_eq!(
-            s.queue.iter().copied().collect::<Vec<_>>(),
-            vec![queue[2]]
-        );
+        assert_eq!(s.queue.iter().copied().collect::<Vec<_>>(), vec![queue[2]]);
 
         // The bag is untouched: the swapped-in A and the spawned B are both
         // queue-sourced (the generator dealt them long ago; the exported remainder
@@ -1015,7 +1018,11 @@ mod tests {
             .expect("a hold placement exists");
         assert_eq!(hold_placement.piece_type(), queue[0]);
         s.commit_placement(&hold_placement);
-        assert_eq!(s.bag, BagState::full(), "queue-sourced hold commit left the bag alone");
+        assert_eq!(
+            s.bag,
+            BagState::full(),
+            "queue-sourced hold commit left the bag alone"
+        );
 
         // 2) Plain commit draining the queue — still no bag change.
         let plain_placement = placements_of(&s)
@@ -1023,8 +1030,15 @@ mod tests {
             .find(|p| !p.used_hold)
             .expect("a no-hold placement exists");
         s.commit_placement(&plain_placement);
-        assert_eq!(s.bag, BagState::full(), "queue-sourced plain commit left the bag alone");
-        assert!(s.queue.is_empty(), "the two commits drained the 2-piece queue");
+        assert_eq!(
+            s.bag,
+            BagState::full(),
+            "queue-sourced plain commit left the bag alone"
+        );
+        assert!(
+            s.queue.is_empty(),
+            "the two commits drained the 2-piece queue"
+        );
 
         // 3) Speculative commit past the queue: the supplied piece IS a bag draw.
         let spec_placement = placements_of(&s)
@@ -1032,7 +1046,13 @@ mod tests {
             .find(|p| !p.used_hold)
             .expect("a placement for the active piece exists");
         s.commit_placement_with_next(&spec_placement, PieceType::S);
-        assert!(!s.bag.contains(PieceType::S), "the speculative S was dealt from the bag");
-        assert!(s.bag.contains(PieceType::Z), "undealt pieces remain available");
+        assert!(
+            !s.bag.contains(PieceType::S),
+            "the speculative S was dealt from the bag"
+        );
+        assert!(
+            s.bag.contains(PieceType::Z),
+            "undealt pieces remain available"
+        );
     }
 }

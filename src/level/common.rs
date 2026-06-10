@@ -240,8 +240,15 @@ pub fn spawn_snapshot_block(
     piece_type: PieceType,
     block_kind: BlockKind,
 ) -> Entity {
-    let entity =
-        spawn_free_block(commands, config, texture_assets, x, y, Some(piece_type), block_kind);
+    let entity = spawn_free_block(
+        commands,
+        config,
+        texture_assets,
+        x,
+        y,
+        Some(piece_type),
+        block_kind,
+    );
     commands
         .entity(entity)
         .insert(DespawnOnExit(GameState::Playing));

@@ -23,7 +23,9 @@ use rand::{RngExt, SeedableRng};
 use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy};
-use crate::ai::search::{score_placement, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget};
+use crate::ai::search::{
+    score_placement, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget,
+};
 
 /// How many of the top placements the imperfection softmax samples from. A small
 /// window keeps a "mistake" *plausible* (a near-best alternative) rather than
@@ -221,8 +223,12 @@ mod tests {
     #[test]
     fn empty_board_still_decides() {
         let active = movegen::spawn_piece(PieceType::T, 6, 12);
-        let state =
-            crate::ai::state::SearchState::for_test(Board::new(6, 12), active, None, std::iter::empty());
+        let state = crate::ai::state::SearchState::for_test(
+            Board::new(6, 12),
+            active,
+            None,
+            std::iter::empty(),
+        );
         let mut policy = SearchPolicy::greedy(0.0, 7);
         let _ = placed(policy.decide(&state));
     }

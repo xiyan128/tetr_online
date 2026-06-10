@@ -45,9 +45,7 @@ fn print_delta(label: &str, s: &MarathonStats, baseline: &MarathonStats) {
     } else {
         "below baseline"
     };
-    println!(
-        "\n{label} vs baseline score/sec: {delta:+.2} ({pct:+.1}%) — {verdict}"
-    );
+    println!("\n{label} vs baseline score/sec: {delta:+.2} ({pct:+.1}%) — {verdict}");
 }
 
 fn main() {

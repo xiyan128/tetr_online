@@ -285,7 +285,10 @@ mod tests {
             .lock_result(GoalSystem::Fixed, Some(TSpinKind::Mini), 2)
             .expect("a mini double scores");
         assert_eq!(first.score, 400, "TSMD base = 400 x level 1");
-        assert!(!first.back_to_back_bonus, "first qualifying clear starts the chain");
+        assert!(
+            !first.back_to_back_bonus,
+            "first qualifying clear starts the chain"
+        );
         assert!(s.back_to_back_active());
 
         // A second mini double continues the chain: 400 + 50% = 600.
