@@ -32,7 +32,10 @@
 //! Each [`poll`](AiController::poll):
 //! 1. **Detect a new piece.** If the active piece's identity changed (or the board
 //!    did under the same piece), the current plan is stale: cancel the in-flight
-//!    decision, clear the queued frames, and start a fresh think.
+//!    decision, clear the queued frames, and start a fresh think. The one
+//!    *expected* change is exempt: a plan-initiated hold swap is pre-targeted
+//!    when the plan is applied (see [`PieceSignature`]), so the bot's own hold
+//!    never discards its own maneuver.
 //! 2. **Pump.** Poll the runner every frame and buffer a finished [`Decision`].
 //!    A cooperative venue ([`SlicedRunner`]) does its per-frame quantum of search
 //!    *inside* that poll, so the thinking overlaps the reaction window below —
@@ -106,6 +109,13 @@ pub struct AiController {
 /// boundary); pairing it with the locked-cell count distinguishes "same piece,
 /// same board" (keep the current decision) from "new piece spawned" or "board
 /// changed under us" (re-decide). Cheap to compute from a snapshot and `Eq`.
+///
+/// One transition is *expected* rather than new: a plan that begins with a hold
+/// swaps the active piece one frame later. [`AiController::apply_decision`]
+/// retargets `piece_type` to the post-hold piece when it enqueues such a plan, so
+/// the swap the controller itself caused never discards the rest of the maneuver
+/// (which used to re-pay the reaction delay *and* a full search on every held
+/// piece).
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct PieceSignature {
     piece_type: PieceType,
@@ -218,6 +228,19 @@ impl AiController {
             // leave the plan empty so we emit neutral frames.
             Decision::None => {}
             Decision::Place(placement) => {
+                // A plan that begins with a hold swaps the active piece one frame
+                // from now. That swap is the controller's own doing, not a new
+                // planning situation: retarget the expected signature to the
+                // post-hold piece (`placement.piece_type()` — the resting pose is
+                // the swapped-in piece) so the maneuver continues uninterrupted.
+                // The board is untouched by a hold, so `locked_cells` stands; if
+                // the engine somehow doesn't swap, the mismatch re-plans — the
+                // safe fallback either way.
+                if placement.used_hold {
+                    if let Some(signature) = self.planning_for.as_mut() {
+                        signature.piece_type = placement.piece_type();
+                    }
+                }
                 // Render against the board the maneuver happens on, from the active
                 // piece's current pose — the inputs `placement_to_inputs` round-trips.
                 let frames = placement_to_inputs(&obs.board.to_array2d(), &obs.active, &placement);
@@ -491,6 +514,73 @@ mod tests {
             || frame.rotate_clockwise
             || frame.rotate_counterclockwise
             || frame.hold
+    }
+
+    /// A policy that always plays a hold-using placement when one exists — the
+    /// probe for the hold-replan fix (a plan beginning with `Move::Hold` must
+    /// execute to the end, not be discarded when the swap lands).
+    struct AlwaysHold;
+    impl Policy for AlwaysHold {
+        fn decide(&mut self, obs: &crate::ai::policy::Observation) -> Decision {
+            crate::ai::search::hold_placements(obs)
+                .into_iter()
+                .find(|p| p.used_hold)
+                .map(Decision::Place)
+                .unwrap_or(Decision::None)
+        }
+    }
+
+    #[test]
+    fn a_hold_plan_executes_without_a_second_reaction() {
+        // The double-reaction bug: emitting the plan's leading hold frame swaps
+        // the active piece, which used to read as a "new piece" — discarding the
+        // queued maneuver and re-paying the reaction delay plus a full search on
+        // every held piece. Fixed: the swap is pre-targeted, so the maneuver
+        // continues on the very next poll.
+        let handicap = Handicap {
+            reaction: core::time::Duration::from_millis(200),
+            ..Handicap::perfect()
+        };
+        let mut controller = AiController::with_policy(Box::new(AlwaysHold), handicap.reaction);
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.step(InputFrame::default()); // spawn the first piece
+
+        let mut frames = Vec::new();
+        let mut locked_at = None;
+        for i in 0..120usize {
+            let frame = controller.poll(&engine.snapshot());
+            frames.push(frame.clone());
+            let events = engine.step(frame);
+            if locked_at.is_none()
+                && events
+                    .iter()
+                    .any(|e| matches!(e, crate::engine::EngineEvent::Locked { .. }))
+            {
+                locked_at = Some(i);
+            }
+        }
+
+        let hold_at = frames
+            .iter()
+            .position(|f| f.hold)
+            .expect("the AlwaysHold bot must hold");
+        let locked_at = locked_at.expect("the held placement must lock");
+        assert!(locked_at > hold_at, "the lock comes from the held plan");
+        assert!(
+            pressed_anything(&frames[hold_at + 1]),
+            "the maneuver must continue on the poll right after the hold swap \
+             (a re-reaction gap means the plan was discarded)"
+        );
+        // One reaction window for the whole held placement: between the swap and
+        // the lock there is never another reaction-length idle stretch.
+        let neutral_gap = frames[hold_at + 1..=locked_at]
+            .iter()
+            .filter(|f| !pressed_anything(f))
+            .count();
+        assert!(
+            neutral_gap < 12,
+            "a second reaction window ({neutral_gap} idle frames) was paid after the hold"
+        );
     }
 
     /// An attack-shaped policy (the shipped interactive operating point) for the
