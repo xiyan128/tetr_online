@@ -37,8 +37,14 @@ use rand::{RngExt, SeedableRng};
 const HOLE_SALT: u64 = 0x6172_6261_6765_5F68; // "garbage_h", truncated
 
 /// One queued attack: `lines` garbage rows sharing a single `hole_col`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(crate) struct GarbageBatch {
+///
+/// Public because [`EngineSnapshot`](super::EngineSnapshot) exposes the pending
+/// queue batch-by-batch: hole columns are drawn at queue time from the
+/// receiver's own seeded stream, so they are *determined* — exporting them
+/// gives a search perfect information to model rising exactly (symmetric in
+/// bot-vs-bot; a human-fairness surface could strip them before showing a bot).
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
+pub struct GarbageBatch {
     pub lines: u32,
     pub hole_col: usize,
 }
@@ -58,16 +64,6 @@ impl PendingGarbage {
             batches: VecDeque::new(),
             rng: StdRng::seed_from_u64(engine_seed ^ HOLE_SALT),
         }
-    }
-
-    /// Total pending lines (what a versus UI shows as the incoming meter).
-    /// Saturating: `queue` is a public-facing seam (a netplay peer eventually),
-    /// so an absurd queued total must pin the meter, not panic the snapshot.
-    pub(crate) fn total(&self) -> u32 {
-        self.batches
-            .iter()
-            .map(|b| b.lines)
-            .fold(0u32, u32::saturating_add)
     }
 
     /// Queue an incoming attack of `lines`, drawing its hole column from the
@@ -97,6 +93,11 @@ impl PendingGarbage {
             }
         }
         attack
+    }
+
+    /// The queued batches, oldest first (what the snapshot exports).
+    pub(crate) fn batches(&self) -> impl Iterator<Item = GarbageBatch> + '_ {
+        self.batches.iter().copied()
     }
 
     /// Take the batches that rise after a clear-less lock: oldest first, at most
@@ -129,6 +130,12 @@ impl PendingGarbage {
 mod tests {
     use super::*;
 
+    /// Total pending lines (the lib-side meter lives on `EngineSnapshot` now;
+    /// tests sum the queue directly).
+    fn total(q: &PendingGarbage) -> u32 {
+        q.batches.iter().map(|b| b.lines).sum()
+    }
+
     fn queued(batches: &[(u32, usize)]) -> PendingGarbage {
         let mut q = PendingGarbage::new(7);
         for &(lines, hole) in batches {
@@ -145,12 +152,12 @@ mod tests {
         let mut q = queued(&[(3, 1), (4, 2)]);
         // 5 lines of attack: kills the 3-batch, eats 2 of the 4-batch.
         assert_eq!(q.cancel(5), 0);
-        assert_eq!(q.total(), 2);
+        assert_eq!(total(&q), 2);
         assert_eq!(q.batches.front().unwrap().hole_col, 2);
 
         // 7 attack against the remaining 2: 5 lines leave the board.
         assert_eq!(q.cancel(7), 5);
-        assert_eq!(q.total(), 0);
+        assert_eq!(total(&q), 0);
     }
 
     #[test]
@@ -172,7 +179,7 @@ mod tests {
             ]
         );
         // The remainder of the split batch stays queued, same hole.
-        assert_eq!(q.total(), 4);
+        assert_eq!(total(&q), 4);
         assert_eq!(q.batches.front().unwrap().hole_col, 4);
     }
 

@@ -35,6 +35,7 @@ pub use attack::{attack_lines, COMBO_TABLE, PERFECT_CLEAR_ATTACK};
 pub use bit_board::{BitBoard, ColumnView, Occupancy};
 pub use board::{Board, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
+pub use garbage::GarbageBatch;
 pub use generator::PieceGenerator;
 pub use goals::{
     breaks_back_to_back, fixed_goal_for_level, goal_for_level, qualifies_for_back_to_back,

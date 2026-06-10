@@ -13,7 +13,7 @@ use crate::engine::active_piece::ActivePiece;
 use crate::engine::attack::attack_lines;
 use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};
-use crate::engine::garbage::PendingGarbage;
+use crate::engine::garbage::{GarbageBatch, PendingGarbage};
 use crate::engine::generator::PieceGenerator;
 use crate::engine::goals::GoalSystem;
 use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
@@ -172,10 +172,24 @@ pub struct EngineSnapshot {
     /// alone: the queue window straddles bag boundaries, so any reconstruction is
     /// wrong whenever the active piece is not the first piece of its bag.
     pub bag_remainder: Vec<PieceType>,
-    /// Versus: total pending-garbage lines queued against this player (the
-    /// incoming meter). Always `0` outside versus.
-    pub pending_garbage: u32,
+    /// Versus: the pending-garbage queue against this player, oldest batch
+    /// first (empty outside versus). Hole columns are already determined (drawn
+    /// at queue time from this engine's seeded stream), so a search can model
+    /// rising exactly; [`pending_garbage_total`](Self::pending_garbage_total)
+    /// is the incoming-meter sum a UI shows.
+    pub pending_garbage: Vec<GarbageBatch>,
     pub game_over: Option<GameOverStatus>,
+}
+
+impl EngineSnapshot {
+    /// Total pending-garbage lines (the incoming meter). Saturating, like the
+    /// engine's own meter.
+    pub fn pending_garbage_total(&self) -> u32 {
+        self.pending_garbage
+            .iter()
+            .map(|b| b.lines)
+            .fold(0u32, u32::saturating_add)
+    }
 }
 
 pub struct Engine {
@@ -280,7 +294,7 @@ impl Engine {
             back_to_back_active: self.score_state.back_to_back_active(),
             combo: self.score_state.combo(),
             bag_remainder: self.generator.bag_remainder().to_vec(),
-            pending_garbage: self.garbage.total(),
+            pending_garbage: self.garbage.batches().collect(),
             game_over: self.game_over,
         }
     }
@@ -1648,7 +1662,7 @@ mod tests {
     fn queued_garbage_is_pending_until_a_clear_less_lock() {
         let mut engine = Engine::new(EngineConfig::default(), 7);
         engine.queue_garbage(3);
-        assert_eq!(engine.snapshot().pending_garbage, 3);
+        assert_eq!(engine.snapshot().pending_garbage_total(), 3);
         assert!(
             engine.snapshot().board_cells.is_empty(),
             "queueing alone must not touch the board"
@@ -1657,7 +1671,7 @@ mod tests {
         // A lock that clears nothing: the pending garbage rises beneath it.
         let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
         assert!(events.contains(&EngineEvent::GarbageInserted { lines: 3 }));
-        assert_eq!(engine.snapshot().pending_garbage, 0);
+        assert_eq!(engine.snapshot().pending_garbage_total(), 0);
         // 3 garbage rows of 9 cells (one hole each) plus the locked O.
         assert_eq!(engine.snapshot().board_cells.len(), 3 * 9 + 4);
     }
@@ -1688,7 +1702,7 @@ mod tests {
                 .any(|e| matches!(e, EngineEvent::AttackSent { .. })),
             "a fully-cancelled attack sends nothing"
         );
-        assert_eq!(engine.snapshot().pending_garbage, 1);
+        assert_eq!(engine.snapshot().pending_garbage_total(), 1);
     }
 
     #[test]
@@ -1705,7 +1719,7 @@ mod tests {
             events.contains(&EngineEvent::AttackSent { lines: 10 }),
             "11 gross attack minus 1 cancelled pending line leaves 10: {events:?}"
         );
-        assert_eq!(engine.snapshot().pending_garbage, 0);
+        assert_eq!(engine.snapshot().pending_garbage_total(), 0);
     }
 
     #[test]
@@ -1719,12 +1733,12 @@ mod tests {
 
         lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 12)));
         assert_eq!(
-            engine.snapshot().pending_garbage,
+            engine.snapshot().pending_garbage_total(),
             2,
             "the cap holds 2 of the 6 lines back"
         );
         lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 14)));
-        assert_eq!(engine.snapshot().pending_garbage, 0);
+        assert_eq!(engine.snapshot().pending_garbage_total(), 0);
 
         // All 6 garbage rows came from one batch, so they share one hole column.
         let cells = engine.snapshot().board_cells;
@@ -1788,7 +1802,7 @@ mod tests {
             "a dying lock must not send: {events:?}"
         );
         assert_eq!(
-            engine.snapshot().pending_garbage,
+            engine.snapshot().pending_garbage_total(),
             1,
             "a dying lock must not consume its own pending queue either"
         );
@@ -1812,7 +1826,7 @@ mod tests {
         let cells_before = engine.snapshot().board_cells.len();
         engine.queue_garbage(5);
         assert_eq!(
-            engine.snapshot().pending_garbage,
+            engine.snapshot().pending_garbage_total(),
             0,
             "a finished game accepts no more attack"
         );
