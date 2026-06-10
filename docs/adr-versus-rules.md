@@ -54,6 +54,30 @@ informational, and gating it on "versus armed" would be hidden statefulness.
   is out of scope for an external-process bridge that already carries
   documented re-sync caveats.
 
+## Addendum (2026-06-10, later): the search sees and models the queue
+
+`EngineSnapshot::pending_garbage` is now the **batch list** (lines + hole
+column — holes are drawn at queue time from the receiver's own stream, so they
+are determined facts, not hidden randomness). `SearchState` mirrors the full
+garbage transition through the *same* shared rule functions the engine's lock
+path calls (`engine::garbage::{cancel, rise}` over one `BatchQueue` type), with
+the same attack inputs and the dying-lock rule — pinned by a 50-piece
+garbage-pressured duel in which the search's predicted future must equal the
+engine's real one every piece, plus deterministic cancellation/rising pins. No
+new eval weights: rising is modeled in the transition, so the existing
+height/hole features price the post-rise board directly. `BitBoard` gained the
+differential-tested mirror of `insert_garbage_lines`. The transposition key
+includes pending (states differing only in queued garbage never transpose).
+Perfect hole information is symmetric in bot-vs-bot; a human-facing surface can
+blind a bot with the research `BlindToGarbage` wrapper (also the A/B
+instrument).
+
+Known gap for a live versus surface (benchmarks are unaffected — attack routes
+between pieces there): the controller's staleness signature does not include
+the pending meter, so an attack arriving *mid-think* would not trigger a
+replan until the next piece. Wire pending into `PieceSignature` when a real-
+time versus surface exists.
+
 ## Deliberately deferred
 
 - **Messiness** (per-line hole-change probability): one hole per batch matches
@@ -61,9 +85,6 @@ informational, and gating it on "versus armed" would be hidden statefulness.
   first win-rate climbs.
 - **Garbage `CellKind`**: garbage rows still paint as I-colour. Needed for a
   real versus UI and clean TBP round-trips; bundled with the versus UI work.
-- **AI awareness**: `SearchState`/`EvalContext` still ignore
-  `pending_garbage`. Exposing it (so search values cancellation and survival)
-  is the first step of the win-rate climb sprint, not a rules concern.
 - **Entry delay / charge timing knobs** beyond the per-lock cap (TETR.IO-style
   delays were dropped with TETR.IO fidelity).
 - **Opponent/targeting concepts** in core (irrelevant below 3+ player modes).

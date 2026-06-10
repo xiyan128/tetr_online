@@ -11,7 +11,10 @@ use std::hint::black_box;
 
 use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
 
-use common::{first_locked, first_placement, play_pieces, search_state, spawner, Scenario};
+use common::{
+    first_locked, first_placement, play_pieces, pressured_search_state, search_state, spawner,
+    Scenario,
+};
 use tetr_online::ai::{
     movegen, think_to_completion, Cc2Evaluator, EvalContext, Evaluator, GreedyPlanner,
     LinearEvaluator, SearchBudget,
@@ -123,6 +126,31 @@ fn bench_transition(c: &mut Criterion) {
                 ))
             });
         });
+    }
+
+    // The pressured paths: with pending garbage the commit also runs the
+    // mirrored cancel/rise transition, and the clone carries the batch list
+    // (inline up to 8 — a spill would make every child clone malloc, which is
+    // exactly what these ids would surface).
+    for batches in [3u32, 6] {
+        let state = pressured_search_state(Scenario::Empty, batches);
+        let placement = first_placement(&state);
+        group.bench_function(
+            BenchmarkId::new("clone", format!("pending{batches}")),
+            |b| {
+                b.iter(|| black_box(black_box(&state).clone()));
+            },
+        );
+        group.bench_function(
+            BenchmarkId::new("commit", format!("pending{batches}")),
+            |b| {
+                b.iter_batched(
+                    || state.clone(),
+                    |mut s| black_box(s.commit_placement(black_box(&placement))),
+                    BatchSize::SmallInput,
+                );
+            },
+        );
     }
     group.finish();
 }

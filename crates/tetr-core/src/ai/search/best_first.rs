@@ -225,8 +225,8 @@ impl BestFirstPlanner {
             let Some(node) = run.frontier.pop() else {
                 break;
             };
-            if node.depth >= run.max_depth || node.state.queue.is_empty() {
-                continue; // leaf — already backed up
+            if node.state.dead || node.depth >= run.max_depth || node.state.queue.is_empty() {
+                continue; // leaf (dead branches are terminal) — already backed up
             }
             run.expanded += 1;
             spent += 1;

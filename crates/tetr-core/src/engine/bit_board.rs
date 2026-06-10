@@ -152,6 +152,48 @@ impl BitBoard {
         self.cols[..self.width].iter().all(|&c| c == 0)
     }
 
+    /// Raise the stack by `count` garbage rows (each row full except
+    /// `hole_col`) — the bit-op mirror of [`Board::insert_garbage_lines`],
+    /// differential-tested against it. Returns `true` when a **pre-existing**
+    /// cell is pushed past the backing grid (the engine's overflow rule; like
+    /// the engine, garbage rows themselves that would not fit are silently
+    /// dropped — only the displaced stack signals the block-out).
+    pub fn insert_garbage_lines(&mut self, count: usize, hole_col: usize) -> bool {
+        if count == 0 {
+            return false;
+        }
+        let hole_col = hole_col.min(self.width.saturating_sub(1));
+        let keep = if self.total_rows >= 64 {
+            u64::MAX
+        } else {
+            (1u64 << self.total_rows) - 1
+        };
+        let fill = if count >= 64 {
+            keep
+        } else {
+            ((1u64 << count) - 1) & keep
+        };
+        let mut overflow = false;
+        for x in 0..self.width {
+            let col = self.cols[x];
+            // Bits at y >= total_rows - count land at or above the backing
+            // grid after the shift: the displaced stack.
+            let pushed_out = if count >= self.total_rows {
+                col
+            } else {
+                col >> (self.total_rows - count)
+            };
+            overflow |= pushed_out != 0;
+            let shifted = if count >= 64 {
+                0
+            } else {
+                (col << count) & keep
+            };
+            self.cols[x] = shifted | if x == hole_col { 0 } else { fill };
+        }
+        overflow
+    }
+
     /// Highest occupied row across all columns, or `None` if empty. (The skyline the
     /// engine reports as `top_y_after_lock`.) Delegates to [`highest_occupied_y`], the
     /// one impl shared with the engine's `lock_and_clear`.
@@ -549,6 +591,51 @@ mod tests {
                 classify_t_spin(&t, &bb),
                 "t-spin classification mismatch at {origin:?}"
             );
+        }
+    }
+
+    #[test]
+    fn insert_garbage_lines_mirrors_the_engine_board() {
+        // The differential gate for the garbage mirror: assorted stacks ×
+        // counts × holes — occupancy and the overflow verdict must match the
+        // engine Board bit for bit (including the quirk that only DISPLACED
+        // cells flag overflow; unfittable garbage rows are silently dropped).
+        let scenarios: [&[(isize, isize)]; 4] = [
+            &[],                                         // empty board
+            &[(0, 0), (3, 2), (9, 1), (5, 7)],           // scattered stack
+            &[(2, 36), (2, 37), (2, 38), (2, 39)],       // column at the ceiling
+            &[(0, 0), (1, 0), (2, 0), (4, 39), (7, 20)], // floor + ceiling mix
+        ];
+        for cells in scenarios {
+            for count in [1usize, 3, 8, 39, 40, 64] {
+                for hole in [0usize, 5, 9, 99] {
+                    let mut board = Board::with_top_margin(10, 20, 20);
+                    for &(x, y) in cells {
+                        board.set(
+                            x,
+                            y,
+                            crate::engine::CellKind::Some(crate::engine::PieceType::J),
+                        );
+                    }
+                    let mut bits = BitBoard::from_board(&board);
+
+                    let board_overflow = board.insert_garbage_lines(count, hole);
+                    let bits_overflow = bits.insert_garbage_lines(count, hole);
+
+                    assert_eq!(
+                        bits_overflow, board_overflow,
+                        "overflow verdict diverged (cells {cells:?} count {count} hole {hole})"
+                    );
+                    let mut expect: Vec<(isize, isize)> = board.cell_coords();
+                    let mut got = bits.cell_coords();
+                    expect.sort_unstable();
+                    got.sort_unstable();
+                    assert_eq!(
+                        got, expect,
+                        "occupancy diverged (cells {cells:?} count {count} hole {hole})"
+                    );
+                }
+            }
         }
     }
 }
