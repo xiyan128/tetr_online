@@ -1,7 +1,7 @@
-//! [`SearchPolicy`]: the search-based AI brain (greedy Tier-1 now, beam Tier-2
-//! later behind the same [`Planner`] seam).
+//! [`SearchPolicy`]: the search-based AI brain (any [`Mind`] paradigm — greedy,
+//! beam, best-first — behind the same seam).
 //!
-//! It wraps a [`Planner`] + [`Evaluator`] and owns the **deliberate-error model**:
+//! It wraps a [`Mind`] + [`Evaluator`] and owns the **deliberate-error model**:
 //! it plans the best placement, then with probability `imperfection` substitutes a
 //! plausible near-best — a top-N softmax over candidate placements — so a
 //! handicapped bot misplays like a human rather than flailing. This error model
@@ -22,9 +22,9 @@ use rand::{RngExt, SeedableRng};
 
 use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
-use crate::ai::policy::{Decision, Observation, Policy};
+use crate::ai::policy::{Decision, Observation, Policy, PolicyProgress};
 use crate::ai::search::{
-    score_placement, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget,
+    score_placement, GreedyPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
 };
 
 /// How many of the top placements the imperfection softmax samples from. A small
@@ -33,14 +33,14 @@ use crate::ai::search::{
 /// now.)
 const ERROR_SAMPLE_WINDOW: usize = 4;
 
-/// A search brain: a [`Planner`] over an [`Evaluator`] under a [`SearchBudget`],
+/// A search brain: a [`Mind`] over an [`Evaluator`] under a [`SearchBudget`],
 /// with a tunable `imperfection` that degrades it into a beatable opponent.
 ///
-/// Owns the planner + evaluator because [`Planner::plan`] takes `&mut self` (an
-/// incremental search carries state between calls), so it cannot be borrowed across
-/// the runner's poll boundary — the policy is its home.
+/// Owns the mind + evaluator because the mind carries an in-flight search between
+/// calls (`&mut self`), so it cannot be borrowed across the runner's poll
+/// boundary — the policy is its home.
 pub struct SearchPolicy {
-    planner: Box<dyn Planner>,
+    mind: Box<dyn Mind>,
     evaluator: Box<dyn Evaluator>,
     budget: SearchBudget,
     /// `0.0..=1.0`: probability of substituting a softmax-sampled near-best
@@ -51,17 +51,17 @@ pub struct SearchPolicy {
 }
 
 impl SearchPolicy {
-    /// Build a search policy from an explicit planner + evaluator + budget. `seed`
+    /// Build a search policy from an explicit mind + evaluator + budget. `seed`
     /// seeds the imperfection RNG (the determinism handle).
     pub fn new(
-        planner: Box<dyn Planner>,
+        mind: Box<dyn Mind>,
         evaluator: Box<dyn Evaluator>,
         budget: SearchBudget,
         imperfection: f32,
         seed: u64,
     ) -> Self {
         Self {
-            planner,
+            mind,
             evaluator,
             budget,
             imperfection,
@@ -81,19 +81,10 @@ impl SearchPolicy {
         )
     }
 
-    /// Run the planner to its final best placement. Loops while it asks for more
-    /// budget so a future incremental (Tier-2) planner works unchanged; greedy
-    /// returns [`PlannerStep::Done`] on the first call. Bounded so a misbehaving
-    /// incremental planner cannot spin forever.
-    fn plan_best(&mut self, obs: &Observation) -> Option<PlacementPlan> {
-        const MAX_STEPS: u32 = 100_000;
-        for _ in 0..MAX_STEPS {
-            match self.planner.plan(obs, self.evaluator.as_ref(), self.budget) {
-                PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => {}
-            }
-        }
-        None
+    /// Whether the current root's search has met its node-budget contract
+    /// (`nodes == 0` is uncapped: only exhaustion makes the decision ready).
+    fn budget_spent(&self) -> bool {
+        self.budget.nodes != 0 && self.mind.nodes_expanded() >= self.budget.nodes
     }
 
     /// Apply the imperfection handicap to the planner's `best`.
@@ -131,8 +122,52 @@ impl SearchPolicy {
 }
 
 impl Policy for SearchPolicy {
+    /// The blocking direct-drive verb: exactly `reroot` + `think`-until-`Ready` +
+    /// `take`, fused — so the one-shot and incremental drivings can never
+    /// disagree on a decision.
     fn decide(&mut self, obs: &Observation) -> Decision {
-        match self.plan_best(obs) {
+        // Bounded like `think_to_completion`: a misbehaving mind (never exhausting
+        // under an uncapped budget) must not spin forever.
+        const MAX_THINK_CALLS: u32 = 100_000;
+
+        self.reroot(obs);
+        for _ in 0..MAX_THINK_CALLS {
+            if self.think(u32::MAX) == PolicyProgress::Ready {
+                break;
+            }
+        }
+        self.take(obs)
+    }
+
+    fn reroot(&mut self, obs: &Observation) {
+        self.mind
+            .reroot(obs, self.evaluator.as_ref(), self.budget.max_depth);
+    }
+
+    fn think(&mut self, quantum: u32) -> PolicyProgress {
+        if self.budget_spent() {
+            return PolicyProgress::Ready;
+        }
+        // Never think past the budget: cap the quantum to what remains (an
+        // uncapped budget leaves the quantum as-is; exhaustion terminates it).
+        let quantum = match self.budget.nodes {
+            0 => quantum,
+            cap => quantum.min(cap.saturating_sub(self.mind.nodes_expanded())),
+        };
+        let progress = self.mind.think(quantum, self.evaluator.as_ref());
+        if progress == ThinkProgress::Exhausted || self.budget_spent() {
+            PolicyProgress::Ready
+        } else {
+            PolicyProgress::Working
+        }
+    }
+
+    /// Anytime: the mind's best-so-far for `obs`, through the imperfection
+    /// model. Reroots first, so a cold take is still a coherent (seeding-quality)
+    /// decision for `obs` rather than a stale root's plan.
+    fn take(&mut self, obs: &Observation) -> Decision {
+        self.reroot(obs);
+        match self.mind.best() {
             Some(best) => Decision::Place(self.apply_imperfection(obs, best).placement),
             None => Decision::None,
         }
@@ -231,5 +266,87 @@ mod tests {
         );
         let mut policy = SearchPolicy::greedy(0.0, 7);
         let _ = placed(policy.decide(&state));
+    }
+
+    /// A real engine state (hold + full queue) for multi-ply incremental tests.
+    fn engine_state(seed: u64) -> Observation {
+        use crate::engine::{Engine, EngineConfig, InputFrame};
+        let mut engine = Engine::new(EngineConfig::default(), seed);
+        engine.step(InputFrame::default());
+        crate::ai::state::SearchState::from_snapshot(&engine.snapshot())
+            .expect("active piece present")
+    }
+
+    /// A best-first attack-shaped policy (the interactive operating point's shape)
+    /// for exercising the incremental verbs.
+    fn best_first_policy(imperfection: f32, seed: u64) -> SearchPolicy {
+        use crate::ai::search::BestFirstPlanner;
+        SearchPolicy::new(
+            Box::new(BestFirstPlanner::new()),
+            Box::new(LinearEvaluator::default()),
+            SearchBudget::best_first(150, 6),
+            imperfection,
+            seed,
+        )
+    }
+
+    #[test]
+    fn incremental_verbs_equal_blocking_decide() {
+        // The fused-verbs contract: reroot + think-until-Ready + take must produce
+        // the decision `decide` produces — including the imperfection RNG stream
+        // (imperfection > 0, same seed, so a draw-count mismatch would diverge).
+        let state = engine_state(7);
+        let mut blocking = best_first_policy(0.9, 42);
+        let mut sliced = best_first_policy(0.9, 42);
+
+        for _ in 0..5 {
+            let db = placed(blocking.decide(&state));
+
+            sliced.reroot(&state);
+            let mut calls = 0;
+            while sliced.think(16) == PolicyProgress::Working {
+                calls += 1;
+                assert!(calls < 1_000, "thinking must reach Ready");
+            }
+            let ds = placed(sliced.take(&state));
+
+            assert_eq!(db.origin(), ds.origin());
+            assert_eq!(db.path, ds.path);
+        }
+    }
+
+    #[test]
+    fn think_reports_ready_exactly_at_the_node_budget() {
+        // The budget is the caller-side meter: 150 nodes in 16-node quanta is
+        // Ready after exactly ceil(150/16) = 10 thinks, never having thought past
+        // the cap (the last quantum is clipped to the remainder).
+        let state = engine_state(7);
+        let mut policy = best_first_policy(0.0, 1);
+        policy.reroot(&state);
+
+        let mut calls = 0;
+        while policy.think(16) == PolicyProgress::Working {
+            calls += 1;
+            assert!(calls < 100, "a 150-node budget must finish");
+        }
+        assert_eq!(calls + 1, 10, "Ready lands on the think that meets the cap");
+        assert_eq!(policy.mind.nodes_expanded(), 150, "never thinks past it");
+    }
+
+    #[test]
+    fn take_is_anytime_valid() {
+        // A deadline-pressed caller can take before Ready — cold (seeding quality)
+        // or mid-think — and always gets a real placement for the observation.
+        let state = engine_state(11);
+
+        // Cold: take without any reroot/think.
+        let mut cold = best_first_policy(0.0, 1);
+        let _ = placed(cold.take(&state));
+
+        // Mid-think: one quantum in.
+        let mut warm = best_first_policy(0.0, 1);
+        warm.reroot(&state);
+        assert_eq!(warm.think(16), PolicyProgress::Working);
+        let _ = placed(warm.take(&state));
     }
 }

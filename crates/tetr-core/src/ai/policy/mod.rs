@@ -48,14 +48,64 @@ pub enum Decision {
     None,
 }
 
+/// Progress of an in-flight policy decision (see [`Policy::think`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PolicyProgress {
+    /// More thinking would still improve the decision (budget unspent, search not
+    /// exhausted) — keep calling [`Policy::think`].
+    Working,
+    /// The decision has reached its contract quality (budget spent or search
+    /// exhausted): [`Policy::take`] returns it at full strength.
+    Ready,
+}
+
 /// The AI brain: decide which placement to play from an [`Observation`].
 ///
 /// Model-agnostic — search, neural, and hybrid policies all implement it, and the
 /// [`AiController`](crate::ai::AiController) shell drives any of them. `Send` so a
 /// policy can run off-thread on native targets (the off-thread runner moves it to a
 /// worker and back).
+///
+/// # One-shot and incremental driving
+///
+/// [`decide`](Policy::decide) is the blocking, direct-drive verb: one call, full
+/// budget — what headless benchmarks and the synchronous runner use.
+///
+/// The three incremental verbs let a venue spread the same decision across frames
+/// (or across a thread boundary) without the policy knowing where it runs:
+///
+/// 1. [`reroot`](Policy::reroot) — point the thinking at `obs`. Cheap when
+///    already rooted there (an in-flight search continues).
+/// 2. [`think`](Policy::think) — spend up to a quantum of work; returns
+///    [`PolicyProgress::Ready`] once the decision's budget contract is met.
+/// 3. [`take`](Policy::take) — the decision **now** (anytime): the best plan so
+///    far plus the policy's own error model. Valid even before `Ready` — a
+///    deadline-pressed caller gets the strongest answer available.
+///
+/// One-shot policies (a neural forward pass, a trivial heuristic) keep the
+/// defaults: instantly `Ready`, with `take` delegating to `decide`. The blocking
+/// `decide` of an incremental policy must equal `reroot` + `think`-until-`Ready` +
+/// `take` — same verbs, fused.
 pub trait Policy: Send {
-    /// Decide the placement to play for `obs`. Any randomness (tie-breaking, the
-    /// imperfection handicap) uses the policy's own seeded RNG — never the engine's.
+    /// Decide the placement to play for `obs` in one blocking call (full budget).
+    /// Any randomness (tie-breaking, the imperfection handicap) uses the policy's
+    /// own seeded RNG — never the engine's.
     fn decide(&mut self, obs: &Observation) -> Decision;
+
+    /// Point the in-flight thinking at `obs` (a no-op when already rooted there).
+    /// One-shot policies have no in-flight state: the default does nothing.
+    fn reroot(&mut self, _obs: &Observation) {}
+
+    /// Spend up to `quantum` units of work on the current root. One-shot policies
+    /// are always instantly [`PolicyProgress::Ready`] (the default).
+    fn think(&mut self, _quantum: u32) -> PolicyProgress {
+        PolicyProgress::Ready
+    }
+
+    /// Take the decision for `obs` **now** — anytime, from whatever has been
+    /// thought so far (re-rooting first if the caller never did). The default
+    /// delegates to the blocking [`decide`](Policy::decide).
+    fn take(&mut self, obs: &Observation) -> Decision {
+        self.decide(obs)
+    }
 }

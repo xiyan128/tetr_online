@@ -1,17 +1,16 @@
-//! The synchronous decision runner (shipped Tier-1 back-end).
+//! The synchronous decision runner (the blocking direct-drive venue).
 //!
 //! [`SyncRunner`] runs the policy inline: [`submit`](super::DecisionRunner::submit)
 //! decides right then and buffers the [`Decision`], and the next
-//! [`poll`](super::DecisionRunner::poll) returns it. The Tier-1 greedy policy is
-//! microseconds per decision, so there is nothing to gain from threads or
-//! time-slicing yet — and a synchronous runner keeps the whole AI path trivially
-//! deterministic and unit-testable. A future off-thread (native worker thread) or
-//! cooperative-WASM time-slice runner would drop in behind the same
-//! [`DecisionRunner`](super::DecisionRunner) trait when a Tier-2 beam (or a heavy
-//! neural forward) makes the decision frame-expensive.
+//! [`poll`](super::DecisionRunner::poll) returns it. This is the venue for
+//! **headless** drivers — benchmarks, tests, research bots — where there is no
+//! frame to hitch and a blocked "frame" is free throughput: exact budgets, zero
+//! pacing, trivially deterministic. Interactive surfaces use the cooperative
+//! [`SlicedRunner`](super::SlicedRunner) instead, which spreads the same work
+//! (and the same decision) across polls.
 //!
 //! The runner **owns** the policy: [`Policy::decide`] takes `&mut self` (the policy
-//! carries its seeded RNG, and an incremental search would carry state between
+//! carries its seeded RNG, and an incremental search carries state between
 //! calls), so it cannot be shared by reference across a poll boundary — the runner
 //! is its home.
 
@@ -45,6 +44,12 @@ impl DecisionRunner for SyncRunner {
     }
 
     fn poll(&mut self) -> Option<Decision> {
+        self.pending.take()
+    }
+
+    fn take_now(&mut self) -> Option<Decision> {
+        // Synchronous decisions are always complete: "best available right now"
+        // is simply the buffered decision.
         self.pending.take()
     }
 

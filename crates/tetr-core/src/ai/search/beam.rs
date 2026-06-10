@@ -1,8 +1,9 @@
 //! The deterministic, batch-shaped beam Tier-2 planner (Colder Clear, STEP 2).
 //!
-//! A CC2-style **beam search** behind the same [`Planner`] trait the greedy Tier-1
-//! planner implements, so it drops in with no controller / policy / runner change.
-//! See `BEAM.md` (this directory) for the design record; the load-bearing pins:
+//! A CC2-style **beam search** behind the same [`Mind`] session seam the greedy
+//! Tier-1 planner implements, so it drops in with no controller / policy / runner
+//! change. See `BEAM.md` (this directory) for the design record; the load-bearing
+//! pins:
 //!
 //! 1. **Determinism (BEAM.md §1).** Zero RNG, no clock. The only tie-breaker is
 //!    movegen's canonical placement order: children are pushed in
@@ -19,15 +20,16 @@
 //!    [`score_placement`] does (clone, classify pre-lock, lock, `value + reward`),
 //!    so a `max_depth == 1` beam reproduces [`GreedyPlanner`]'s decision.
 //!
-//! The planner is **time-sliced**: [`BeamPlanner::plan`] expands exactly one
-//! generation per call and yields [`PlannerStep::NeedMoreBudget`] until it reaches
-//! `budget.max_depth` (or the frontier empties), at which point it returns the
-//! best ply-1 placement. [`SearchPolicy::plan_best`] already drives that loop.
+//! As a session the beam is **batch-grain**: [`Mind::think`] expands exactly one
+//! generation per call regardless of the quantum (a generation is one
+//! [`Evaluator::evaluate_batch`], indivisible by design — pin 3) and reports
+//! [`ThinkProgress::Exhausted`] once it reaches the run's depth cap or the
+//! frontier empties. [`Mind::best`] is the backed-up ply-1 argmax at any point.
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
-    best_root_plan, commit_child, hold_placements, Planner, PlannerStep, RootKey, SearchBudget,
+    best_root_plan, commit_child, hold_placements, Mind, PlacementPlan, RootKey, ThinkProgress,
 };
 use crate::ai::state::SearchState;
 use crate::engine::{ColumnView, LockOutcome, PieceType, TSpinKind};
@@ -80,9 +82,11 @@ struct PendingChild {
     spec_weight: f32,
 }
 
-/// The in-flight search carried on the planner between `plan` calls (BEAM.md §4).
+/// The in-flight session carried on the planner between [`Mind::think`] calls
+/// (BEAM.md §4).
 struct BeamRun {
     /// The ply-1 placements, in canonical movegen order. `root_index` indexes this.
+    /// Empty when the root state had no legal placement (topped out).
     roots: Vec<Placement>,
     /// Best leaf score seen so far per root (the back-up target). `i32::MIN` = unseen.
     root_best: Vec<i32>,
@@ -90,9 +94,14 @@ struct BeamRun {
     frontier: Vec<BeamNode>,
     /// Plies expanded so far (root seeding = depth 1).
     depth: u8,
-    /// Identity of the state this run was seeded from, to detect a stale run (the
-    /// shared [`RootKey`]; compared by value, exact, no hashing).
+    /// Identity of the state this run was seeded from — the [`Mind::reroot`]
+    /// fingerprint (the shared [`RootKey`]; compared by value, exact, no hashing).
     root_key: RootKey,
+    /// Ply cap the run was seeded under; part of the root identity.
+    max_depth: u8,
+    /// Frontier nodes expanded so far (the [`Mind::nodes_expanded`] meter; the
+    /// beam's *termination* is width × depth, never this count).
+    expanded: u32,
 }
 
 /// A deterministic, batch-shaped, time-sliced beam planner (BEAM.md §2/§4/§5/§6).
@@ -123,14 +132,12 @@ impl BeamPlanner {
         self
     }
 
-    /// Seed the run: form the ply-1 root children (depth 1), score them as one batch,
-    /// and build the initial frontier. Returns the seeded [`BeamRun`], or `None` when
-    /// the state has no legal placement (topped out).
-    fn seed(&self, state: &SearchState, eval: &dyn Evaluator) -> Option<BeamRun> {
+    /// Seed a fresh run for `state`: form the ply-1 root children (depth 1), score
+    /// them as one batch, and build the initial frontier. A topped-out state (no
+    /// legal placement) seeds an *empty* run — the fingerprint still records it,
+    /// so re-rooting at the same dead state stays a no-op.
+    fn seed(&self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> BeamRun {
         let roots = hold_placements(state);
-        if roots.is_empty() {
-            return None;
-        }
 
         // Fork + transition each root child in canonical order, through the shared
         // fork → classify pre-lock → commit helper. Root children score with the
@@ -163,15 +170,25 @@ impl BeamPlanner {
             frontier: Vec::new(),
             depth: 1,
             root_key: RootKey::of(state),
+            max_depth,
+            expanded: 0,
         };
         Self::score_into_frontier(&mut run, pending, eval, self.beam_width);
-        Some(run)
+        run
     }
 
     /// Expand one generation from the current frontier: form every child, then hand
     /// the generation to [`score_into_frontier`](Self::score_into_frontier).
-    fn expand_generation(&self, run: &mut BeamRun, eval: &dyn Evaluator) {
+    /// An associated fn (config passed in) so [`Mind::think`] can call it while
+    /// holding the run borrowed out of `self`.
+    fn expand_generation(
+        run: &mut BeamRun,
+        eval: &dyn Evaluator,
+        beam_width: usize,
+        speculate: bool,
+    ) {
         let mut pending: Vec<PendingChild> = Vec::new();
+        run.expanded += run.frontier.len() as u32;
 
         for parent in &run.frontier {
             if parent.state.queue.is_empty() {
@@ -179,7 +196,7 @@ impl BeamPlanner {
                 // node is terminal (no concrete next piece to advance the active). A
                 // terminal node contributes no children; its `root_best` was already
                 // recorded when it entered the frontier, so the back-up keeps it.
-                if self.speculate {
+                if speculate {
                     Self::expand_speculative(parent, &mut pending);
                 }
                 continue;
@@ -206,7 +223,7 @@ impl BeamPlanner {
             }
         }
 
-        Self::score_into_frontier(run, pending, eval, self.beam_width);
+        Self::score_into_frontier(run, pending, eval, beam_width);
         run.depth += 1;
     }
 
@@ -308,50 +325,60 @@ impl BeamPlanner {
     }
 }
 
-impl Planner for BeamPlanner {
-    fn plan(
-        &mut self,
-        state: &SearchState,
-        eval: &dyn Evaluator,
-        budget: SearchBudget,
-    ) -> PlannerStep {
-        // Detect a stale in-flight run: if `plan` is called for a *different* root
-        // state than the one the current run was seeded from, restart from scratch so
-        // a fresh decision never resumes the previous decision's frontier.
-        if let Some(run) = &self.run {
-            if run.root_key != RootKey::of(state) {
-                self.run = None;
-            }
-        }
+/// Whether `run` can expand no further: the depth cap is met or the frontier is
+/// exhausted (every surviving line is terminal). The back-up `root_best` already
+/// holds the best score each ply-1 root ever achieved, so [`Mind::best`] is
+/// correct even if a root's descendants were all pruned (BEAM.md §4).
+fn exhausted(run: &BeamRun) -> bool {
+    run.depth >= run.max_depth || run.frontier.is_empty()
+}
 
-        // First call for this decision: seed depth 1 (== greedy when max_depth == 1).
-        // Seeding is itself generation 1; this call does **not** also expand, so a
-        // depth >= 2 search yields here and resumes on the next call (one generation
-        // per `plan`, BEAM.md §4).
-        let run = match self.run.take() {
-            None => match self.seed(state, eval) {
-                Some(run) => run,
-                None => return PlannerStep::Done(None), // topped out: no legal placement
-            },
-            // A run from a prior call: advance exactly one more generation.
-            Some(mut run) => {
-                self.expand_generation(&mut run, eval);
-                run
-            }
+impl Mind for BeamPlanner {
+    fn reroot(&mut self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) {
+        // A different root state — or a different depth cap — is a different
+        // search: discard the stale run so a fresh decision never resumes the
+        // previous decision's frontier. Seeding is itself generation 1 (== greedy
+        // when max_depth == 1, BEAM.md §8).
+        let root_key = RootKey::of(state);
+        if self
+            .run
+            .as_ref()
+            .is_some_and(|run| run.root_key == root_key && run.max_depth == max_depth)
+        {
+            return; // already rooted here: the in-flight search continues
+        }
+        self.run = Some(self.seed(state, eval, max_depth));
+    }
+
+    /// **Batch-grain**: one whole generation per call, regardless of `quantum` — a
+    /// generation is a single [`Evaluator::evaluate_batch`] and is indivisible by
+    /// design (BEAM.md §7, the seam a neural value net needs).
+    fn think(&mut self, _quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
+        let (beam_width, speculate) = (self.beam_width, self.speculate);
+        let Some(run) = self.run.as_mut() else {
+            return ThinkProgress::Exhausted; // never rooted: nothing to think about
         };
-
-        // Terminate when the depth cap is met or the frontier is exhausted (every
-        // surviving line is terminal). The back-up `root_best` already holds the best
-        // score each ply-1 root ever achieved, so the decision is correct even if a
-        // root's descendants were all pruned (BEAM.md §4).
-        if run.depth >= budget.max_depth || run.frontier.is_empty() {
-            let plan = best_root_plan(&run.roots, &run.root_best);
-            self.run = None; // decision complete: the next call re-seeds
-            PlannerStep::Done(Some(plan))
-        } else {
-            self.run = Some(run);
-            PlannerStep::NeedMoreBudget
+        if exhausted(run) {
+            return ThinkProgress::Exhausted;
         }
+        Self::expand_generation(run, eval, beam_width, speculate);
+        if exhausted(run) {
+            ThinkProgress::Exhausted
+        } else {
+            ThinkProgress::Working
+        }
+    }
+
+    fn best(&self) -> Option<PlacementPlan> {
+        let run = self.run.as_ref()?;
+        if run.roots.is_empty() {
+            return None; // topped out: no legal placement existed at the root
+        }
+        Some(best_root_plan(&run.roots, &run.root_best))
+    }
+
+    fn nodes_expanded(&self) -> u32 {
+        self.run.as_ref().map_or(0, |run| run.expanded)
     }
 }
 
@@ -366,29 +393,21 @@ mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
     use crate::ai::movegen;
-    use crate::ai::search::GreedyPlanner;
-    use crate::ai::search::PlacementPlan;
+    use crate::ai::search::{GreedyPlanner, SearchBudget};
     use crate::engine::{Board, CellKind, Engine, EngineConfig, InputFrame};
 
     fn linear() -> LinearEvaluator {
         LinearEvaluator::default()
     }
 
-    /// Drive a planner to a single `Done` plan, looping while it asks for budget
-    /// (mirrors `SearchPolicy::plan_best`).
+    /// Drive a mind to its final plan in one blocking call (the direct-drive venue).
     fn drive(
-        planner: &mut dyn Planner,
+        mind: &mut dyn Mind,
         state: &SearchState,
         eval: &dyn Evaluator,
         budget: SearchBudget,
     ) -> Option<PlacementPlan> {
-        for _ in 0..10_000 {
-            match planner.plan(state, eval, budget) {
-                PlannerStep::Done(plan) => return plan,
-                PlannerStep::NeedMoreBudget => {}
-            }
-        }
-        panic!("planner never finished");
+        crate::ai::search::think_to_completion(mind, state, eval, budget)
     }
 
     /// The Tetris-well fixture greedy's tests use: a 4-wide board, cols 0-2 filled
@@ -489,37 +508,50 @@ mod tests {
         let state = SearchState::for_test(board, active, None, std::iter::empty());
         if hold_placements(&state).is_empty() {
             let mut beam = BeamPlanner::new(8);
-            assert!(matches!(
-                beam.plan(&state, &linear(), SearchBudget::beam(2)),
-                PlannerStep::Done(None)
-            ));
+            assert!(drive(&mut beam, &state, &linear(), SearchBudget::beam(2)).is_none());
+            // The dead root is still fingerprinted: re-rooting at it stays a no-op
+            // (no per-call re-seed of a state that can never produce a plan).
+            beam.reroot(&state, &linear(), 2);
+            assert!(beam.best().is_none());
         }
     }
 
     #[test]
-    fn beam_yields_then_done_at_depth2() {
-        // At depth 2 the first call must yield `NeedMoreBudget`, then a later call
-        // returns `Done` (the time-slice contract, BEAM.md §4).
+    fn beam_thinks_one_generation_per_call() {
+        // The batch-grain session contract (BEAM.md §4): seeding is generation 1
+        // and makes `best()` immediately valid; each `think` is one generation; a
+        // depth-3 run takes exactly two thinks to exhaust — and `best()` stays a
+        // valid plan at every point in between (the anytime contract).
         let state = engine_snapshot_state(11);
         let mut beam = BeamPlanner::new(16);
-        let first = beam.plan(&state, &linear(), SearchBudget::beam(2));
-        assert!(
-            matches!(first, PlannerStep::NeedMoreBudget),
-            "depth-2 beam should yield after seeding depth 1"
+
+        beam.reroot(&state, &linear(), 3);
+        let seeded = beam.best().expect("best is valid right after seeding");
+
+        assert_eq!(
+            beam.think(u32::MAX, &linear()),
+            ThinkProgress::Working,
+            "after generation 2 of 3 the beam still has work"
         );
-        // Drive to completion.
-        let mut steps = 1;
-        loop {
-            match beam.plan(&state, &linear(), SearchBudget::beam(2)) {
-                PlannerStep::Done(plan) => {
-                    assert!(plan.is_some());
-                    break;
-                }
-                PlannerStep::NeedMoreBudget => {
-                    steps += 1;
-                    assert!(steps < 100, "beam should finish within a few generations");
-                }
-            }
+        assert!(beam.best().is_some(), "anytime best between generations");
+
+        assert_eq!(
+            beam.think(u32::MAX, &linear()),
+            ThinkProgress::Exhausted,
+            "generation 3 reaches the depth cap"
+        );
+        let final_plan = beam.best().expect("final best");
+
+        // Deeper search may refine the choice but never invalidates it: both are
+        // legal root placements (the seeded one was checked by construction here).
+        let legal = hold_placements(&state);
+        for plan in [&seeded, &final_plan] {
+            assert!(
+                legal.iter().any(|p| p.origin() == plan.placement.origin()
+                    && p.rotation() == plan.placement.rotation()
+                    && p.path == plan.placement.path),
+                "anytime best is a real root placement"
+            );
         }
     }
 

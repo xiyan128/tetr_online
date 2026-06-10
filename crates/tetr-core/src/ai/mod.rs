@@ -21,7 +21,8 @@
 //!
 //! - [`state`] (AI3.1) — cheap cloneable search state from a snapshot.
 //! - [`eval`] (AI3.2) — the `(Value, Reward)` evaluator seam.
-//! - [`movegen`] + [`search`] (AI3.3) — reachable placements + the planner.
+//! - [`movegen`] + [`search`] (AI3.3) — reachable placements + the anytime
+//!   search session ([`Mind`]).
 //! - [`plan`] (AI3.4) — placement → [`InputFrame`](crate::engine::InputFrame)s.
 //! - [`runner`] + [`controller`] (AI3.5) — the compute seam and the
 //!   [`AiController`] (a [`PlayerController`](crate::player::PlayerController)).
@@ -48,8 +49,9 @@ pub use handicap::Handicap;
 pub use movegen::{generate, generate_with_hold, Move, Placement};
 pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
-pub use runner::{DecisionRunner, SyncRunner};
+pub use runner::{DecisionRunner, SlicedRunner, SyncRunner};
 pub use search::{
-    BeamPlanner, BestFirstPlanner, GreedyPlanner, PlacementPlan, Planner, PlannerStep, SearchBudget,
+    think_to_completion, BeamPlanner, BestFirstPlanner, GreedyPlanner, Mind, PlacementPlan,
+    SearchBudget, ThinkProgress,
 };
 pub use state::{BagState, SearchState};
