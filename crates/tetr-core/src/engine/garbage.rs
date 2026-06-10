@@ -61,8 +61,13 @@ impl PendingGarbage {
     }
 
     /// Total pending lines (what a versus UI shows as the incoming meter).
+    /// Saturating: `queue` is a public-facing seam (a netplay peer eventually),
+    /// so an absurd queued total must pin the meter, not panic the snapshot.
     pub(crate) fn total(&self) -> u32 {
-        self.batches.iter().map(|b| b.lines).sum()
+        self.batches
+            .iter()
+            .map(|b| b.lines)
+            .fold(0u32, u32::saturating_add)
     }
 
     /// Queue an incoming attack of `lines`, drawing its hole column from the

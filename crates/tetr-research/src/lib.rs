@@ -431,11 +431,20 @@ pub fn evaluate_downstack(
 }
 
 // --- Versus (mutual garbage) benchmark ---------------------------------------
-// The complete head-to-head: both bots play the identical piece sequence; line
-// clears convert to attack (guideline table), attack cancels the opponent's
-// incoming garbage queue, and un-cancelled garbage is dumped onto the receiver.
-// A player loses by topping out. This is Cold Clear 2's home turf — the metric
-// that actually decides "beat CC2", as opposed to one-sided downstacking.
+// The complete head-to-head: both bots play the identical piece sequence and a
+// player loses by topping out. The garbage RULES (cancellation, rising after
+// clear-less locks, the per-lock cap, hole choice) are the ENGINE's — see
+// tetr-core's garbage module — and `play_versus` only routes each side's net
+// AttackSent to the other side's queue. The `GarbageQueue` below is a HARNESS
+// scheduler kept for the scripted pressure scenarios (behavior.rs Faucet) and
+// the TBP referee (`cc2_baseline`), which inserts raw and does its own
+// bookkeeping. NOTE one deliberate divergence: this harness queue settles the
+// OLDEST garbage lowest (drain_newest_first), while the engine's chronological
+// rising leaves the NEWEST batch lowest — boards from the two paths are not
+// comparable for multi-batch deliveries, and `cc2_baseline` win rates are not
+// like-for-like with `play_versus` (the referee also keeps the old wholesale
+// dump timing). This is Cold Clear 2's home turf — the metric that actually
+// decides "beat CC2", as opposed to one-sided downstacking.
 
 /// Frames a single piece may take before we treat the bot as wedged (~4.3s at 60 Hz
 /// — far beyond any real per-piece search, so only a genuinely stuck bot trips it).
@@ -607,9 +616,11 @@ pub struct VersusOutcome {
     pub b_topped: bool,
 }
 
-/// Salt folding the match seed into the versus garbage-hole RNG, decorrelating hole
-/// placement from the (same-seeded) piece stream. `cc2_baseline`'s referee mirrors
-/// this stream, so the constant must stay shared — never inline a copy.
+/// Salt folding the match seed into the HARNESS-side garbage-hole RNG used by the
+/// TBP referee (`cc2_baseline`), decorrelating hole placement from the
+/// (same-seeded) piece stream. `play_versus` no longer draws holes here at all:
+/// engine-rules matches use each receiver engine's own internal stream
+/// (tetr-core's garbage module, its own salt).
 pub const VERSUS_HOLE_SALT: u64 = 0xA5A5_5A5A_DEAD_BEEF;
 
 /// Play one versus match between bot A and bot B. Both face the identical piece
@@ -646,25 +657,31 @@ pub fn play_versus(
         let order = if ply % 2 == 0 { [0u8, 1] } else { [1, 0] };
         for &who in &order {
             plies += 1;
+            // Route the attack BEFORE checking death: the engine already
+            // encodes the rule (a lock-out lock emits no AttackSent), so any
+            // attack that WAS emitted — e.g. a real clear whose next spawn
+            // block-outs — legitimately left the board and must reach the
+            // opponent's queue and the stats. The driver never second-guesses
+            // the event stream.
             if who == 0 {
                 let (atk, topped) = versus_step_piece(&mut a_engine, &mut *a_bot);
-                if topped {
-                    a_topped = true;
-                    break 'match_loop;
-                }
                 if atk > 0 {
                     b_engine.queue_garbage(atk);
                     a_attack += atk;
                 }
-            } else {
-                let (atk, topped) = versus_step_piece(&mut b_engine, &mut *b_bot);
                 if topped {
-                    b_topped = true;
+                    a_topped = true;
                     break 'match_loop;
                 }
+            } else {
+                let (atk, topped) = versus_step_piece(&mut b_engine, &mut *b_bot);
                 if atk > 0 {
                     a_engine.queue_garbage(atk);
                     b_attack += atk;
+                }
+                if topped {
+                    b_topped = true;
+                    break 'match_loop;
                 }
             }
         }

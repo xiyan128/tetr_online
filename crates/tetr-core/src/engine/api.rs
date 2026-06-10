@@ -36,7 +36,9 @@ pub struct EngineConfig {
     pub goal_system: GoalSystem,
     /// Versus: the maximum pending-garbage lines that rise onto the board after
     /// one clear-less lock (the "garbage cap"). Pending lines beyond the cap
-    /// stay queued for the next opportunity. Irrelevant outside versus — the
+    /// stay queued for the next opportunity. `0` disables rising entirely —
+    /// pending garbage can then only ever be cancelled (a config edge, not the
+    /// "uncapped" convention some games use). Irrelevant outside versus — the
     /// queue is only fed by [`Engine::queue_garbage`].
     pub garbage_cap: u32,
 }
@@ -314,6 +316,13 @@ impl Engine {
     /// return (and the latched game-over in the snapshot) is the caller's signal,
     /// not an [`EngineEvent::GameOver`].
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
+        // A finished game accepts no more garbage: the board stays a faithful
+        // record of how it ended, and the latched game-over reason is never
+        // rewritten post-mortem. "You are (already) topped out" is the honest
+        // return.
+        if self.game_over.is_some() {
+            return true;
+        }
         let overflow = self.board.insert_garbage_lines(count, hole_col);
         let buried = self
             .active
@@ -338,6 +347,11 @@ impl Engine {
     /// [`step`](Self::step) — queueing has no immediate board effect, so there
     /// is no event to miss.
     pub fn queue_garbage(&mut self, lines: u32) {
+        // A finished game accepts no more attack (and must not advance the
+        // hole stream): the final snapshot stays a faithful record.
+        if self.game_over.is_some() {
+            return;
+        }
         self.garbage.queue(lines, self.config.board_width);
     }
 
@@ -574,6 +588,19 @@ impl Engine {
         let combo_before = self.score_state.combo();
         let award = self.score_lock_result(t_spin, lines_cleared, events);
 
+        if lock_out {
+            self.game_over = Some(GameOverStatus::LockOut);
+            events.push(EngineEvent::GameOver {
+                reason: GameOverStatus::LockOut,
+            });
+            // A dying lock sends nothing: the attack block below is never
+            // reached, so the clear neither cancels this player's pending
+            // queue nor emits AttackSent — death takes priority over offense,
+            // and no consumer has to scan a batch for a trailing GameOver to
+            // know whether its AttackSent counts.
+            return;
+        }
+
         // Versus: a clear's attack first cancels this player's own pending
         // garbage (oldest first); only the remainder leaves the board.
         if let Some(award) = award {
@@ -587,14 +614,6 @@ impl Engine {
             if net > 0 {
                 events.push(EngineEvent::AttackSent { lines: net });
             }
-        }
-
-        if lock_out {
-            self.game_over = Some(GameOverStatus::LockOut);
-            events.push(EngineEvent::GameOver {
-                reason: GameOverStatus::LockOut,
-            });
-            return;
         }
 
         // Versus: pending garbage rises after a lock that cleared nothing —
@@ -1738,6 +1757,78 @@ mod tests {
             engine.snapshot().game_over,
             Some(GameOverStatus::BlockOut),
             "an overflowing rise ends the game in-band"
+        );
+    }
+
+    #[test]
+    fn a_dying_lock_sends_no_attack_and_leaves_pending_intact() {
+        // A piece can lock entirely above the skyline yet still clear buffer
+        // rows (full-matrix clears are deliberate). Death takes priority over
+        // offense: the lock-out lock emits NO AttackSent — its clear neither
+        // cancels this player's pending queue nor reaches the opponent — so no
+        // consumer has to scan an event batch for a trailing GameOver to know
+        // whether an attack counts.
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        // Rows 30-31 (buffer zone; visible height is 20) filled except cols
+        // 4-5: the O completes both, a Double that would perfect-clear (gross
+        // attack 11) — while locking entirely above the skyline.
+        for y in [30, 31] {
+            fill_row_except(&mut engine, y, &[4, 5]);
+        }
+        engine.queue_garbage(1);
+
+        let events = lock_piece(&mut engine, ActivePiece::new(PieceType::O, (3, 29)));
+        assert!(events.contains(&EngineEvent::GameOver {
+            reason: GameOverStatus::LockOut
+        }));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, EngineEvent::AttackSent { .. })),
+            "a dying lock must not send: {events:?}"
+        );
+        assert_eq!(
+            engine.snapshot().pending_garbage,
+            1,
+            "a dying lock must not consume its own pending queue either"
+        );
+    }
+
+    #[test]
+    fn a_finished_engine_accepts_no_garbage() {
+        // End a game by an overflowing rise (everything in one lock).
+        let mut engine = Engine::new(
+            EngineConfig {
+                garbage_cap: 64,
+                ..EngineConfig::default()
+            },
+            7,
+        );
+        engine.queue_garbage(64); // taller than the 40-row backing
+        lock_piece(&mut engine, ActivePiece::new(PieceType::O, (4, 10)));
+        assert_eq!(engine.snapshot().game_over, Some(GameOverStatus::BlockOut));
+
+        // Post-mortem, both out-of-band seams are inert.
+        let cells_before = engine.snapshot().board_cells.len();
+        engine.queue_garbage(5);
+        assert_eq!(
+            engine.snapshot().pending_garbage,
+            0,
+            "a finished game accepts no more attack"
+        );
+        assert!(
+            engine.insert_garbage(3, 0),
+            "inserting into a finished game reports topped-out"
+        );
+        assert_eq!(
+            engine.snapshot().board_cells.len(),
+            cells_before,
+            "the final board is a faithful record"
+        );
+        assert_eq!(
+            engine.snapshot().game_over,
+            Some(GameOverStatus::BlockOut),
+            "the latched reason is never rewritten post-mortem"
         );
     }
 

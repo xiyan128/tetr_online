@@ -376,6 +376,10 @@ fn run_downstack(
 /// (`stop`+`start`) whenever garbage lands on it — the portable way to inject
 /// garbage into a base-TBP bot. Caveat: the re-sent board marks every occupied cell
 /// as "G"; CC2 plays on occupancy/shape so the effect is minor but not perfect.
+/// Caveat 2: this referee keeps the harness garbage rules (wholesale dump every
+/// ply, oldest-lowest stacking) rather than the engine's guideline rules
+/// (deferred, capped rising), so its win rates are NOT like-for-like with
+/// `play_versus` — compare runs of this referee only with each other.
 /// Returns `(result, our attack sent, CC2 attack sent)`.
 fn run_versus(
     bin: &str,
@@ -407,7 +411,8 @@ fn run_versus(
     let mut cc2_attack = 0u32;
     let mut cc2_q = GarbageQueue::default();
 
-    // The shared salt keeps this referee's hole stream identical to `play_versus`'s.
+    // The referee's own hole stream (engine-rules matches draw holes inside each
+    // receiver engine instead — see tetr-core's garbage module).
     let mut hole_rng = seed ^ tetr_research::VERSUS_HOLE_SALT;
     let mut ours_topped = false;
     let mut cc2_topped = false;
