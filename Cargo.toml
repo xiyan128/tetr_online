@@ -2,6 +2,7 @@
 name = "tetr_online"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 # Benchmark targets are declared explicitly under `[[bench]]` below (each uses the
 # criterion harness). Disable cargo's auto-discovery so the shared
 # `benches/common/` fixture module is never mistaken for its own bench target.

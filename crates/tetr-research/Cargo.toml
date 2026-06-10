@@ -2,6 +2,7 @@
 name = "tetr-research"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 description = "Headless research & evaluation harness for the Tetris bot — behavior metrics, benchmarks, CC2 baselines."
 publish = false
 

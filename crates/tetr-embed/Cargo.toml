@@ -2,6 +2,7 @@
 name = "tetr-embed"
 version = "0.1.0"
 edition = "2021"
+license = "MIT"
 description = "Headless wasm surface for the tetr_online engine + AI — drives a tiny embeddable component."
 publish = false
 
