@@ -23,6 +23,14 @@
 //! The default candidate is the climb's v3 accept (versus_climb.rs RUN RECORD
 //! v3: validation deaths 20-15, margin +0.79, p ≈ 0.25 — promising, unproven).
 //!
+//! RUN RECORD (2026-06-10, defaults): **H0 ACCEPTED in 270 s** — decisive
+//! 266-269 of 544 matches (9 ties), LLR −2.99, mean margin −0.17. The v3
+//! candidate has no survival edge; its 20-15 validation was noise, exactly as
+//! its p ≈ 0.25 warned. Resolution cost matched Wald's prediction (~525
+//! decisive matches at these settings, ~2 matches/s) — racing an accept costs
+//! ~5 minutes, which is the budget figure for wiring this into the climb as a
+//! second-stage confirmer (screen with cheap blocks, SPRT only what passes).
+//!
 //! Env: TIME_BUDGET_SECS (3600), BLOCK_SEEDS (8 ⇒ 16 matches/block), P1
 //!      (0.55), RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH
 //!      (16), SEED_BASE (16384 — disjoint from the climb's train/validation

@@ -43,9 +43,18 @@
 //! candidate is a small, sane perturbation of attack_tuned worth a long SPRT:
 //! [-0.0036628882, -1.5733862, -0.19578815, -0.34977585, -1.5387586,
 //!  -5.149458, 0.3575636, 0.09665186, 1.550793, 4.4781384, 3.782923]
+//! SPRT EPILOGUE (same day, `versus_sprt`): the v3 candidate was REJECTED —
+//! H0 accepted in 270 s (266-269 of 544 decisive, LLR −2.99). The one accept
+//! the calibrated climb produced in an hour was noise after all; the gate
+//! chain (held-out validation → SPRT) worked end to end and nothing shipped.
+//! Honest read: board-params-only jitter around attack_tuned has no cheap
+//! survival gains at this match budget — further wins want a different lever
+//! (re-priced garbage-aware weights, deeper search, or the NN round), not
+//! more of this walk.
+//!
 //! Next: longer budgets (the bar means ~1 accept/hour — that is the honest
-//! pace of real progress), or an SPRT racer per proposal to spend matches
-//! adaptively instead of in fixed blocks.
+//! pace of real progress), or wire `versus_sprt` in as a second-stage
+//! confirmer per accept (~5 min each; screen with cheap blocks first).
 //!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
 //!      when rotating), VAL_SEEDS (32), ROTATE (1), ACCEPT_MARGIN (25),
