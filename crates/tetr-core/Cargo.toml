@@ -3,6 +3,7 @@ name = "tetr-core"
 version = "0.1.0"
 edition = "2021"
 description = "Engine-agnostic Tetris rule core, player abstraction, and AI — no Bevy."
+publish = false
 
 # No #[bench] fns live here; the criterion suites are declared in the game crate.
 [lib]

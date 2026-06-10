@@ -3,6 +3,7 @@ name = "tetr-embed"
 version = "0.1.0"
 edition = "2021"
 description = "Headless wasm surface for the tetr_online engine + AI — drives a tiny embeddable component."
+publish = false
 
 # cdylib: the wasm artifact wasm-bindgen consumes. rlib: lets it build/test natively too.
 [lib]
