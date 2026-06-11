@@ -33,7 +33,9 @@ mod ui;
 // The engine-driver resources the per-frame pipeline owns. Re-exported so the AI
 // sandbox driver (AI3.6) — which steps the *same* engine with a different
 // controller — can read/publish them without reaching into `engine_bridge`.
-pub use engine_bridge::{EngineState, FrameEvents, LatestSnapshot, PlayerInput, SIM_DT_SECONDS};
+pub use engine_bridge::{
+    EngineState, FrameEvents, LatestSnapshot, PlayerInput, RunSeed, SIM_DT_SECONDS,
+};
 
 pub struct LevelPlugin;
 
@@ -61,6 +63,7 @@ impl Plugin for LevelPlugin {
             .insert_resource(Time::<Fixed>::from_hz(SIM_HZ as f64))
             // resources
             .init_resource::<LevelConfig>()
+            .init_resource::<RunSeed>()
             .init_resource::<HeldInput>()
             .init_resource::<PendingEdges>()
             .init_resource::<FrameEvents>()
@@ -167,6 +170,8 @@ fn level_setup(
     settings: Res<crate::settings::GameSettings>,
     active_variant: Res<crate::variant::ActiveVariant>,
     texture_assets: Res<GameAssets>,
+    run_seed: Res<RunSeed>,
+    time: Res<Time<Real>>,
 ) {
     info!("level_setup ({})", active_variant.0.display_name());
 
@@ -175,7 +180,15 @@ fn level_setup(
     config.preview_count = settings.next_count;
 
     let engine_config = engine_config_for_game(&config, &settings, active_variant.0);
-    let engine = Engine::new(engine_config, DEFAULT_SEED);
+    // Fresh deal per run (the versus idiom): app-clock entropy unless a test
+    // or future replay pinned the seed. Headless suites freeze the clock, so
+    // they pin via RunSeed for byte-stable schedule-driven games.
+    let seed = run_seed.0.unwrap_or_else(|| {
+        (time.elapsed().subsec_nanos().wrapping_mul(0x9E37_79B9) as u64)
+            ^ time.elapsed().as_nanos() as u64
+    });
+    info!("run seed: {seed}");
+    let engine = Engine::new(engine_config, seed);
     let snapshot = engine.snapshot();
 
     // Seed the per-frame resources with a fresh engine + its initial snapshot so
@@ -541,6 +554,9 @@ mod tests {
                 font: default(),
             })
             .add_plugins(LevelPlugin);
+        // Pin the deal: live sessions draw per-run entropy; the deterministic
+        // suites reproduce the reference engine bit-for-bit via the override.
+        app.insert_resource(RunSeed(Some(DEFAULT_SEED)));
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
             .set(GameState::Playing);
