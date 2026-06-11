@@ -14,7 +14,7 @@
 //!    where it originated.
 //!
 //! 2. **Background music** — [`start_music`] spawns a single looping track on
-//!    entering [`GameState::Playing`], tagged [`MusicTrack`] and despawned on
+//!    entering [`GameState::Session`], tagged [`MusicTrack`] and despawned on
 //!    exit. Because no music asset ships in `assets/` yet, the track only spawns
 //!    when [`MusicAsset`] holds a handle; otherwise it warns once.
 

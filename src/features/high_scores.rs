@@ -2,9 +2,9 @@
 //!
 //! Two halves, both wired here:
 //!
-//! 1. **Record + persist.** On entering [`GameState::GameOver`] we build a
-//!    [`HighScore`] from the final [`LatestSnapshot`] (`score`, `lines`, `level`)
-//!    plus [`VariantProgress::elapsed_seconds`], try
+//! 1. **Record + persist.** When a solo session ends, the session calls
+//!    [`record`] with the seat's final snapshot (`score`, `lines`, `level`)
+//!    plus the session clock, try
 //!    [`HighScores::insert`] for the [`ActiveVariant`], and — if it landed on the
 //!    board — re-serialize every table and save it through
 //!    [`StorageResource`] under [`storage::keys::HIGH_SCORES`]. The board is
@@ -20,13 +20,10 @@
 //! [`HighScores::insert`], so a corrupt or over-long stored file degrades to a
 //! correctly sorted, truncated board rather than a panic.
 //!
-//! [`GameState::GameOver`]: crate::GameState::GameOver
 //! [`GameState::HighScores`]: crate::GameState::HighScores
 //! [`HighScore`]: crate::high_scores::HighScore
 //! [`HighScores::insert`]: crate::high_scores::HighScores::insert
 //! [`HighScores`]: crate::high_scores::HighScores
-//! [`LatestSnapshot`]: crate::level::engine_bridge::LatestSnapshot
-//! [`VariantProgress::elapsed_seconds`]: crate::variant::VariantProgress
 //! [`ActiveVariant`]: crate::variant::ActiveVariant
 //! [`StorageResource`]: crate::storage::StorageResource
 //! [`HighScoresRoot`]: crate::screens::HighScoresRoot

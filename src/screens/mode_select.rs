@@ -2,7 +2,7 @@
 //!
 //! Each row corresponds to a [`Variant`]; selecting it writes [`ActiveVariant`]
 //! (which the engine bridge reads when building the engine) and transitions to
-//! [`GameState::Playing`]. Esc returns to the main menu.
+//! a one-seat Solo session. Esc returns to the main menu.
 
 use bevy::prelude::*;
 

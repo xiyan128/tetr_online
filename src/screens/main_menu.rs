@@ -78,11 +78,11 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 /// menu is the root). Also paints the focused row's "pressed" color briefly via
 /// the focus helper's normal restyle on the next frame.
 ///
-/// Both **Play** and **Watch AI** lead to mode select (pick a variant) and then a
-/// gameplay session; they differ only in the [`AiSandbox`] flag, which decides
-/// whether the keyboard or the bot drives the engine. Arming it *here* (and
-/// clearing it on the Play path) means the flag is always fresh for the next
-/// session — a previous "Watch AI" run can never leave a keyboard game bot-driven.
+/// **Play** seats you and goes to mode select; **Watch AI** picks its bot in
+/// the seat picker first, then the mode — both land in a one-seat Solo
+/// session, differing only in who occupies the seat. **Versus** configures
+/// two seats. The seats are written HERE (and by the pickers), so a previous
+/// run's configuration can never leak into the next.
 #[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,

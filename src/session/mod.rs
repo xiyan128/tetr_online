@@ -658,6 +658,136 @@ mod tests {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
     }
 
+    /// The reviewer's race hypothesis, settled empirically: a NATURAL death
+    /// (not a manual phase poke) must end a solo run as completed=false, with
+    /// the goal checker unable to overwrite it in the same frame. Garbage
+    /// overflow kills the seat mid-schedule exactly like a real top-out.
+    #[test]
+    fn a_natural_solo_death_records_incomplete() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 1); // spawn
+                                 // Bury the seat: queue far more garbage than the board holds, then a
+                                 // clear-less lock rises it (the human seat plays neutral frames, so
+                                 // gravity locks the piece eventually).
+        {
+            let mut seats = app.world_mut().query::<&mut SeatEngine>();
+            let mut engine = seats.iter_mut(app.world_mut()).next().unwrap();
+            engine.0.queue_garbage(48);
+        }
+        // Hard-drop every other frame (press/release so each edge latches):
+        // every lock is clear-less, rising 8 queued lines, so the overflow
+        // death arrives within a handful of pieces.
+        for i in 0..240 {
+            {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                if i % 2 == 0 {
+                    keys.press(KeyCode::Space);
+                } else {
+                    keys.release(KeyCode::Space);
+                }
+            }
+            tick_fixed(&mut app, 1);
+            if app.world().get_resource::<SessionOutcome>().is_some() {
+                break;
+            }
+        }
+        let outcome = *app
+            .world()
+            .get_resource::<SessionOutcome>()
+            .expect("48 queued lines must kill the solo seat");
+        assert_eq!(
+            outcome,
+            SessionOutcome::Solo { completed: false },
+            "a death is an incomplete run — and nothing may overwrite it"
+        );
+        // Drop the key AND its edges: this harness has no InputPlugin, so
+        // nothing clears just_pressed — a stale Space edge would Select the
+        // result banner's Retry row every frame. (Production clears edges in
+        // PreUpdate; en route this stale edge DID drive death → banner →
+        // retry end-to-end, which was a nice accidental flow check.)
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Space);
+            keys.clear();
+        }
+        // Run several more frames: the settled outcome must stay settled.
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(
+            *app.world().resource::<SessionOutcome>(),
+            SessionOutcome::Solo { completed: false },
+            "the outcome must not be rewritten after the run ends"
+        );
+    }
+
+    /// The natural GOAL path: an Ultra time-limit expiry ends the run as
+    /// completed=true (check_solo_end's verdict), exercising the clock-based
+    /// ending with no death anywhere near.
+    #[test]
+    fn a_solo_goal_completion_records_complete() {
+        let mut app = headless_versus_app(SessionConfig {
+            seats: [Participant::Human, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Ultra,
+            },
+            seed: Some(7),
+        });
+        // Ultra's limit is minutes of sim time; instead of ticking it out,
+        // pre-load the clock just under the limit and tick across it.
+        let limit = match crate::variant::Variant::Ultra.def().end_condition {
+            crate::variant::EndCondition::TimeLimit(limit) => limit,
+            _ => unreachable!("Ultra is time-limited"),
+        };
+        app.world_mut().resource_mut::<MatchClock>().0 = limit - 0.01;
+        for _ in 0..30 {
+            tick_fixed(&mut app, 1);
+            if app.world().get_resource::<SessionOutcome>().is_some() {
+                break;
+            }
+        }
+        assert_eq!(
+            *app.world().resource::<SessionOutcome>(),
+            SessionOutcome::Solo { completed: true },
+            "a met time limit is a completed run"
+        );
+    }
+
+    /// Solo pause conceals the field (the anti-pause-think rule); resume
+    /// restores it. Versus pause is covered by the overlay's own tests.
+    #[test]
+    fn solo_pause_conceals_the_board() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 2);
+
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Paused);
+        app.update();
+        {
+            let mut roots = app.world_mut().query::<(&render::BoardRoot, &Visibility)>();
+            for (_, visibility) in roots.iter(app.world()) {
+                assert_eq!(
+                    *visibility,
+                    Visibility::Hidden,
+                    "a solo pause must conceal the field"
+                );
+            }
+        }
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
+        app.update();
+        let mut roots = app.world_mut().query::<(&render::BoardRoot, &Visibility)>();
+        for (_, visibility) in roots.iter(app.world()) {
+            assert_eq!(
+                *visibility,
+                Visibility::Inherited,
+                "resume must reveal the field"
+            );
+        }
+    }
+
     fn solo_human(seed: u64) -> SessionConfig {
         SessionConfig {
             seats: [Participant::Human, Participant::Bot { model: 0 }],

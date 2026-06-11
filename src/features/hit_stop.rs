@@ -47,8 +47,8 @@ impl Plugin for HitStopPlugin {
             // a game can't start — and a menu can't sit — on a paused clock.
             .add_systems(OnEnter(GameState::Session), clear_freeze)
             .add_systems(OnExit(GameState::Session), clear_freeze)
-            // Detect marquee clears in the Reconcile set (gated on
-            // `PauseState::Running`, after the engine has stepped). The toggle only
+            // Detect marquee clears in the Reconcile set (gated on the
+            // session running). The toggle only
             // gates *new* freezes; `tick_hit_stop` always runs so an in-flight
             // freeze still resolves if the effect is switched off mid-freeze.
             .add_systems(

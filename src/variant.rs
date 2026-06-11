@@ -11,9 +11,9 @@
 //! * [`ActiveVariant`] resource (default [`Variant::Marathon`]) holds the chosen
 //!   variant. Mode-select writes it; the engine bridge reads its
 //!   [`VariantDef::apply_engine_overrides`] when building the engine.
-//! * [`VariantProgress`] tracks wall-clock elapsed time for the active run.
+//! * the session's `MatchClock` tracks wall-clock elapsed time for a run.
 //! * [`check_variant_end_conditions`] runs each frame while `Playing` and
-//!   transitions to [`GameState::GameOver`] when the variant's goal/limit is met
+//!   the session ends the run when the variant's goal/limit is met
 //!   (engine-driven block/lock-out is handled separately by the level plugin).
 
 use bevy::prelude::*;

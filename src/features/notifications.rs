@@ -1,7 +1,7 @@
 //! Line-clear visual effects (A1.9, guideline §19.2).
 //!
 //! Consumes the engine's per-frame [`FrameEvents`] while
-//! [`GameState::Playing`](crate::GameState::Playing) and turns them into transient
+//! a running session's seats and turns them into transient
 //! *world-space* flourishes over the playfield:
 //!
 //! * **Line-clear flash** — a white sheet over the field that pulses and fades on
