@@ -11,7 +11,7 @@
 
 use crate::engine::{EngineSnapshot, InputFrame, MoveDirection};
 use crate::player::das::{DasConfig, DasState};
-use crate::player::{resolve_horizontal, PlayerController};
+use crate::player::{PlayerController, resolve_horizontal};
 
 /// Raw per-frame keyboard state, decoupled from Bevy so the controller can be
 /// driven headlessly in tests. `pressed` = key currently down; `just_pressed` =

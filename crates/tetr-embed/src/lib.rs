@@ -40,7 +40,7 @@ use core::time::Duration;
 
 use tetr_core::ai::{AiController, Handicap};
 use tetr_core::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot, SnapshotCell};
-use tetr_core::player::{drive_engine, KeyboardController, RawKeyboardFrame};
+use tetr_core::player::{KeyboardController, RawKeyboardFrame, drive_engine};
 use wasm_bindgen::prelude::*;
 
 /// The fixed simulation slice: 60 Hz, matching the engine driver and the AI

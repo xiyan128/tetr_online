@@ -16,9 +16,9 @@ use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 #[cfg(feature = "dev")]
-use bevy_egui::{egui, EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext};
+use bevy_egui::{EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEguiContext, egui};
 #[cfg(feature = "dev")]
-use bevy_inspector_egui::{bevy_inspector, DefaultInspectorConfigPlugin};
+use bevy_inspector_egui::{DefaultInspectorConfigPlugin, bevy_inspector};
 
 // The engine-agnostic core is the `tetr-core` crate: re-export `engine` and
 // `player` so the host addresses them as `crate::engine::…` / `crate::player::…`.
@@ -42,13 +42,14 @@ pub mod variant;
 pub(crate) mod vfx;
 
 pub use crate::engine::{
+    ActivePiece, ActivePieceSnapshot, EXTENDED_LOCK_RESET_BUDGET, Engine, EngineConfig,
+    EngineEvent, EngineScoreAction, EngineSnapshot, GameOverStatus, GoalProgress, GoalSystem,
+    InputFrame, LOCK_DOWN_SECONDS, LockDownMode, MAX_LEVEL, MIN_LEVEL, PieceAction, PieceRotation,
+    PieceType, RotationDirection, SnapshotCell, TSpinCorners, TSpinKind,
     apply_grounded_move_or_rotation, breaks_back_to_back, classify_t_spin, fall_speed_seconds,
     fixed_goal_for_level, goal_for_level, is_block_out, is_lock_out, is_top_out,
     qualifies_for_back_to_back, soft_drop_speed_seconds, t_spin_corners, variable_goal_for_level,
-    variable_goal_units, ActivePiece, ActivePieceSnapshot, Engine, EngineConfig, EngineEvent,
-    EngineScoreAction, EngineSnapshot, GameOverStatus, GoalProgress, GoalSystem, InputFrame,
-    LockDownMode, PieceAction, PieceRotation, PieceType, RotationDirection, SnapshotCell,
-    TSpinCorners, TSpinKind, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS, MAX_LEVEL, MIN_LEVEL,
+    variable_goal_units,
 };
 
 /// Top-level screen the app is on. Drives which plugins' systems run and which

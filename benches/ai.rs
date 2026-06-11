@@ -11,15 +11,15 @@ mod common;
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
 use common::{
-    first_locked, first_placement, play_pieces, pressured_search_state, search_state, spawner,
-    Scenario,
+    Scenario, first_locked, first_placement, play_pieces, pressured_search_state, search_state,
+    spawner,
 };
 use tetr_online::ai::{
-    movegen, think_to_completion, BestFirstPlanner, Cc2Evaluator, EvalContext, Evaluator,
-    LinearEvaluator, SearchBudget,
+    BestFirstPlanner, Cc2Evaluator, EvalContext, Evaluator, LinearEvaluator, SearchBudget, movegen,
+    think_to_completion,
 };
 use tetr_online::engine::classify_t_spin;
 

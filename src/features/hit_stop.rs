@@ -17,8 +17,8 @@
 
 use bevy::prelude::*;
 
-use crate::engine::{EngineEvent, EngineScoreAction, TSpinKind};
 use crate::GameState;
+use crate::engine::{EngineEvent, EngineScoreAction, TSpinKind};
 
 /// Freeze length (seconds of *real* time) for a Tetris.
 const FREEZE_TETRIS: f32 = 0.085;

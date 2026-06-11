@@ -33,7 +33,7 @@ use rustc_hash::FxHashMap;
 use crate::ai::eval::{EvalContext, Evaluator, Reward};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
-    best_root_plan, hold_placements, score_child, Mind, PlacementPlan, RootKey, ThinkProgress,
+    Mind, PlacementPlan, RootKey, ThinkProgress, best_root_plan, hold_placements, score_child,
 };
 use crate::ai::state::SearchState;
 
@@ -280,7 +280,7 @@ impl Mind for BestFirstPlanner {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::ai::search::{think_to_completion, BeamPlanner, SearchBudget};
+    use crate::ai::search::{BeamPlanner, SearchBudget, think_to_completion};
     use crate::engine::{Engine, EngineConfig, InputFrame};
 
     /// A real engine snapshot after the first spawn (hold + full queue present).

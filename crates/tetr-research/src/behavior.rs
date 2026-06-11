@@ -13,13 +13,13 @@
 use std::time::Instant;
 
 use tetr_core::engine::{CellKind, Engine, EngineEvent, EngineScoreAction, PieceType, TSpinKind};
-use tetr_core::player::{drive_engine, PlayerController};
+use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{action_clear_lines, controller_seed, fold_combo};
 use crate::downstack::cheese_holes;
 use crate::marathon::marathon_config;
 use crate::versus::MAX_PIECE_FRAMES;
-use crate::versus_legacy::{versus_hole, GarbageQueue};
+use crate::versus_legacy::{GarbageQueue, versus_hole};
 
 /// A garbage scenario to measure the bot in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

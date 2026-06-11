@@ -37,7 +37,7 @@ pub mod weights;
 use std::ops::Add;
 
 use crate::engine::{
-    attack_lines, qualifies_for_back_to_back, Board, EngineScoreAction, LockOutcome, TSpinKind,
+    Board, EngineScoreAction, LockOutcome, TSpinKind, attack_lines, qualifies_for_back_to_back,
 };
 
 pub use cc2::{Cc2Evaluator, Cc2Weights};

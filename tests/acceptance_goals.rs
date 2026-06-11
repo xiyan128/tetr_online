@@ -11,11 +11,11 @@
 //! `src/lib.rs` (`tetr_online::<Name>`), so this file does not depend on the
 //! pending `pub mod engine;` change.
 
-use tetr_online::{fixed_goal_for_level, variable_goal_for_level, variable_goal_units};
 use tetr_online::{
     Engine, EngineConfig, EngineEvent, EngineScoreAction, GoalSystem, InputFrame, PieceType,
     TSpinKind,
 };
+use tetr_online::{fixed_goal_for_level, variable_goal_for_level, variable_goal_units};
 
 /// Build a deterministic engine on a 4-wide well with the given goal system and
 /// starting level. A 4-wide board is the narrowest well in which a horizontal

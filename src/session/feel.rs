@@ -13,11 +13,11 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 use bevy::transform::TransformSystems;
 
+use crate::GameState;
 use crate::assets::GameAssets;
 use crate::engine::EngineEvent;
-use crate::features::screen_shake::{trauma_for_clear, ScreenShake};
+use crate::features::screen_shake::{ScreenShake, trauma_for_clear};
 use crate::level::common::{AudioCue, GameplayCamera};
-use crate::GameState;
 
 use super::render::SessionLayout;
 use super::{HumanSeat, Seat, SeatEvents, SessionPhase};

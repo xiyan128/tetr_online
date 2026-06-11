@@ -29,10 +29,10 @@
 // any given target would otherwise warn.
 #![allow(dead_code)]
 
-use tetr_online::ai::{movegen, AiController, Handicap, SearchState};
+use tetr_online::ai::{AiController, Handicap, SearchState, movegen};
 use tetr_online::engine::{
-    classify_t_spin, ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent, InputFrame,
-    LockOutcome, PieceType, TSpinKind,
+    ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent, InputFrame, LockOutcome,
+    PieceType, TSpinKind, classify_t_spin,
 };
 use tetr_online::player::drive_engine;
 

@@ -12,7 +12,7 @@
 
 use rayon::prelude::*;
 use tetr_core::engine::{Engine, EngineEvent, EngineSnapshot, InputFrame};
-use tetr_core::player::{drive_engine, PlayerController};
+use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::controller_seed;
 use crate::marathon::marathon_config;
@@ -388,7 +388,7 @@ mod versus_rules_tests {
 
 #[cfg(test)]
 mod versus_decision_tests {
-    use super::{decide_versus, VersusResult};
+    use super::{VersusResult, decide_versus};
 
     #[test]
     fn topout_loses_before_attack_is_compared() {

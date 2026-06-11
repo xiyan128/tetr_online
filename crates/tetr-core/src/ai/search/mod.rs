@@ -47,9 +47,9 @@ pub use best_first::BestFirstPlanner;
 use smallvec::SmallVec;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
-use crate::ai::movegen::{generate_with_hold, spawn_piece, Move, Placement};
+use crate::ai::movegen::{Move, Placement, generate_with_hold, spawn_piece};
 use crate::ai::state::SearchState;
-use crate::engine::{classify_t_spin, LockOutcome, PieceType, TSpinKind};
+use crate::engine::{LockOutcome, PieceType, TSpinKind, classify_t_spin};
 
 /// How much total work one decision may spend.
 ///

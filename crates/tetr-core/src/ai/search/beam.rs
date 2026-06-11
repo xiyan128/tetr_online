@@ -30,7 +30,7 @@
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
-    best_root_plan, commit_child, hold_placements, Mind, PlacementPlan, RootKey, ThinkProgress,
+    Mind, PlacementPlan, RootKey, ThinkProgress, best_root_plan, commit_child, hold_placements,
 };
 use crate::ai::state::SearchState;
 use crate::engine::{LockOutcome, PieceType, TSpinKind};

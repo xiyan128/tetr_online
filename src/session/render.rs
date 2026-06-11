@@ -20,10 +20,10 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::GameState;
 use crate::assets::GameAssets;
 use crate::engine::{Piece, PieceType, SnapshotCell};
-use crate::level::common::{mino_render_color, to_translation, GameplayCamera};
-use crate::GameState;
+use crate::level::common::{GameplayCamera, mino_render_color, to_translation};
 
 use super::{Participant, Seat, SeatSnapshot, SeatStats, SessionConfig};
 

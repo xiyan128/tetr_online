@@ -538,7 +538,7 @@ mod tests {
 
     #[test]
     fn bit_board_lock_matches_engine_lock_and_clear() {
-        use crate::engine::{lock_and_clear, ActivePiece};
+        use crate::engine::{ActivePiece, lock_and_clear};
         let mut rng = SplitMix64(0xACE1_2345_6789_BCDE);
         for _ in 0..500 {
             let fill = 40 + rng.below(45); // 40..85%, so clears happen often enough
@@ -574,7 +574,7 @@ mod tests {
 
     #[test]
     fn bit_board_t_spin_matches_engine() {
-        use crate::engine::{classify_t_spin, ActivePiece, PieceRotation, RotationDirection};
+        use crate::engine::{ActivePiece, PieceRotation, RotationDirection, classify_t_spin};
         let rotations = [
             PieceRotation::R0,
             PieceRotation::R90,

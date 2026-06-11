@@ -36,9 +36,9 @@ use smallvec::SmallVec;
 use crate::ai::movegen::Placement;
 use crate::engine::garbage::{self, BatchQueue};
 use crate::engine::{
-    attack_lines, breaks_back_to_back, classify_t_spin, is_lock_out, qualifies_for_back_to_back,
     ActivePiece, BitBoard, Board, CellKind, EngineScoreAction, EngineSnapshot, LockOutcome, Piece,
-    TSpinKind,
+    TSpinKind, attack_lines, breaks_back_to_back, classify_t_spin, is_lock_out,
+    qualifies_for_back_to_back,
 };
 
 /// The remainder of the current 7-bag: which tetrominoes have **not** yet been
@@ -1144,7 +1144,7 @@ mod tests {
         // meter (cancellation included), and the B2B/combo chains. Any drift
         // between the two models shows up here as a board mismatch.
         use crate::ai::plan::placement_to_inputs;
-        use crate::ai::search::{think_to_completion, BestFirstPlanner, SearchBudget};
+        use crate::ai::search::{BestFirstPlanner, SearchBudget, think_to_completion};
         use crate::engine::{Engine, EngineConfig, InputFrame};
 
         let mut engine = Engine::new(EngineConfig::default(), 21);

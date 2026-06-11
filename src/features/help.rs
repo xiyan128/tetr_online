@@ -16,11 +16,11 @@
 
 use bevy::prelude::*;
 
+use crate::GameState;
 use crate::assets::GameAssets;
 use crate::screens::HelpRoot;
 use crate::settings::{GameAction, GameSettings, Keybinds};
 use crate::ui::theme;
-use crate::GameState;
 
 /// Help-screen content: a scrollable controls/rules reference.
 pub struct HelpPlugin;

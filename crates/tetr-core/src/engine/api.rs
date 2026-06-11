@@ -9,6 +9,7 @@
 //! modules in this crate. The engine carries no rendering or Bevy
 //! types; it is driven entirely through these plain data structures.
 
+use crate::engine::RotationDirection;
 use crate::engine::active_piece::ActivePiece;
 use crate::engine::attack::attack_lines;
 use crate::engine::board::{Board, CellKind};
@@ -19,10 +20,9 @@ use crate::engine::gravity::fall_speed_seconds;
 use crate::engine::lock_clear::lock_and_clear;
 use crate::engine::lock_down::apply_grounded_move_or_rotation;
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
-use crate::engine::scoring::{score_action, EngineScoreAction, ScoreAward, ScoreState};
-use crate::engine::t_spin::{classify_t_spin, is_t_slot, TSpinKind};
+use crate::engine::scoring::{EngineScoreAction, ScoreAward, ScoreState, score_action};
+use crate::engine::t_spin::{TSpinKind, classify_t_spin, is_t_slot};
 use crate::engine::types::*;
-use crate::engine::RotationDirection;
 
 pub struct Engine {
     config: EngineConfig,
@@ -817,12 +817,14 @@ mod tests {
         });
         let before = engine.snapshot();
 
-        assert!(engine
-            .step(InputFrame {
-                hold: true,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    hold: true,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
         assert_eq!(engine.snapshot(), before);
     }
 
@@ -860,12 +862,14 @@ mod tests {
 
         // Movement is snapshot state: the step emits nothing, and the origin
         // shifts by exactly one cell.
-        assert!(engine
-            .step(InputFrame {
-                left: true,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    left: true,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
 
         assert_eq!(
             engine.snapshot().active.expect("moved active piece").origin,
@@ -885,12 +889,14 @@ mod tests {
             CellKind::Some(PieceType::O),
         ));
 
-        assert!(engine
-            .step(InputFrame {
-                left: true,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    left: true,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
 
         assert_eq!(
             engine
@@ -1055,12 +1061,14 @@ mod tests {
         let before = engine.snapshot().active.expect("active piece");
         let half_fall = fall_speed_seconds(engine.snapshot().level) / 2.0;
 
-        assert!(engine
-            .step(InputFrame {
-                dt_seconds: half_fall,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    dt_seconds: half_fall,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
         assert_eq!(
             engine.snapshot().active.expect("active piece").origin,
             before.origin
@@ -1068,12 +1076,14 @@ mod tests {
 
         // The second half-interval crosses the fall threshold: the piece falls
         // exactly one row (gravity is snapshot state, the step emits nothing).
-        assert!(engine
-            .step(InputFrame {
-                dt_seconds: half_fall,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    dt_seconds: half_fall,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
         assert_eq!(
             active_origin(&engine),
             (before.origin.0, before.origin.1 - 1)
@@ -1086,12 +1096,14 @@ mod tests {
         engine.active = Some(ActivePiece::new(PieceType::T, (3, 0)));
 
         // One full fall interval drops the T one row onto the floor.
-        assert!(engine
-            .step(InputFrame {
-                dt_seconds: fall_speed_seconds(engine.snapshot().level),
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    dt_seconds: fall_speed_seconds(engine.snapshot().level),
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
         assert_eq!(active_origin(&engine), (3, -1));
 
         let active = engine.snapshot().active.expect("landed active piece");
@@ -1132,13 +1144,15 @@ mod tests {
             // Each grounded move succeeds: origin.x shifts by exactly one cell.
             let go_left = i % 2 == 0;
             let x_before = active_origin(&engine).0;
-            assert!(engine
-                .step(InputFrame {
-                    left: go_left,
-                    right: !go_left,
-                    ..InputFrame::default()
-                })
-                .is_empty());
+            assert!(
+                engine
+                    .step(InputFrame {
+                        left: go_left,
+                        right: !go_left,
+                        ..InputFrame::default()
+                    })
+                    .is_empty()
+            );
             let expected = if go_left { x_before - 1 } else { x_before + 1 };
             assert_eq!(active_origin(&engine).0, expected);
             assert_eq!(
@@ -1168,12 +1182,14 @@ mod tests {
         // The 16th grounded move still succeeds physically (origin.x shifts)
         // but no longer resets the drained timer.
         let x_before = active_origin(&engine).0;
-        assert!(engine
-            .step(InputFrame {
-                left: true,
-                ..InputFrame::default()
-            })
-            .is_empty());
+        assert!(
+            engine
+                .step(InputFrame {
+                    left: true,
+                    ..InputFrame::default()
+                })
+                .is_empty()
+        );
         assert_eq!(active_origin(&engine).0, x_before - 1);
         assert_eq!(
             engine

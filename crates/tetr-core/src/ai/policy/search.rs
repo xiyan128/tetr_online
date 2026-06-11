@@ -24,7 +24,7 @@ use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy, PolicyProgress};
 use crate::ai::search::{
-    score_placement, BestFirstPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
+    BestFirstPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress, score_placement,
 };
 
 /// How many of the top placements the imperfection softmax samples from. A small

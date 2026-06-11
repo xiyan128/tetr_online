@@ -9,7 +9,7 @@
 //! ```
 
 use tetr_research::bots::BotSpec;
-use tetr_research::marathon::{evaluate, MarathonStats, DEFAULT_MAX_FRAMES};
+use tetr_research::marathon::{DEFAULT_MAX_FRAMES, MarathonStats, evaluate};
 use tetr_research::seeds::seed_set;
 
 /// Beam width used for the beam comparison runs.

@@ -22,11 +22,11 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::screens::OptionsRoot;
 use crate::settings::{GameAction, GameSettings, Keybinds, MAX_NEXT_COUNT, MIN_NEXT_COUNT};
-use crate::storage::{keys, StorageResource};
-use crate::ui::focus::{focus_navigation, FocusList, Focusable};
+use crate::storage::{StorageResource, keys};
+use crate::ui::focus::{FocusList, Focusable, focus_navigation};
 use crate::ui::theme;
 use crate::ui::widgets::label_text;
-use crate::{engine::LockDownMode, GameState};
+use crate::{GameState, engine::LockDownMode};
 
 /// Options-screen settings editor.
 pub struct OptionsPlugin;
@@ -132,11 +132,7 @@ impl OptionRow {
 }
 
 fn on_off(value: bool) -> String {
-    if value {
-        "On".into()
-    } else {
-        "Off".into()
-    }
+    if value { "On".into() } else { "Off".into() }
 }
 
 fn volume_label(value: f32) -> String {

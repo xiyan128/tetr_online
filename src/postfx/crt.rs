@@ -20,12 +20,13 @@
 
 use bevy::{
     core_pipeline::{
-        core_2d::graph::{Core2d, Node2d},
         FullscreenShader,
+        core_2d::graph::{Core2d, Node2d},
     },
     ecs::query::QueryItem,
     prelude::*,
     render::{
+        RenderApp, RenderStartup,
         extract_component::{
             ComponentUniforms, DynamicUniformIndex, ExtractComponent, ExtractComponentPlugin,
             UniformComponentPlugin,
@@ -39,7 +40,6 @@ use bevy::{
         },
         renderer::{RenderContext, RenderDevice},
         view::ViewTarget,
-        RenderApp, RenderStartup,
     },
     ui_render::graph::NodeUi,
 };

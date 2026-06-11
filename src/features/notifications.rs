@@ -23,9 +23,9 @@ use bevy::color::Alpha;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use crate::GameState;
 use crate::engine::{EngineEvent, SnapshotCell};
 use crate::level::common::to_translation;
-use crate::GameState;
 
 /// Lifetime of the white line-clear flash sheet.
 const FLASH_TTL_SECONDS: f32 = 0.25;

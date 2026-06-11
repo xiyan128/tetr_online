@@ -8,10 +8,10 @@ mod common;
 
 use std::hint::black_box;
 
-use criterion::{criterion_group, criterion_main, BatchSize, BenchmarkId, Criterion, Throughput};
+use criterion::{BatchSize, BenchmarkId, Criterion, Throughput, criterion_group, criterion_main};
 
-use common::{fresh_engine, search_state, Scenario, SIM_DT};
-use tetr_online::engine::{classify_t_spin, lock_and_clear, InputFrame};
+use common::{SIM_DT, Scenario, fresh_engine, search_state};
+use tetr_online::engine::{InputFrame, classify_t_spin, lock_and_clear};
 
 /// `Engine::step` for a representative set of single-frame inputs. Each iteration
 /// steps a *fresh* engine (set up untimed) so state never accumulates across

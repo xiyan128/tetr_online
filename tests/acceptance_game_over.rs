@@ -16,8 +16,8 @@
 //! helper assertions, and the Engine paths use a fixed seed.
 
 use tetr_online::engine::{
-    is_block_out, is_lock_out, is_top_out, ActivePiece, Board, CellKind, Engine, EngineConfig,
-    EngineEvent, GameOverStatus, Piece, PieceType,
+    ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent, GameOverStatus, Piece,
+    PieceType, is_block_out, is_lock_out, is_top_out,
 };
 
 /// §25.10 / §16.1: a Tetrimino whose spawn footprint overlaps an existing Block

@@ -592,7 +592,7 @@ mod tests {
         let reward = |combo: u32| {
             eval.evaluate(&clear, &board, None, EvalContext { combo, b2b: false })
                 .1
-                 .0
+                .0
         };
 
         // floor((combo - 1) / 2) == 0 for combo 0, 1, 2 (and combo 0 must not underflow
@@ -629,7 +629,7 @@ mod tests {
         let mut board = Board::new(10, 20);
         board.set(0, 0, CellKind::Some(PieceType::O));
         let lock = no_clear_lock(PieceType::O);
-        let value = |ctx| eval.evaluate(&lock, &board, None, ctx).0 .0;
+        let value = |ctx| eval.evaluate(&lock, &board, None, ctx).0.0;
 
         let base = value(EvalContext {
             combo: 0,

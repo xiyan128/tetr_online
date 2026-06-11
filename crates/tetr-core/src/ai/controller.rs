@@ -278,10 +278,10 @@ impl AiController {
                 // The board is untouched by a hold, so `locked_cells` stands; if
                 // the engine somehow doesn't swap, the mismatch re-plans — the
                 // safe fallback either way.
-                if placement.used_hold {
-                    if let Some(signature) = self.planning_for.as_mut() {
-                        signature.piece_type = placement.piece_type();
-                    }
+                if placement.used_hold
+                    && let Some(signature) = self.planning_for.as_mut()
+                {
+                    signature.piece_type = placement.piece_type();
                 }
                 // Render against the board the maneuver happens on, from the active
                 // piece's current pose — the inputs `placement_to_inputs` round-trips.
@@ -425,10 +425,10 @@ mod tests {
         // piece locks, and assert the resulting board equals the planner's
         // simulated placement. (Plan-to-input pose fidelity is separately pinned by
         // `plan.rs`'s round-trip test; this proves the controller *sequences* it.)
-        use crate::ai::eval::LinearEvaluator;
-        use crate::ai::search::{think_to_completion, BestFirstPlanner, SearchBudget};
         use crate::ai::SearchState;
-        use crate::engine::{lock_and_clear, Board, CellKind};
+        use crate::ai::eval::LinearEvaluator;
+        use crate::ai::search::{BestFirstPlanner, SearchBudget, think_to_completion};
+        use crate::engine::{Board, CellKind, lock_and_clear};
 
         let mut controller = AiController::new(Handicap::perfect(), DEFAULT_AI_SEED);
         let mut engine = Engine::new(EngineConfig::default(), 7);

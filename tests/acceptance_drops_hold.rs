@@ -12,8 +12,8 @@
 //! a particular bag shuffle.
 
 use tetr_online::engine::{
-    fall_speed_seconds, soft_drop_speed_seconds, Engine, EngineConfig, EngineEvent,
-    EngineScoreAction, InputFrame, PieceRotation,
+    Engine, EngineConfig, EngineEvent, EngineScoreAction, InputFrame, PieceRotation,
+    fall_speed_seconds, soft_drop_speed_seconds,
 };
 
 /// Fixed seed shared by every engine-driven scenario for determinism.

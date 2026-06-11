@@ -4,9 +4,9 @@
 //!
 //! Run: `SEEDS=24 BEAM_DEPTH=2 cargo run --release -p tetr-research --bin behavior`
 
-use tetr_core::ai::eval::{BoardWeights, RewardWeights, Weights};
 use tetr_core::ai::Cc2Weights;
-use tetr_research::behavior::{evaluate_scenario, standard_suite, ScenarioReport};
+use tetr_core::ai::eval::{BoardWeights, RewardWeights, Weights};
+use tetr_research::behavior::{ScenarioReport, evaluate_scenario, standard_suite};
 use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
 use tetr_research::seeds::seed_set;
@@ -64,9 +64,18 @@ fn print_report(r: &ScenarioReport) {
     let t = &r.totals;
     eprintln!(
         "    clears: S{} D{} T{} Quad{} | TSmini{} TSS{} TSD{} TST{} | B2B{} comboClears{} maxCombo{} PC{}",
-        t.singles, t.doubles, t.triples, t.tetrises,
-        t.tspin_mini, t.tspin_single, t.tspin_double, t.tspin_triple,
-        t.b2b_clears, t.combo_clears, t.max_combo, t.perfect_clears,
+        t.singles,
+        t.doubles,
+        t.triples,
+        t.tetrises,
+        t.tspin_mini,
+        t.tspin_single,
+        t.tspin_double,
+        t.tspin_triple,
+        t.b2b_clears,
+        t.combo_clears,
+        t.max_combo,
+        t.perfect_clears,
     );
     println!("APP[{}] {:.3}", r.scenario.label(), r.mean_app);
 }

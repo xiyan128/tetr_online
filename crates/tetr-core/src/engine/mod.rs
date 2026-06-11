@@ -29,25 +29,25 @@ mod types;
 
 pub use active_piece::{ActivePiece, PieceAction, RotationDirection};
 pub use api::Engine;
-pub use attack::{attack_lines, COMBO_TABLE, PERFECT_CLEAR_ATTACK};
+pub use attack::{COMBO_TABLE, PERFECT_CLEAR_ATTACK, attack_lines};
 pub use bit_board::{BitBoard, ColumnView, Occupancy};
 pub use board::{Board, CellKind};
 pub use game_over::{is_block_out, is_lock_out, is_top_out};
 pub use garbage::GarbageBatch;
 pub use generator::PieceGenerator;
 pub use goals::{
-    breaks_back_to_back, fixed_goal_for_level, goal_for_level, qualifies_for_back_to_back,
-    variable_goal_for_level, variable_goal_units, GoalProgress, GoalSystem,
+    GoalProgress, GoalSystem, breaks_back_to_back, fixed_goal_for_level, goal_for_level,
+    qualifies_for_back_to_back, variable_goal_for_level, variable_goal_units,
 };
-pub use gravity::{fall_speed_seconds, soft_drop_speed_seconds, MAX_LEVEL, MIN_LEVEL};
-pub use lock_clear::{lock_and_clear, LockOutcome};
+pub use gravity::{MAX_LEVEL, MIN_LEVEL, fall_speed_seconds, soft_drop_speed_seconds};
+pub use lock_clear::{LockOutcome, lock_and_clear};
 pub use lock_down::{
-    apply_grounded_move_or_rotation, LockDownMode, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS,
+    EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS, LockDownMode, apply_grounded_move_or_rotation,
 };
 pub use pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 pub use scoring::EngineScoreAction;
-pub use t_spin::{classify_t_spin, is_t_slot, t_spin_corners, TSpinCorners, TSpinKind};
+pub use t_spin::{TSpinCorners, TSpinKind, classify_t_spin, is_t_slot, t_spin_corners};
 pub use types::{
-    ActivePieceSnapshot, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus, InputFrame,
-    SnapshotCell, BUFFER_HEIGHT,
+    ActivePieceSnapshot, BUFFER_HEIGHT, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
+    InputFrame, SnapshotCell,
 };
