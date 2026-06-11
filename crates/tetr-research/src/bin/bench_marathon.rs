@@ -8,9 +8,9 @@
 //! cargo run --release -p tetr-research --bin bench-marathon
 //! ```
 
-use tetr_research::{
-    baseline_bot, beam_linear_bot, evaluate, seed_set, MarathonStats, DEFAULT_MAX_FRAMES,
-};
+use tetr_research::bots::BotSpec;
+use tetr_research::marathon::{evaluate, MarathonStats, DEFAULT_MAX_FRAMES};
+use tetr_research::seeds::seed_set;
 
 /// Beam width used for the beam comparison runs.
 const BEAM_WIDTH: usize = 16;
@@ -56,14 +56,14 @@ fn main() {
         seeds.len()
     );
 
-    let baseline = evaluate(&|s| baseline_bot(s), &seeds, DEFAULT_MAX_FRAMES);
+    let baseline = evaluate(&BotSpec::greedy().factory(), &seeds, DEFAULT_MAX_FRAMES);
     print_stats("baseline: greedy (linear DT20 / SURVIVAL)", &baseline);
 
     // --- BeamPlanner head-to-head (same linear eval, perfect handicap) -----------
     // depth-1 beam must reproduce the greedy decisions, so its score/sec ties the
     // baseline within noise — the seam-faithful gate before depth rises.
     let beam1 = evaluate(
-        &|s| beam_linear_bot(s, BEAM_WIDTH, 1),
+        &BotSpec::beam(BEAM_WIDTH, 1).factory(),
         &seeds,
         DEFAULT_MAX_FRAMES,
     );
@@ -71,7 +71,7 @@ fn main() {
     print_delta("beam @depth1", &beam1, &baseline);
 
     let beam2 = evaluate(
-        &|s| beam_linear_bot(s, BEAM_WIDTH, 2),
+        &BotSpec::beam(BEAM_WIDTH, 2).factory(),
         &seeds,
         DEFAULT_MAX_FRAMES,
     );
@@ -79,7 +79,7 @@ fn main() {
     print_delta("beam @depth2", &beam2, &baseline);
 
     let beam3 = evaluate(
-        &|s| beam_linear_bot(s, BEAM_WIDTH, 3),
+        &BotSpec::beam(BEAM_WIDTH, 3).factory(),
         &seeds,
         DEFAULT_MAX_FRAMES,
     );

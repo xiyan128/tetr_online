@@ -15,9 +15,10 @@
 //! let bot = aware.controller(7);
 //! ```
 //!
-//! The free functions below predate the spec and remain as one-line shims —
-//! they are the names the recorded baselines were measured under. New
-//! experiments should compose a [`BotSpec`].
+//! There is exactly one way to build a research bot: compose a spec. (The
+//! pre-spec factory functions are gone — this crate carries no compatibility
+//! surface; recorded run records cite settings, which a spec expresses
+//! completely. A new evaluator gets a new [`EvalSpec`] arm, not a bypass.)
 
 use std::time::Duration;
 
@@ -137,16 +138,18 @@ impl BotSpec {
                 );
                 Box::new(AiController::new(Handicap::perfect(), seed))
             }
-            SearchSpec::Beam { width, depth } => {
-                full_strength(Box::new(BeamPlanner::new(width)), self.eval.build(), {
-                    SearchBudget::beam(depth)
-                })(seed)
-            }
+            SearchSpec::Beam { width, depth } => full_strength(
+                Box::new(BeamPlanner::new(width)),
+                self.eval.build(),
+                SearchBudget::beam(depth),
+                seed,
+            ),
             SearchSpec::BestFirst { budget, depth } => full_strength(
                 Box::new(BestFirstPlanner::new()),
                 self.eval.build(),
                 SearchBudget::best_first(budget, depth),
-            )(seed),
+                seed,
+            ),
         };
         if self.blind {
             Box::new(BlindToGarbage(inner))
@@ -163,143 +166,33 @@ impl BotSpec {
 
 /// The one place the full-strength convention lives: imperfection 0 and no
 /// reaction delay (suites measure pure policy quality), blocking venue.
-/// Returns a one-shot builder so [`BotSpec::controller`] and the legacy shims
-/// construct identically.
 fn full_strength(
     planner: Box<dyn tetr_core::ai::Mind>,
     eval: Box<dyn Evaluator>,
     budget: SearchBudget,
-) -> impl FnOnce(u64) -> Box<dyn PlayerController> {
-    move |seed| {
-        let policy = SearchPolicy::new(planner, eval, budget, 0.0, seed);
-        Box::new(AiController::with_policy(
-            Box::new(policy) as Box<dyn Policy>,
-            Duration::ZERO,
-        ))
-    }
-}
-
-// --- Legacy factory shims ------------------------------------------------------
-// The names the recorded baselines were measured under. Each is a one-line
-// composition of `BotSpec` (or the raw `full_strength` core for the
-// `Box<dyn Evaluator>` forms); new experiments should use the spec directly.
-
-/// The current shipped bot: greedy search over the linear DT-20 / SURVIVAL
-/// evaluator, at full strength. This is the baseline.
-pub fn baseline_bot(seed: u64) -> Box<dyn PlayerController> {
-    BotSpec::greedy().controller(seed)
-}
-
-/// A beam bot over an arbitrary evaluator (the `Box<dyn Evaluator>` escape
-/// hatch for one-off evals that have no [`EvalSpec`] arm yet).
-pub fn beam_bot(
     seed: u64,
-    beam_width: usize,
-    max_depth: u8,
-    eval: Box<dyn Evaluator>,
 ) -> Box<dyn PlayerController> {
-    full_strength(
-        Box::new(BeamPlanner::new(beam_width)),
-        eval,
-        SearchBudget::beam(max_depth),
-    )(seed)
-}
-
-/// A best-first bot over an arbitrary evaluator (escape hatch, like [`beam_bot`]).
-pub fn bestfirst_bot(
-    seed: u64,
-    node_budget: u32,
-    max_depth: u8,
-    eval: Box<dyn Evaluator>,
-) -> Box<dyn PlayerController> {
-    full_strength(
-        Box::new(BestFirstPlanner::new()),
-        eval,
-        SearchBudget::best_first(node_budget, max_depth),
-    )(seed)
-}
-
-/// Best-first over CC2's evaluator with custom weights.
-pub fn bestfirst_cc2_weights_bot(
-    seed: u64,
-    node_budget: u32,
-    max_depth: u8,
-    weights: Cc2Weights,
-) -> Box<dyn PlayerController> {
-    BotSpec::best_first(node_budget, max_depth)
-        .cc2(weights)
-        .controller(seed)
-}
-
-/// Best-first over the linear evaluator with explicit weights.
-pub fn bestfirst_weights_bot(
-    seed: u64,
-    node_budget: u32,
-    max_depth: u8,
-    weights: Weights,
-) -> Box<dyn PlayerController> {
-    BotSpec::best_first(node_budget, max_depth)
-        .linear(weights)
-        .controller(seed)
-}
-
-/// The Tier-2 beam bot over the default linear evaluator (differs from
-/// [`baseline_bot`] in only the planner, so a head-to-head isolates search).
-pub fn beam_linear_bot(seed: u64, beam_width: usize, max_depth: u8) -> Box<dyn PlayerController> {
-    BotSpec::beam(beam_width, max_depth).controller(seed)
-}
-
-/// Cold Clear 2's evaluator (default weights) on our beam — the eval
-/// head-to-head against [`beam_linear_bot`], and the baseline to hillclimb past.
-pub fn beam_cc2_bot(seed: u64, beam_width: usize, max_depth: u8) -> Box<dyn PlayerController> {
-    BotSpec::beam(beam_width, max_depth)
-        .cc2(Cc2Weights::DEFAULT)
-        .controller(seed)
-}
-
-/// A beam bot over explicit linear weights.
-pub fn beam_weights_bot(
-    seed: u64,
-    beam_width: usize,
-    max_depth: u8,
-    weights: Weights,
-) -> Box<dyn PlayerController> {
-    BotSpec::beam(beam_width, max_depth)
-        .linear(weights)
-        .controller(seed)
-}
-
-/// A beam bot over CC2's evaluator with custom weights — the hillclimb's
-/// candidate factory.
-pub fn beam_cc2_weights_bot(
-    seed: u64,
-    beam_width: usize,
-    max_depth: u8,
-    weights: Cc2Weights,
-) -> Box<dyn PlayerController> {
-    BotSpec::beam(beam_width, max_depth)
-        .cc2(weights)
-        .controller(seed)
+    let policy = SearchPolicy::new(planner, eval, budget, 0.0, seed);
+    Box::new(AiController::with_policy(
+        Box::new(policy) as Box<dyn Policy>,
+        Duration::ZERO,
+    ))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    /// The spec and the legacy shims must construct identical bots: same spec,
-    /// same seed ⇒ identical play. (Construction equality is unobservable
-    /// directly; a short deterministic game is the witness.)
+    /// Same spec, same seed => the identical game (the determinism every suite
+    /// rests on, witnessed at the construction seam).
     #[test]
-    fn spec_and_shim_build_the_same_bot() {
-        let weights = Cc2Weights::attack_tuned();
+    fn same_spec_same_game() {
+        let spec = BotSpec::beam(8, 2).cc2(Cc2Weights::attack_tuned());
         let outcome = |make: &dyn Fn(u64) -> Box<dyn PlayerController>| {
             let o = crate::versus::play_versus(make, make, 7, 30);
             (o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped)
         };
-        let spec = BotSpec::beam(8, 2).cc2(weights);
-        let via_spec = outcome(&spec.factory());
-        let via_shim = outcome(&|s| beam_cc2_weights_bot(s, 8, 2, weights));
-        assert_eq!(via_spec, via_shim);
+        assert_eq!(outcome(&spec.factory()), outcome(&spec.factory()));
     }
 
     /// `.blind()` wraps the same brain: with nothing queued the play is

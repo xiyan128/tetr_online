@@ -54,25 +54,7 @@ pub mod versus_legacy;
 
 pub(crate) mod accounting;
 
-// The crate's flat vocabulary: the names experiments actually compose. Bins
-// may also import from the modules directly; both paths are supported.
-pub use bots::{
-    baseline_bot, beam_bot, beam_cc2_bot, beam_cc2_weights_bot, beam_linear_bot, beam_weights_bot,
-    bestfirst_bot, bestfirst_cc2_weights_bot, bestfirst_weights_bot,
-};
-pub use downstack::{
-    cheese_holes, evaluate_downstack, play_downstack, DownstackOutcome, DownstackStats,
-};
-pub use marathon::{
-    evaluate, evaluate_capped, marathon_config, play_marathon_capped, MarathonOutcome,
-    MarathonStats, DEFAULT_MAX_FRAMES, SIM_HZ,
-};
-pub use seeds::{seed_set, seed_set_from};
-pub use versus::{
-    decide_versus, evaluate_versus, evaluate_versus_format, play_versus, play_versus_format,
-    BlindToGarbage, VersusFormat, VersusOutcome, VersusResult, VersusStats,
-};
-// `versus_legacy` is deliberately NOT re-exported flat: its scheduler diverges
-// from the engine rules on purpose (TBP-referee comparability), and sitting
-// beside `play_versus` in the vocabulary invited misuse. Import it by module
-// path; the path is the warning label.
+// No flat re-exports: every item is imported by module path (one import
+// style, and the path carries meaning — `versus_legacy::` is a warning label,
+// `seeds::regions::` is the partition). This crate has no external consumers
+// and keeps no compatibility surface.

@@ -7,11 +7,9 @@
 use tetr_core::ai::eval::{BoardWeights, RewardWeights, Weights};
 use tetr_core::ai::Cc2Weights;
 use tetr_research::behavior::{evaluate_scenario, standard_suite, ScenarioReport};
+use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
-use tetr_research::{
-    beam_cc2_bot, beam_cc2_weights_bot, beam_linear_bot, beam_weights_bot,
-    bestfirst_cc2_weights_bot, bestfirst_weights_bot, seed_set,
-};
+use tetr_research::seeds::seed_set;
 
 /// Parse a comma-separated `f32` list from env var `key` (empty if unset/malformed).
 fn parse_f32_list(key: &str) -> Vec<f32> {
@@ -85,51 +83,21 @@ fn main() {
         seeds.len()
     );
 
+    // The arm under test, as a spec (see BOT env). The best-first arms are the
+    // search-algorithm counterparts of their beam twins — same eval, beam vs
+    // best-first; "bflin" pairs deep search with the near_full_rows combo
+    // feature (can best-first build the cascade the beam's truncation prunes?).
+    let spec = match bot.as_str() {
+        "cc2" => BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT),
+        "cc2custom" => BotSpec::beam(width, depth).cc2(cc2_custom_weights()),
+        "lincustom" => BotSpec::beam(width, depth).linear(linear_custom_weights()),
+        "bf" => BotSpec::best_first(node_budget, depth).cc2(Cc2Weights::DEFAULT),
+        "bfcustom" => BotSpec::best_first(node_budget, depth).cc2(cc2_custom_weights()),
+        "bflin" => BotSpec::best_first(node_budget, depth).linear(linear_custom_weights()),
+        _ => BotSpec::beam(width, depth),
+    };
+
     for scenario in standard_suite() {
-        let r = match bot.as_str() {
-            "cc2" => evaluate_scenario(&|s| beam_cc2_bot(s, width, depth), &seeds, scenario),
-            "cc2custom" => {
-                let w = cc2_custom_weights();
-                evaluate_scenario(
-                    &|s| beam_cc2_weights_bot(s, width, depth, w),
-                    &seeds,
-                    scenario,
-                )
-            }
-            "lincustom" => {
-                let w = linear_custom_weights();
-                evaluate_scenario(&|s| beam_weights_bot(s, width, depth, w), &seeds, scenario)
-            }
-            // Best-first search over CC2's eval (DEFAULT weights), depth-capped. The
-            // search-algorithm counterpart of BOT=cc2 — same eval, beam vs best-first.
-            "bf" => evaluate_scenario(
-                &|s| bestfirst_cc2_weights_bot(s, node_budget, depth, Cc2Weights::DEFAULT),
-                &seeds,
-                scenario,
-            ),
-            // Best-first over the warm-climbed CC2 weights (`CC2_PARAMS`) — counterpart
-            // of BOT=cc2custom; best-first vs beam at the tuned attack eval.
-            "bfcustom" => {
-                let w = cc2_custom_weights();
-                evaluate_scenario(
-                    &|s| bestfirst_cc2_weights_bot(s, node_budget, depth, w),
-                    &seeds,
-                    scenario,
-                )
-            }
-            // Best-first over the linear eval with custom `BOARD_PARAMS`/`REWARD_PARAMS`
-            // (incl. `near_full_rows`) — the combo-synergy test: can deep best-first
-            // search build the clean-board combo cascade the beam's truncation prunes?
-            "bflin" => {
-                let w = linear_custom_weights();
-                evaluate_scenario(
-                    &|s| bestfirst_weights_bot(s, node_budget, depth, w),
-                    &seeds,
-                    scenario,
-                )
-            }
-            _ => evaluate_scenario(&|s| beam_linear_bot(s, width, depth), &seeds, scenario),
-        };
-        print_report(&r);
+        print_report(&evaluate_scenario(&spec.factory(), &seeds, scenario));
     }
 }

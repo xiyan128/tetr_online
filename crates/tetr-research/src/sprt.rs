@@ -24,7 +24,8 @@ use tetr_core::player::PlayerController;
 
 use rayon::prelude::*;
 
-use crate::{play_versus_format, seed_set_from, VersusFormat, VersusOutcome};
+use crate::seeds::seed_set_from;
+use crate::versus::{play_versus_format, VersusFormat, VersusOutcome};
 
 /// Test design: hypotheses, error rates, block shape, and budgets.
 #[derive(Clone, Copy, Debug)]

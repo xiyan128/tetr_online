@@ -27,11 +27,11 @@
 use std::time::{Duration, Instant};
 
 use tetr_core::ai::Cc2Weights;
-use tetr_core::player::PlayerController;
+use tetr_research::bots::BotSpec;
 use tetr_research::cli::{env_f64, env_usize};
 use tetr_research::seeds::regions;
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
-use tetr_research::{beam_cc2_weights_bot, VersusFormat};
+use tetr_research::versus::VersusFormat;
 
 /// The climb's v3 candidate (versus_climb.rs RUN RECORD v3) — judged and
 /// REJECTED by this bin's run record above; kept as the default so the record
@@ -69,12 +69,10 @@ fn main() {
     };
 
     let weights = Cc2Weights::attack_tuned().with_board_params(&V3_CANDIDATE);
-    let cand = move |s: u64| -> Box<dyn PlayerController> {
-        beam_cc2_weights_bot(s, width, depth, weights)
-    };
-    let incumbent = move |s: u64| -> Box<dyn PlayerController> {
-        beam_cc2_weights_bot(s, width, depth, Cc2Weights::attack_tuned())
-    };
+    let cand = BotSpec::beam(width, depth).cc2(weights).factory();
+    let incumbent = BotSpec::beam(width, depth)
+        .cc2(Cc2Weights::attack_tuned())
+        .factory();
 
     println!(
         "SPRT: v3 candidate vs attack_tuned | H0 p=0.5, H1 p={} | beam d{depth} w{width}, \
