@@ -98,8 +98,9 @@ fn emit_seat_audio(mut commands: Commands, seats: Query<(&SeatEvents, Option<&Hu
     }
 }
 
-/// A clear callout ("TETRIS", "T-SPIN", "COMBO x3", with B2B prefix) floating
-/// above a seat's board — the guideline §19.2 wording, seat-native.
+/// A clear callout ("TETRIS", "T-SPIN DOUBLE", with a "BACK-TO-BACK" prefix
+/// line) in the seat's OUTER side gutter — amber display type that never
+/// overlaps the field (Kissaten: the field is sacred).
 #[derive(Component)]
 struct SeatCallout {
     age: f32,
@@ -107,7 +108,22 @@ struct SeatCallout {
 
 const CALLOUT_TTL: f32 = 1.1;
 
-fn callout_label(action: &crate::engine::EngineScoreAction, b2b: bool) -> Option<String> {
+/// Where a seat's callouts live: just outside the seat's OUTER board edge
+/// (away from the shared gutter, the meters, and the opponent), mid-low on
+/// the board so a drifting callout never reaches the hold/preview columns.
+/// Returns the anchor x and the text anchor to use.
+fn callout_anchor(seat: usize) -> (f32, bevy::sprite::Anchor) {
+    if seat == 0 {
+        (-0.75 * SessionLayout::BLOCK, Anchor::CENTER_RIGHT)
+    } else {
+        (
+            (SessionLayout::BOARD_W as f32 + 0.75) * SessionLayout::BLOCK,
+            Anchor::CENTER_LEFT,
+        )
+    }
+}
+
+fn callout_label(action: &crate::engine::EngineScoreAction) -> Option<String> {
     use crate::engine::{EngineScoreAction as A, TSpinKind};
     let core = match action {
         A::Single => "SINGLE".to_string(),
@@ -128,21 +144,19 @@ fn callout_label(action: &crate::engine::EngineScoreAction, b2b: bool) -> Option
         }
         _ => return None,
     };
-    Some(if b2b {
-        format!("BACK-TO-BACK {core}")
-    } else {
-        core
-    })
+    Some(core)
 }
 
 /// Spawn a callout per scoring clear on any seat (both modes — reading the
-/// opponent's Tetris matters in versus too).
+/// opponent's Tetris matters in versus too). A back-to-back clear gets a
+/// smaller "BACK-TO-BACK" prefix line above the core word, both amber.
 fn spawn_seat_callouts(
     mut commands: Commands,
     assets: Res<crate::assets::GameAssets>,
     seats: Query<(&Seat, &SeatEvents)>,
 ) {
     use crate::engine::EngineEvent;
+    use crate::ui::widgets::theme;
     for (seat, events) in &seats {
         for event in &events.0 {
             let EngineEvent::ScoreAwarded {
@@ -153,24 +167,40 @@ fn spawn_seat_callouts(
             else {
                 continue;
             };
-            let Some(label) = callout_label(action, *back_to_back_bonus) else {
+            let Some(label) = callout_label(action) else {
                 continue;
             };
             let origin = SessionLayout::board_origin(seat.index);
-            let center_x = SessionLayout::BOARD_W as f32 * SessionLayout::BLOCK / 2.0;
-            let top_y = (SessionLayout::BOARD_H as f32 - 2.5) * SessionLayout::BLOCK;
+            let (anchor_x, anchor) = callout_anchor(seat.index);
+            let mid_y = 6.0 * SessionLayout::BLOCK;
             commands.spawn((
                 SeatCallout { age: 0.0 },
                 Text2d::new(label),
                 TextFont {
                     font: assets.font.clone(),
-                    font_size: crate::ui::widgets::theme::TITLE_FONT_SIZE,
+                    font_size: theme::TITLE_FONT_SIZE,
                     ..Default::default()
                 },
-                TextColor(crate::ui::widgets::theme::ACCENT),
-                Transform::from_translation(origin + Vec3::new(center_x, top_y, 2.0)),
+                TextColor(theme::ACCENT),
+                anchor,
+                Transform::from_translation(origin + Vec3::new(anchor_x, mid_y, 2.0)),
                 DespawnOnExit(GameState::Session),
             ));
+            if *back_to_back_bonus {
+                commands.spawn((
+                    SeatCallout { age: 0.0 },
+                    Text2d::new("BACK-TO-BACK"),
+                    TextFont {
+                        font: assets.font.clone(),
+                        font_size: theme::BUTTON_FONT_SIZE,
+                        ..Default::default()
+                    },
+                    TextColor(theme::ACCENT),
+                    anchor,
+                    Transform::from_translation(origin + Vec3::new(anchor_x, mid_y + 36.0, 2.0)),
+                    DespawnOnExit(GameState::Session),
+                ));
+            }
         }
     }
 }

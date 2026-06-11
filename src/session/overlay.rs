@@ -306,19 +306,24 @@ fn spawn_result_banner(
     let minutes = (clock.0 / 60.0) as u32;
     let seconds = clock.0 % 60.0;
 
-    let (title, summary) = match outcome {
+    // Ceremony color: a decisive win gets the amber moment (the screenshot
+    // belongs to the winner); a draw, a loss, and a top-out stay quiet cream.
+    let (title, summary, title_color) = match outcome {
         super::SessionOutcome::Versus { winner } => {
-            let title = match winner {
-                None => "DRAW".to_string(),
+            let (title, color) = match winner {
+                None => ("DRAW".to_string(), theme::TEXT),
                 Some(seat) => match config.seats[seat] {
-                    Participant::Human => "YOU WIN!".to_string(),
+                    Participant::Human => ("YOU WIN!".to_string(), theme::ACCENT),
                     Participant::Bot { .. } => {
                         // A bot won. Against a human that reads as a loss; in
                         // bot-vs-bot, name the victor.
                         if config.seats[..config.mode.seat_count()].contains(&Participant::Human) {
-                            "YOU LOSE".to_string()
+                            ("YOU LOSE".to_string(), theme::TEXT)
                         } else {
-                            format!("{} WINS", seat_label(&config, &registry, seat))
+                            (
+                                format!("{} WINS", seat_label(&config, &registry, seat)),
+                                theme::ACCENT,
+                            )
                         }
                     }
                 },
@@ -338,13 +343,14 @@ fn spawn_result_banner(
                 minutes,
                 seconds,
             );
-            (title, summary)
+            (title, summary, color)
         }
         super::SessionOutcome::Solo { completed } => {
-            let title = if completed {
-                "COMPLETE!".to_string()
+            let (title, color) = if completed {
+                ("COMPLETE!".to_string(), theme::ACCENT)
             } else {
-                "GAME OVER".to_string()
+                // Defeat is quiet; no amber for a top-out.
+                ("GAME OVER".to_string(), theme::TEXT)
             };
             // The final numbers come straight off the seat's last snapshot.
             let snap = seats_snapshot.iter().next().map(|s| s.0.clone());
@@ -362,7 +368,7 @@ fn spawn_result_banner(
                 }
                 None => format!("TIME {minutes}:{seconds:04.1}"),
             };
-            (title, summary)
+            (title, summary, color)
         }
     };
 
@@ -372,9 +378,15 @@ fn spawn_result_banner(
             FocusList::new(2),
             overlay_root(0.8),
             DespawnOnExit(SessionPhase::Over),
-            children![title_text(title, assets.font.clone())],
         ))
         .id();
+    // `insert` (not a tuple bundle): title_text already carries a TextColor,
+    // and a bundle with a duplicate component panics — overwrite it instead.
+    let title_id = commands
+        .spawn(title_text(title, assets.font.clone()))
+        .insert(TextColor(title_color))
+        .id();
+    commands.entity(root).add_child(title_id);
     let summary_id = commands
         .spawn(label_text(summary, assets.font_body.clone()))
         .id();

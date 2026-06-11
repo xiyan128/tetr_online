@@ -339,7 +339,45 @@ fn setup_scene(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(root).add_children(&[hold, preview]);
+        // Micro labels over the columns, in the working voice — quiet chrome
+        // that makes the HUD legible cold (the columns themselves are unboxed).
+        let hold_label = commands
+            .spawn((
+                Text2d::new("HOLD"),
+                TextFont {
+                    font: assets.font_body.clone(),
+                    font_size: theme::MICRO_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(theme::TEXT_DIM),
+                Anchor::BOTTOM_RIGHT,
+                Transform::from_translation(Vec3::new(
+                    -0.5 * block,
+                    (SessionLayout::BOARD_H as f32 + 0.15) * block,
+                    0.0,
+                )),
+            ))
+            .id();
+        let next_label = commands
+            .spawn((
+                Text2d::new("NEXT"),
+                TextFont {
+                    font: assets.font_body.clone(),
+                    font_size: theme::MICRO_FONT_SIZE,
+                    ..default()
+                },
+                TextColor(theme::TEXT_DIM),
+                Anchor::BOTTOM_LEFT,
+                Transform::from_translation(Vec3::new(
+                    (SessionLayout::BOARD_W as f32 + 0.5) * block,
+                    (SessionLayout::BOARD_H as f32 + 0.15) * block,
+                    0.0,
+                )),
+            ))
+            .id();
+        commands
+            .entity(root)
+            .add_children(&[hold, preview, hold_label, next_label]);
 
         // Seat label above the board: "YOU", or the model's catalog name.
         let label = match config.seats[seat] {
