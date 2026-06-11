@@ -13,7 +13,7 @@
 //!
 //! Reconcilers diff the cached snapshot slice and despawn-and-respawn only
 //! what changed, querying per seat. Garbage cells (`SnapshotCell::garbage`) paint a
-//! neutral gray: telling your own stack from their attack at a glance is the
+//! warm zero-chroma gray: telling your own stack from their attack at a glance is the
 //! point of having a versus renderer at all.
 
 use bevy::camera::ScalingMode;
