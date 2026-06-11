@@ -130,6 +130,16 @@ features = [
     "serialize",
 ]
 
+# Linux only: winit refuses to compile without a windowing backend selected,
+# and the curated list above deliberately selects none (macOS and wasm need
+# none). Target-gated, so it adds nothing to the macOS or wasm builds. `x11`
+# compiles with no system headers (x11rb/x11-dl bind at runtime); `wayland`
+# stays off until a native Linux release wants it (it needs libwayland-dev).
+[target.'cfg(target_os = "linux")'.dependencies.bevy]
+version = "0.18.1"
+default-features = false
+features = ["x11"]
+
 [target.wasm32-unknown-unknown.dependencies]
 getrandom = { version = "0.4", features = ["wasm_js"] }
 # Routes Rust panics to `console.error` with a readable stack instead of the
