@@ -58,13 +58,16 @@ jobs:
       # between the CLI and the `wasm-bindgen` crate yields a silently broken
       # bundle (blank canvas, no error), so this match is load-bearing. binstall
       # fetches the prebuilt binary (seconds) instead of compiling from source.
+      # --force: rust-cache restores binstall's install METADATA but not the
+      # binary in ~/.cargo/bin, so on a warm cache an unforced binstall says
+      # "already installed" and skips — leaving no wasm-bindgen on PATH.
       - name: Install wasm-bindgen-cli (pinned to Cargo.lock)
         run: |
           version="$(cargo metadata --format-version 1 --locked \
             | jq -r '.packages[] | select(.name == "wasm-bindgen") | .version' \
             | head -n1)"
           echo "Pinning wasm-bindgen-cli to ${version}"
-          cargo binstall -y wasm-bindgen-cli --version "${version}"
+          cargo binstall -y --force wasm-bindgen-cli --version "${version}"
 
       - name: Install binaryen (wasm-opt)
         run: |
