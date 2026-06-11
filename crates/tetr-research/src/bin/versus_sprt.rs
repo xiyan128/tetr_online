@@ -16,14 +16,20 @@
 //!
 //! Env: TIME_BUDGET_SECS (3600), BLOCK_SEEDS (8 ⇒ 16 matches/block), P1
 //!      (0.55), RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH
-//!      (16), SEED_BASE (16384 — disjoint from the climb's train/validation/
-//!      confirmer regions at 0.., 4096.., and 32768+).
+//!      (16), SEED_BASE (regions::SPRT = 16384 — see `seeds::regions` for the
+//!      full partition; disjoint from the climb's regions by construction).
+//!
+//! NOTE: the RUN RECORD above was produced with the then-default
+//! BLOCK_SEEDS=8 (pre-parallelism). The default is now 24 (pool-saturating);
+//! the verdict stands, and re-deriving the exact LLR trajectory needs
+//! BLOCK_SEEDS=8.
 
 use std::time::{Duration, Instant};
 
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
-use tetr_research::cli::env_usize;
+use tetr_research::cli::{env_f64, env_usize};
+use tetr_research::seeds::regions;
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{beam_cc2_weights_bot, VersusFormat};
 
@@ -44,13 +50,6 @@ const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
     3.782_923,
 ];
 
-fn env_f64(key: &str, default: f64) -> f64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
-
 fn main() {
     let budget_secs = env_usize("TIME_BUDGET_SECS", 3600) as u64;
     let depth = env_usize("BEAM_DEPTH", 2) as u8;
@@ -62,7 +61,7 @@ fn main() {
     let config = SprtConfig {
         p1: env_f64("P1", 0.55),
         block_seeds: env_usize("BLOCK_SEEDS", 8),
-        seed_base: env_usize("SEED_BASE", 16384),
+        seed_base: env_usize("SEED_BASE", regions::SPRT),
         max_matches: u32::MAX,
         deadline: Some(Instant::now() + Duration::from_secs(budget_secs)),
         verbose: true,

@@ -16,9 +16,9 @@ use std::time::Duration;
 
 use tetr_core::engine::{attack_lines, EngineScoreAction, PieceGenerator, PieceType, TSpinKind};
 use tetr_research::cc2::{Cc2, TbpBoard, TbpMove};
+use tetr_research::versus_legacy::{versus_hole, GarbageQueue, VersusEngine};
 use tetr_research::{
-    beam_linear_bot, cheese_holes, decide_versus, evaluate_downstack, seed_set, versus_hole,
-    GarbageQueue, VersusEngine, VersusResult,
+    beam_linear_bot, cheese_holes, decide_versus, evaluate_downstack, seed_set, VersusResult,
 };
 
 const WIDTH: i32 = 10;
@@ -413,7 +413,7 @@ fn run_versus(
 
     // The referee's own hole stream (engine-rules matches draw holes inside each
     // receiver engine instead — see tetr-core's garbage module).
-    let mut hole_rng = seed ^ tetr_research::VERSUS_HOLE_SALT;
+    let mut hole_rng = seed ^ tetr_research::versus_legacy::VERSUS_HOLE_SALT;
     let mut ours_topped = false;
     let mut cc2_topped = false;
     let mut cc2_plies = 0u32; // CC2 placements made

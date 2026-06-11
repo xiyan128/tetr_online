@@ -54,9 +54,10 @@
 //!
 //! THE CONFIRMER (same day, post-epilogue): the rotate path now runs exactly
 //! that design — a screened accept must additionally win an SPRT race
-//! ([`tetr_research::sprt`], proposal vs the walk's current incumbent, fresh
-//! per-iter seed region at 32768+, capped by CONFIRM_MATCHES) before it moves
-//! the walk; H0 or in-budget inconclusive DEMOTES it. Block means at these
+//! ([`tetr_research::sprt`], proposal vs the walk's current incumbent, a
+//! fresh per-iter region striding from `seeds::regions::CONFIRM`, capped by
+//! CONFIRM_MATCHES) before it moves the walk; H0 or in-budget inconclusive
+//! DEMOTES it. Block means at these
 //! sizes pass noise (v1/v2/v3 all proved it); the racer does not.
 //!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
@@ -64,6 +65,14 @@
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
 //!      SIGMA (0.15), CLIMB_SEED (1), CONFIRM_MATCHES (800; 0 disables the
 //!      per-accept SPRT confirmer — rotate path only).
+//!
+//! REGION MAP MOVED (2026-06-10, the platform refactor): the rotation and
+//! confirmation regions migrated from their original literals (8192+, 32768+)
+//! to `seeds::regions::{ROTATION, CONFIRM}` (1<<20, 1<<50) for overlap
+//! headroom. The v2 / v3 / CONFIRMER run records above were produced under
+//! the OLD map: their trajectories reproduce only at the pre-move tree, not
+//! with this code. Their VERDICTS stand (they are conclusions, not pending
+//! reruns); the v1 record (train/validation regions, unmoved) reproduces.
 //!
 //! ROTATE=1 (the default, the v2 regularization): every iteration draws a
 //! FRESH disjoint seed block and evaluates BOTH the incumbent and the proposal
@@ -76,7 +85,8 @@ use std::time::Instant;
 
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
-use tetr_research::cli::{env_usize, SplitMix64};
+use tetr_research::cli::{env_f64, env_usize, SplitMix64};
+use tetr_research::seeds::regions;
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{
     beam_cc2_weights_bot, evaluate_versus_format, seed_set, seed_set_from, VersusFormat,
@@ -129,17 +139,14 @@ fn objective(
 fn main() {
     let budget_secs = env_usize("TIME_BUDGET_SECS", 1800) as u64;
     let train_seeds = seed_set(env_usize("SEEDS", 24));
-    let val_seeds = seed_set_from(4096, env_usize("VAL_SEEDS", 32));
+    let val_seeds = seed_set_from(regions::VALIDATION, env_usize("VAL_SEEDS", 32));
     let depth = env_usize("BEAM_DEPTH", 2) as u8;
     let width = env_usize("BEAM_WIDTH", 16);
     let format = VersusFormat {
         max_plies: env_usize("MAX_PLIES", 240) as u32,
         rain_period: env_usize("RAIN_PERIOD", 8) as u32,
     };
-    let mut sigma = std::env::var("SIGMA")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(0.15);
+    let mut sigma = env_f64("SIGMA", 0.15);
     let mut rng = SplitMix64::new(env_usize("CLIMB_SEED", 1) as u64);
 
     eprintln!(
@@ -157,6 +164,10 @@ fn main() {
     // small to prove in that budget are demoted, which is the point: only
     // proven steps move the walk.
     let confirm_matches = env_usize("CONFIRM_MATCHES", 800) as u32;
+    // Seed-index stride between successive confirmation races: at least the
+    // historical 4096, and never smaller than the race's worst-case seed
+    // consumption (M matches use at most M/2 indices; M covers it with slack).
+    let confirm_stride = 4096usize.max(confirm_matches as usize);
     let block = train_seeds.len();
 
     let start = Instant::now();
@@ -185,7 +196,7 @@ fn main() {
             // Fresh disjoint block this iteration; incumbent and proposal race
             // on it head-to-head (paired CRN within the iteration, no reuse
             // across iterations — seed overfitting is structurally impossible).
-            let block_seeds = seed_set_from(8192 + (iter as usize) * block, block);
+            let block_seeds = seed_set_from(regions::ROTATION + (iter as usize) * block, block);
             let incumbent_score = objective(&best_params, width, depth, &block_seeds, format);
             let proposal_score = objective(&proposal, width, depth, &block_seeds, format);
             accepted = proposal_score > incumbent_score + accept_margin;
@@ -219,10 +230,13 @@ fn main() {
                     SprtConfig {
                         // A fresh region per confirmation (keyed by iter so
                         // consecutive demoted races never share seeds — no
-                        // pick-the-lucky-region channel), disjoint from the
-                        // train (0..), validation (4096..), rotation (8192..),
-                        // and standalone-racer (16384..) regions.
-                        seed_base: 32768 + (iter as usize) * 4096,
+                        // pick-the-lucky-region channel), striding from
+                        // regions::CONFIRM, disjoint from every other region
+                        // (see seeds::regions). The stride scales with the
+                        // match cap so a CONFIRM_MATCHES override can never
+                        // make successive races overlap (a race of M matches
+                        // consumes at most M/2 seed indices).
+                        seed_base: regions::CONFIRM + (iter as usize) * confirm_stride,
                         max_matches: confirm_matches,
                         // The race respects the climb's overall clock.
                         deadline: Some(start + std::time::Duration::from_secs(budget_secs)),
