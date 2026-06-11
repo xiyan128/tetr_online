@@ -60,7 +60,10 @@ fn spawn_help_content(
     root: Single<Entity, With<HelpRoot>>,
 ) {
     let root = *root;
-    let font = assets.font.clone();
+    // Headings keep the display voice (Dogica); everything readable is the
+    // working voice (Departure Mono).
+    let heading_font = assets.font.clone();
+    let font = assets.font_body.clone();
 
     // The scrolling viewport: a fixed-height, clipped column that scrolls on Y.
     let viewport = commands
@@ -76,7 +79,7 @@ fn spawn_help_content(
                 row_gap: px(6.0),
                 ..default()
             },
-            BackgroundColor(theme::BUTTON_NORMAL),
+            BackgroundColor(theme::GRID),
             ScrollPosition::default(),
         ))
         .id();
@@ -88,15 +91,15 @@ fn spawn_help_content(
         &font,
         "Scroll: Up / Down  -  Page: PgUp / PgDn  -  Home / End",
         theme::TEXT_DIM,
-        14.0,
+        theme::MICRO_FONT_SIZE,
     );
 
-    spawn_section_heading(&mut commands, viewport, &font, "Controls");
+    spawn_section_heading(&mut commands, viewport, &heading_font, "Controls");
     for action in GameAction::ALL {
         spawn_keybind_row(&mut commands, viewport, &font, &settings.keybinds, action);
     }
 
-    spawn_section_heading(&mut commands, viewport, &font, "How To Play");
+    spawn_section_heading(&mut commands, viewport, &heading_font, "How To Play");
     for (term, blurb) in HOW_TO_PLAY {
         spawn_term_row(&mut commands, viewport, &font, term, blurb);
     }

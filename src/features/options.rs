@@ -114,10 +114,10 @@ impl OptionRow {
 
     /// The current value rendered on the right of the row.
     fn value(self, settings: &GameSettings, rebind: &RebindState) -> String {
-        if let OptionRow::Rebind(action) = self {
-            if rebind.capturing == Some(action) {
-                return "press a key...".into();
-            }
+        if let OptionRow::Rebind(action) = self
+            && rebind.capturing == Some(action)
+        {
+            return "press a key...".into();
         }
         match self {
             OptionRow::NextCount => settings.next_count.to_string(),
@@ -185,7 +185,8 @@ fn build_options_ui(
     if !existing.is_empty() {
         return;
     }
-    let font = assets.font.clone();
+    // Rows + hint speak the working voice (Departure Mono, body size).
+    let font = assets.font_body.clone();
     let rows = OptionRow::all();
 
     // The FocusList lives on the same entity carrying the screen marker the
@@ -212,18 +213,21 @@ fn build_options_ui(
                     height: px(30),
                     margin: UiRect::all(px(3)),
                     padding: UiRect::horizontal(px(14)),
+                    border: UiRect::all(px(1)),
+                    border_radius: BorderRadius::all(px(2)),
                     flex_direction: FlexDirection::Row,
                     justify_content: JustifyContent::SpaceBetween,
                     align_items: AlignItems::Center,
                     ..default()
                 },
-                BackgroundColor(theme::BUTTON_NORMAL),
+                BackgroundColor(theme::BG),
+                BorderColor::all(theme::FRAME),
                 children![
                     (
                         Text::new(row.label()),
                         TextFont {
                             font: font.clone(),
-                            font_size: theme::BUTTON_FONT_SIZE,
+                            font_size: theme::LABEL_FONT_SIZE,
                             ..default()
                         },
                         TextColor(theme::TEXT),
@@ -233,7 +237,7 @@ fn build_options_ui(
                         Text::new(value),
                         TextFont {
                             font: font.clone(),
-                            font_size: theme::BUTTON_FONT_SIZE,
+                            font_size: theme::LABEL_FONT_SIZE,
                             ..default()
                         },
                         TextColor(theme::ACCENT),
@@ -417,11 +421,11 @@ fn clear_rebind_state(mut rebind: ResMut<RebindState>) {
 // ---------------------------------------------------------------------------
 
 fn load_settings(storage: Res<StorageResource>, mut settings: ResMut<GameSettings>) {
-    if let Some(raw) = storage.0.load(keys::SETTINGS) {
-        if let Some(loaded) = crate::settings::decode_settings(&raw) {
-            *settings = loaded;
-            settings.sanitize();
-        }
+    if let Some(raw) = storage.0.load(keys::SETTINGS)
+        && let Some(loaded) = crate::settings::decode_settings(&raw)
+    {
+        *settings = loaded;
+        settings.sanitize();
     }
 }
 

@@ -125,10 +125,8 @@ fn spawn_event_effects(
         // Skip on a hard-drop frame: the snapshot's active piece is already the
         // freshly spawned successor, so caching it would point the next trail
         // at the wrong cells.
-        if !hard_dropped_this_frame {
-            if let Some(active) = snapshot.0.active.as_ref() {
-                cache.clone_from(&active.cells);
-            }
+        if !hard_dropped_this_frame && let Some(active) = snapshot.0.active.as_ref() {
+            cache.clone_from(&active.cells);
         }
     }
 }

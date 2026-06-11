@@ -129,7 +129,7 @@ impl Plugin for GamePlugin {
             .add_plugins(crate::session::SessionPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
             .add_plugins(crate::features::FeaturesPlugin)
-            // Render-pipeline visual effects (CRT pass; bloom on capable builds).
+            // Render-pipeline visual effects (bloom, on opt-in builds only).
             .add_plugins(crate::postfx::PostFxPlugin);
 
         #[cfg(debug_assertions)]

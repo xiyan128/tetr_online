@@ -129,7 +129,7 @@ fn setup(
     let hint = commands
         .spawn(label_text(
             "Left/Right change seat  -  Enter start  -  Esc back",
-            assets.font.clone(),
+            assets.font_body.clone(),
         ))
         .id();
     commands.entity(root).add_children(&[start, hint]);
@@ -195,10 +195,10 @@ fn refresh_row_labels(
             participant_label(config.seats[row.seat], &registry)
         );
         for child in children.iter() {
-            if let Ok(mut text) = texts.get_mut(child) {
-                if text.0 != label {
-                    text.0 = label.clone();
-                }
+            if let Ok(mut text) = texts.get_mut(child)
+                && text.0 != label
+            {
+                text.0 = label.clone();
             }
         }
     }

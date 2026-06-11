@@ -43,7 +43,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
             DespawnOnExit(GameState::ModeSelect),
             children![
                 title_text("Select Mode", assets.font.clone()),
-                label_text("Enter to play  -  Esc to go back", assets.font.clone()),
+                label_text("Enter to play  -  Esc to go back", assets.font_body.clone()),
             ],
         ))
         .id();

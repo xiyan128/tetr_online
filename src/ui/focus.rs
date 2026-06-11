@@ -23,6 +23,14 @@ pub struct Focusable {
     pub index: usize,
 }
 
+/// Marks a row's label text as focus-restyled (cream at rest, amber on focus,
+/// ground-on-amber while pressed). Texts WITHOUT this marker keep their own
+/// color — the options screen's amber value column stays amber regardless of
+/// where the cursor is.
+#[derive(Component, Debug, Clone, Copy, Reflect)]
+#[reflect(Component)]
+pub struct FocusLabel;
+
 impl Focusable {
     pub fn new(index: usize) -> Self {
         Self { index }
@@ -85,20 +93,32 @@ pub fn focus_navigation<M: Component>(
     keys: Res<ButtonInput<KeyCode>>,
     pointer_motion: Res<AccumulatedMouseMotion>,
     mut list: Single<&mut FocusList, With<M>>,
-    mut buttons: Query<(&Focusable, &Interaction, &mut BackgroundColor)>,
+    mut buttons: Query<(
+        &Focusable,
+        Option<&Interaction>,
+        &mut BackgroundColor,
+        &mut BorderColor,
+        &Children,
+    )>,
+    mut labels: Query<&mut TextColor, With<FocusLabel>>,
 ) {
     // Move the cursor to the pointed row — but weigh a press and a hover
     // differently. A press is an explicit action, so it always claims the cursor;
     // a hover only does on a frame the pointer moved (see the doc comment).
+    // `Interaction` is optional: keyboard-only rows (the options list) still
+    // restyle, they just never claim the cursor by pointer.
     let pointer_moved = pointer_motion.delta != Vec2::ZERO;
-    if let Some(index) = buttons.iter().find_map(|(focusable, interaction, _)| {
-        let claims_cursor = match *interaction {
-            Interaction::Pressed => true,
-            Interaction::Hovered => pointer_moved,
-            Interaction::None => false,
-        };
-        claims_cursor.then_some(focusable.index)
-    }) {
+    if let Some(index) = buttons
+        .iter()
+        .find_map(|(focusable, interaction, _, _, _)| {
+            let claims_cursor = match interaction.copied().unwrap_or(Interaction::None) {
+                Interaction::Pressed => true,
+                Interaction::Hovered => pointer_moved,
+                Interaction::None => false,
+            };
+            claims_cursor.then_some(focusable.index)
+        })
+    {
         list.index = index;
     }
 
@@ -109,14 +129,24 @@ pub fn focus_navigation<M: Component>(
         list.move_by(-1);
     }
 
-    for (focusable, interaction, mut color) in &mut buttons {
-        *color = if *interaction == Interaction::Pressed {
-            theme::BUTTON_PRESSED.into()
+    // Kissaten button states: a resting row is ground + frame border; focus
+    // turns the border and label amber; a press inverts into an amber chip.
+    for (focusable, interaction, mut bg, mut border, children) in &mut buttons {
+        let pressed = interaction.copied() == Some(Interaction::Pressed);
+        let (bg_color, border_color, text_color) = if pressed {
+            (theme::ACCENT, theme::ACCENT, theme::BG)
         } else if focusable.index == list.index {
-            theme::BUTTON_FOCUSED.into()
+            (theme::BG, theme::ACCENT, theme::ACCENT)
         } else {
-            theme::BUTTON_NORMAL.into()
+            (theme::BG, theme::FRAME, theme::TEXT)
         };
+        *bg = bg_color.into();
+        *border = BorderColor::all(border_color);
+        for child in children {
+            if let Ok(mut label) = labels.get_mut(*child) {
+                label.0 = text_color;
+            }
+        }
     }
 }
 

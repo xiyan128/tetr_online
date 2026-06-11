@@ -28,7 +28,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
         DespawnOnExit(GameState::Title),
         children![
             title_text("TETR ONLINE", assets.font.clone()),
-            label_text("Press any key to start", assets.font.clone()),
+            label_text("Press any key to start", assets.font_body.clone()),
         ],
     ));
 }

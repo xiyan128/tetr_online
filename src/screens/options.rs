@@ -33,7 +33,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
         DespawnOnExit(GameState::Options),
         children![
             title_text("Options", assets.font.clone()),
-            label_text("Esc to go back", assets.font.clone()),
+            label_text("Esc to go back", assets.font_body.clone()),
         ],
     ));
 }

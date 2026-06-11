@@ -34,7 +34,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
         DespawnOnExit(GameState::HighScores),
         children![
             title_text("High Scores", assets.font.clone()),
-            label_text("Esc to go back", assets.font.clone()),
+            label_text("Esc to go back", assets.font_body.clone()),
         ],
     ));
 }

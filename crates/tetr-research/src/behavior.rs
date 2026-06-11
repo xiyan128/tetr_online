@@ -221,25 +221,28 @@ pub fn play_scenario(
 
         // Faucet tick: dump whatever survived cancellation, then queue the next batch
         // (giving the bot `period` pieces to cancel it before it lands).
-        if let Scenario::Faucet { period, lines, .. } = scenario {
-            if locked && period > 0 && stats.pieces % period == 0 {
-                let received = pending.pending();
-                if received > 0 {
-                    stats.garbage_received += received;
-                    if pending.dump(&mut engine) {
-                        stats.topped_out = true;
-                        break;
-                    }
+        if let Scenario::Faucet { period, lines, .. } = scenario
+            && locked
+            && period > 0
+            && stats.pieces % period == 0
+        {
+            let received = pending.pending();
+            if received > 0 {
+                stats.garbage_received += received;
+                if pending.dump(&mut engine) {
+                    stats.topped_out = true;
+                    break;
                 }
-                pending.push(lines, versus_hole(&mut hole_rng));
             }
+            pending.push(lines, versus_hole(&mut hole_rng));
         }
 
         // Cheese: stop once the garbage has been dug out.
-        if let Scenario::Cheese { rows, .. } = scenario {
-            if locked && engine.snapshot().lines as u32 >= rows {
-                break;
-            }
+        if let Scenario::Cheese { rows, .. } = scenario
+            && locked
+            && engine.snapshot().lines as u32 >= rows
+        {
+            break;
         }
     }
 

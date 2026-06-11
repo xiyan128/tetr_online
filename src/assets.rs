@@ -39,6 +39,14 @@ pub struct GameAssets {
     #[asset(path = "sounds/rotate.ogg")]
     pub rotation_sound: Handle<AudioSource>,
 
+    /// The display voice (Kissaten): Dogica, a pixel font on an 8 px grid —
+    /// titles, stat numerals, button labels, callouts. Crisp only at native
+    /// multiples (16 / 24 / 32 / 96), so every size in `theme` is one.
     #[asset(path = "fonts/dogicabold.ttf")]
     pub font: Handle<Font>,
+
+    /// The working voice: Departure Mono (11 px grid) — body copy, hints,
+    /// menus, tables. Sentence case, 14 px body / 12 px micro.
+    #[asset(path = "fonts/DepartureMono-Regular.otf")]
+    pub font_body: Handle<Font>,
 }

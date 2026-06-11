@@ -78,13 +78,12 @@ bevy_egui = { version = "0.39", optional = true }
 # `cargo run` and `cargo test` Just Work; the web build script passes
 # `--no-default-features --features webgpu` for the WebGPU bundle. On native
 # targets `bevy/webgl2` is inert (it only constrains the wasm wgpu backend).
-# `bloom` is in `default` so native `cargo run`/`cargo test` get the full neon
-# spectacle, but the web build is renderer-split: the WebGL2 bundle is built with
-# `--no-default-features --features webgl2` (see scripts/build.ts) so it DROPS
-# bloom, while the WebGPU bundle adds it back. WebGPU-first by design.
-default = ["webgl2", "bloom"]
+# `bloom` is OFF by default everywhere: the Kissaten skin is flat by rule (no
+# glow, no gradients — hierarchy comes from the warm value ramp). The feature
+# stays buildable as an optional skin for experiments: `--features bloom`.
+default = ["webgl2"]
 webgl2 = ["bevy/webgl2"]
-webgpu = ["bevy/webgpu", "bloom"]
+webgpu = ["bevy/webgpu"]
 # Neon bloom / HDR glow (Tetris-Effect look). Pulls Bevy's `bevy_post_process`.
 # Bevy 0.18's built-in bloom is NOT WebGL2-compatible, so this is deliberately
 # absent from the shipped WebGL2 bundle and present on native + the WebGPU bundle.

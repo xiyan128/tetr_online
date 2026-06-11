@@ -7,7 +7,7 @@
 //! subtree, and a future mirrored layout is a per-root parameter. One camera
 //! frames both boards with `ScalingMode::AutoMin`, so native window resizes
 //! and the web canvas keep the whole match visible. The camera carries the
-//! [`GameplayCamera`] tag, so the bloom/CRT stack applies to it; the
+//! [`GameplayCamera`] tag, so the optional bloom skin applies to it; the
 //! screen-shake mover (`session::feel`) offsets it around the scene's rest
 //! center.
 //!
@@ -24,6 +24,7 @@ use crate::GameState;
 use crate::assets::GameAssets;
 use crate::engine::{Piece, PieceType, SnapshotCell};
 use crate::level::common::{GameplayCamera, mino_render_color, to_translation};
+use crate::ui::widgets::theme;
 
 use super::{Participant, Seat, SeatSnapshot, SeatStats, SessionConfig};
 
@@ -68,10 +69,10 @@ impl SessionLayout {
     }
 }
 
-/// Neutral gray for garbage cells — full alpha (the half-alpha gray is the
-/// ghost's), deliberately desaturated against the seven piece colours.
+/// Warm gray for garbage cells (`theme::GARBAGE`) — zero chroma, so it reads
+/// as dead weight next to any live piece.
 pub fn garbage_color() -> Color {
-    Color::srgb_u8(112, 116, 122)
+    crate::ui::widgets::theme::GARBAGE
 }
 
 /// A seat's render anchor; all of the seat's visuals hang off this entity.
@@ -293,10 +294,10 @@ fn setup_scene(
                 Text2d::new(label),
                 TextFont {
                     font: assets.font.clone(),
-                    font_size: 28.0,
+                    font_size: theme::BUTTON_FONT_SIZE,
                     ..default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(theme::TEXT),
                 Anchor::BOTTOM_CENTER,
                 Transform::from_translation(Vec3::new(
                     SessionLayout::BOARD_W as f32 * block / 2.0,
@@ -306,17 +307,23 @@ fn setup_scene(
             ))
             .id();
 
-        // Cumulative attack under the board.
+        // The readout under the board. Versus shows the pure "ATK n" figure at
+        // the numeral size (numerals are the hero typography); solo packs the
+        // whole run line into one row, so it stays at the label size.
+        let readout_size = match config.mode {
+            super::SessionMode::Versus => theme::NUMERAL_FONT_SIZE,
+            super::SessionMode::Solo { .. } => theme::BUTTON_FONT_SIZE,
+        };
         let atk_id = commands
             .spawn((
                 SeatAtkText { seat },
                 Text2d::new("ATK 0"),
                 TextFont {
                     font: assets.font.clone(),
-                    font_size: 20.0,
+                    font_size: readout_size,
                     ..default()
                 },
-                TextColor(Color::srgb(0.85, 0.55, 0.55)),
+                TextColor(theme::TEXT),
                 Anchor::TOP_CENTER,
                 Transform::from_translation(Vec3::new(
                     SessionLayout::BOARD_W as f32 * block / 2.0,
@@ -329,7 +336,7 @@ fn setup_scene(
     }
 
     // One camera, every board always in frame. `GameplayCamera` opts into the
-    // bloom/CRT stack and is the entity the shake mover offsets.
+    // optional effects stack and is the entity the shake mover offsets.
     commands.spawn((
         Camera2d,
         GameplayCamera,

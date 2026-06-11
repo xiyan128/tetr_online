@@ -86,7 +86,8 @@ struct CountdownText {
     elapsed: f32,
 }
 
-/// A full-screen, click-through column that centers its children.
+/// A full-screen, click-through column that centers its children. The scrim
+/// is `theme::GRID` (near-black brown — never pure black) at the given alpha.
 fn overlay_root(scrim_alpha: f32) -> impl Bundle {
     (
         Node {
@@ -98,7 +99,7 @@ fn overlay_root(scrim_alpha: f32) -> impl Bundle {
             row_gap: px(10),
             ..default()
         },
-        BackgroundColor(Color::srgba(0.0, 0.0, 0.0, scrim_alpha)),
+        BackgroundColor(theme::GRID.with_alpha(scrim_alpha)),
     )
 }
 
@@ -207,7 +208,7 @@ fn spawn_pause_overlay(mut commands: Commands, assets: Res<GameAssets>) {
         .spawn((
             PauseRoot,
             FocusList::new(2),
-            overlay_root(0.55),
+            overlay_root(0.8),
             DespawnOnExit(SessionPhase::Paused),
             children![title_text("PAUSED", assets.font.clone())],
         ))
@@ -225,7 +226,7 @@ fn spawn_pause_overlay(mut commands: Commands, assets: Res<GameAssets>) {
         ))
         .id();
     let hint = commands
-        .spawn(label_text("Esc to resume", assets.font.clone()))
+        .spawn(label_text("Esc to resume", assets.font_body.clone()))
         .id();
     commands.entity(root).add_children(&[resume, quit, hint]);
 }
@@ -369,13 +370,13 @@ fn spawn_result_banner(
         .spawn((
             ResultRoot,
             FocusList::new(2),
-            overlay_root(0.55),
+            overlay_root(0.8),
             DespawnOnExit(SessionPhase::Over),
             children![title_text(title, assets.font.clone())],
         ))
         .id();
     let summary_id = commands
-        .spawn(label_text(summary, assets.font.clone()))
+        .spawn(label_text(summary, assets.font_body.clone()))
         .id();
     let rematch_label = match config.mode {
         super::SessionMode::Solo { .. } => "Retry",

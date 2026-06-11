@@ -10,8 +10,7 @@
 //! the image stays crisp.
 //!
 //! Bloom is attached only to the [`GameplayCamera`] (HDR is auto-required by the
-//! `Bloom` component), so the menus keep their flat look. The [CRT pass](super::crt)
-//! is format-aware and composites correctly over the resulting HDR gameplay view.
+//! `Bloom` component), so the menus keep their flat look.
 
 use bevy::core_pipeline::tonemapping::DebandDither;
 use bevy::post_process::bloom::{Bloom, BloomPrefilter};

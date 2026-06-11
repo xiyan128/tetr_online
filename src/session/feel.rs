@@ -164,10 +164,10 @@ fn spawn_seat_callouts(
                 Text2d::new(label),
                 TextFont {
                     font: assets.font.clone(),
-                    font_size: 28.0,
+                    font_size: crate::ui::widgets::theme::TITLE_FONT_SIZE,
                     ..Default::default()
                 },
-                TextColor(Color::WHITE),
+                TextColor(crate::ui::widgets::theme::ACCENT),
                 Transform::from_translation(origin + Vec3::new(center_x, top_y, 2.0)),
                 DespawnOnExit(GameState::Session),
             ));
@@ -230,10 +230,10 @@ fn spawn_attack_pops(
             Text2d::new(format!("+{sent}")),
             TextFont {
                 font: assets.font.clone(),
-                font_size: 26.0,
+                font_size: crate::ui::widgets::theme::NUMERAL_FONT_SIZE,
                 ..default()
             },
-            TextColor(Color::srgb_u8(255, 120, 90)),
+            TextColor(crate::ui::widgets::theme::ATTACK),
             Anchor::CENTER,
             Transform::from_translation(Vec3::new(x, 10.0 * SessionLayout::BLOCK, 0.8)),
             DespawnOnExit(GameState::Session),

@@ -615,6 +615,7 @@ mod tests {
             hold_sound: default(),
             rotation_sound: default(),
             font: default(),
+            font_body: default(),
         }
     }
 

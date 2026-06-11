@@ -17,7 +17,8 @@ fn main() {
     console_error_panic_hook::set_once();
 
     App::new()
-        .insert_resource(ClearColor(Color::srgb(0.2, 0.2, 0.2)))
+        // Kissaten ground: warm charcoal (#2E2B28) — the field and panel bg.
+        .insert_resource(ClearColor(Color::srgb(0.1804, 0.1686, 0.1569)))
         .add_plugins(
             DefaultPlugins
                 .set(AssetPlugin {

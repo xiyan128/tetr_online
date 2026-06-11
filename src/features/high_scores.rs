@@ -189,7 +189,9 @@ fn spawn_variant_column(
     scores: &HighScores,
     variant: Variant,
 ) -> Entity {
-    let font = assets.font.clone();
+    // Heading in the display voice (Dogica); the table itself is the working
+    // voice (Departure Mono) — fixed-width rows align for free.
+    let font = assets.font_body.clone();
     let kind = variant.def().score_kind;
     let table = scores.table(variant);
 
@@ -203,7 +205,7 @@ fn spawn_variant_column(
         .id();
 
     let heading = commands
-        .spawn(column_heading(variant.display_name(), font.clone()))
+        .spawn(column_heading(variant.display_name(), assets.font.clone()))
         .id();
     commands.entity(column).add_child(heading);
 
@@ -229,13 +231,14 @@ fn spawn_variant_column(
     column
 }
 
-/// A column heading (variant name), slightly larger / brighter than rows.
+/// A column heading (variant name): amber display type at the label size —
+/// Dogica renders crisp only at its native multiples, so 16 px, never 18.
 fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle + use<> {
     (
         Text::new(text),
         TextFont {
             font,
-            font_size: 18.0,
+            font_size: crate::ui::theme::BUTTON_FONT_SIZE,
             ..default()
         },
         TextColor(crate::ui::theme::ACCENT),

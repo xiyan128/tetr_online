@@ -14,26 +14,41 @@
 
 use bevy::prelude::*;
 
-use super::focus::Focusable;
+use super::focus::{FocusLabel, Focusable};
 
-/// Shared palette + sizing. Tuned to read on the dark `ClearColor` background.
+/// The Kissaten palette: a warm neutral ramp plus two saturated signals.
+/// Pure black and pure white are banned; `GRID` (near-black brown) and `TEXT`
+/// (aged-paper cream) take their roles. `ATTACK` is deliberately the most
+/// saturated value in the system — nothing else may approach its chroma.
 pub mod theme {
     use bevy::prelude::*;
 
-    pub const TEXT: Color = Color::srgb(0.92, 0.92, 0.92);
-    pub const TEXT_DIM: Color = Color::srgb(0.6, 0.6, 0.6);
-    pub const ACCENT: Color = Color::srgb(0.35, 0.75, 0.35);
+    /// Warm charcoal: the field and panel ground (also the clear color).
+    pub const BG: Color = Color::srgb(0.1804, 0.1686, 0.1569); // #2E2B28
+    /// Gridlines, meter tracks at rest, overlay scrims.
+    pub const GRID: Color = Color::srgb(0.1373, 0.1255, 0.1137); // #23201D
+    /// Board border, dividers, resting button borders.
+    pub const FRAME: Color = Color::srgb(0.3333, 0.3137, 0.2902); // #55504A
+    /// Garbage minos: warm gray, zero chroma — dead weight next to live pieces.
+    pub const GARBAGE: Color = Color::srgb(0.4314, 0.4118, 0.3882); // #6E6963
+    /// Primary type and numerals (aged paper cream).
+    pub const TEXT: Color = Color::srgb(0.9176, 0.8902, 0.8235); // #EAE3D2
+    /// Labels, hints, inactive states. Chrome only — anything the player must
+    /// read mid-match uses `TEXT`.
+    pub const TEXT_DIM: Color = Color::srgb(0.6039, 0.5765, 0.5412); // #9A938A
+    /// Amber: B2B / spin callouts, hover, focus, selection. Chrome and gutters
+    /// only, never on field cells (it would read as the O piece).
+    pub const ACCENT: Color = Color::srgb(0.8510, 0.6510, 0.2824); // #D9A648
+    /// Incoming damage and danger. The saturation ceiling of the whole system.
+    pub const ATTACK: Color = Color::srgb(0.8196, 0.2941, 0.2588); // #D14B42
 
-    /// Idle menu-row background.
-    pub const BUTTON_NORMAL: Color = Color::srgb(0.15, 0.15, 0.15);
-    /// Keyboard-focused (or hovered) menu-row background.
-    pub const BUTTON_FOCUSED: Color = Color::srgb(0.30, 0.30, 0.30);
-    /// Pressed/activated menu-row background.
-    pub const BUTTON_PRESSED: Color = Color::srgb(0.35, 0.75, 0.35);
-
-    pub const TITLE_FONT_SIZE: f32 = 28.0;
-    pub const LABEL_FONT_SIZE: f32 = 14.0;
+    /// Dogica at native multiples only (8 px grid): 32 / 24 / 16.
+    pub const TITLE_FONT_SIZE: f32 = 32.0;
+    pub const NUMERAL_FONT_SIZE: f32 = 24.0;
     pub const BUTTON_FONT_SIZE: f32 = 16.0;
+    /// Departure Mono, the working voice: body 14, micro 12.
+    pub const LABEL_FONT_SIZE: f32 = 14.0;
+    pub const MICRO_FONT_SIZE: f32 = 12.0;
 }
 
 /// A full-window, centered vertical column to parent a screen's content into.
@@ -106,14 +121,18 @@ pub fn menu_button_sized(
         Focusable::new(index),
         Node {
             width: px(width),
-            height: px(34),
+            height: px(40),
             margin: UiRect::all(px(4)),
+            border: UiRect::all(px(1)),
+            border_radius: BorderRadius::all(px(2)),
             justify_content: JustifyContent::Center,
             align_items: AlignItems::Center,
             ..default()
         },
-        BackgroundColor(theme::BUTTON_NORMAL),
+        BackgroundColor(theme::BG),
+        BorderColor::all(theme::FRAME),
         children![(
+            FocusLabel,
             Text::new(label),
             TextFont {
                 font,
