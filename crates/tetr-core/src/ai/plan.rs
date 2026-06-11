@@ -46,7 +46,7 @@
 //! a difficulty setting wants to inject lives in the controller's seeded RNG, never
 //! here.
 
-use crate::ai::movegen::{spawn_piece, Move, Placement};
+use crate::ai::movegen::{Move, Placement, spawn_piece};
 use crate::engine::{ActivePiece, Board, InputFrame, MoveDirection, PieceAction};
 
 /// Render `placement`'s movement path into the [`InputFrame`] sequence that drives

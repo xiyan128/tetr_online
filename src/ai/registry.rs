@@ -14,8 +14,8 @@
 use bevy::prelude::*;
 
 use crate::ai::{
-    AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, Evaluator, Handicap, LinearEvaluator,
-    Mind, SearchBudget, DEFAULT_AI_SEED,
+    AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, DEFAULT_AI_SEED, Evaluator, Handicap,
+    LinearEvaluator, Mind, SearchBudget,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms

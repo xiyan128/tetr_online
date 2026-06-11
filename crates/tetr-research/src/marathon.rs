@@ -9,7 +9,7 @@
 
 use rayon::prelude::*;
 use tetr_core::engine::{Engine, EngineConfig, EngineEvent, GoalSystem, MAX_LEVEL};
-use tetr_core::player::{drive_engine, PlayerController};
+use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{controller_seed, fold_combo};
 
@@ -56,11 +56,7 @@ impl MarathonOutcome {
     /// The headline marathon metric: score accumulated per simulated second.
     pub fn score_per_second(&self) -> f32 {
         let t = self.elapsed_seconds();
-        if t > 0.0 {
-            self.score as f32 / t
-        } else {
-            0.0
-        }
+        if t > 0.0 { self.score as f32 / t } else { 0.0 }
     }
 
     /// Attack per piece (APP): garbage lines sent ÷ pieces placed — the standard

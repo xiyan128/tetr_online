@@ -11,14 +11,14 @@
 
 use bevy::prelude::*;
 
+use crate::GameState;
 use crate::ai::ModelRegistry;
 use crate::assets::GameAssets;
 use crate::session::{Participant, SessionConfig};
 use crate::ui::focus::{
-    clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
+    FocusList, Focusable, NavAction, clicked_focusable, focus_navigation, read_nav_action,
 };
 use crate::ui::widgets::{label_text, menu_button_sized, screen_root, title_text};
-use crate::GameState;
 
 /// Which face the setup screen wears (set by the main menu before entering).
 #[derive(Resource, Clone, Copy, PartialEq, Eq, Default)]
@@ -195,10 +195,10 @@ fn refresh_row_labels(
             participant_label(config.seats[row.seat], &registry)
         );
         for child in children.iter() {
-            if let Ok(mut text) = texts.get_mut(child) {
-                if text.0 != label {
-                    text.0 = label.clone();
-                }
+            if let Ok(mut text) = texts.get_mut(child)
+                && text.0 != label
+            {
+                text.0 = label.clone();
             }
         }
     }

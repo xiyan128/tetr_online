@@ -52,12 +52,12 @@ pub use eval::{
     Cc2Evaluator, Cc2Weights, EvalContext, Evaluator, LinearEvaluator, Reward, Value, Weights,
 };
 pub use handicap::Handicap;
-pub use movegen::{generate, generate_with_hold, Move, Placement};
+pub use movegen::{Move, Placement, generate, generate_with_hold};
 pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
 pub use runner::{DecisionRunner, SlicedRunner, SyncRunner};
 pub use search::{
-    think_to_completion, BeamPlanner, BestFirstPlanner, Mind, PlacementPlan, SearchBudget,
-    ThinkProgress,
+    BeamPlanner, BestFirstPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
+    think_to_completion,
 };
 pub use state::{BagState, SearchState};

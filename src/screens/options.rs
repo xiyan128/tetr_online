@@ -6,9 +6,9 @@
 
 use bevy::prelude::*;
 
+use crate::GameState;
 use crate::assets::GameAssets;
 use crate::ui::widgets::{label_text, screen_root, title_text};
-use crate::GameState;
 
 pub struct OptionsScreenPlugin;
 

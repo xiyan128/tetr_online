@@ -14,11 +14,10 @@ autobenches = false
 members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-research"]
 
 # One home for the shared package metadata; member crates inherit with
-# `version.workspace = true` etc. (Edition stays 2021 deliberately: the 2024
-# bump would force a workspace-wide rustfmt churn for zero capability.)
+# `version.workspace = true` etc.
 [workspace.package]
 version = "0.1.0"
-edition = "2021"
+edition = "2024"
 license = "MIT"
 
 # Workspace-wide lint posture (crates opt in via [lints] workspace = true).

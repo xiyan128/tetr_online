@@ -32,14 +32,14 @@
 
 use bevy::prelude::*;
 
+use crate::GameState;
 use crate::assets::GameAssets;
 use crate::engine::EngineSnapshot;
 use crate::high_scores::{HighScore, HighScores};
 use crate::screens::HighScoresRoot;
-use crate::storage::{keys, StorageResource};
+use crate::storage::{StorageResource, keys};
 use crate::ui::widgets::label_text;
 use crate::variant::{ScoreKind, Variant, VariantDef};
-use crate::GameState;
 
 /// Records qualifying runs into [`HighScores`], persists the table, loads it on
 /// startup, and renders the per-variant leaderboard tables.
@@ -230,7 +230,7 @@ fn spawn_variant_column(
 }
 
 /// A column heading (variant name), slightly larger / brighter than rows.
-fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle {
+fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle + use<> {
     (
         Text::new(text),
         TextFont {

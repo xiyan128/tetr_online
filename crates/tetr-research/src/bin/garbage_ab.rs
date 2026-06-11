@@ -25,7 +25,7 @@ use tetr_core::ai::Cc2Weights;
 use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
 use tetr_research::seeds::seed_set;
-use tetr_research::versus::{evaluate_versus_format, VersusFormat, VersusResult, VersusStats};
+use tetr_research::versus::{VersusFormat, VersusResult, VersusStats, evaluate_versus_format};
 
 /// Deaths and cap-game outcomes for the aware arm of one orientation.
 /// `aware_is_a`: which side the aware bot played in this run.
@@ -82,14 +82,16 @@ fn main() {
             };
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies, rain {}",
-                seeds.len(), env_usize("RAIN_PERIOD", 0)
+                seeds.len(),
+                env_usize("RAIN_PERIOD", 0)
             );
             BotSpec::best_first(nodes, depth).cc2(weights)
         }
         _ => {
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies, rain {}",
-                seeds.len(), env_usize("RAIN_PERIOD", 0)
+                seeds.len(),
+                env_usize("RAIN_PERIOD", 0)
             );
             BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT)
         }

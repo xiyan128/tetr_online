@@ -17,13 +17,13 @@
 
 use bevy::prelude::*;
 
+use crate::GameState;
 use crate::engine::{
     Engine, EngineConfig, EngineEvent, EngineSnapshot, GoalSystem, LOCK_DOWN_SECONDS, MIN_LEVEL,
 };
 use crate::level::common::LevelConfig;
-use crate::level::engine_bridge::{das_config_from_level, PendingEdges, SIM_DT_SECONDS};
+use crate::level::engine_bridge::{PendingEdges, SIM_DT_SECONDS, das_config_from_level};
 use crate::player::{KeyboardController, PlayerController, RawKeyboardFrame};
-use crate::GameState;
 
 mod feel;
 mod overlay;
@@ -689,9 +689,9 @@ mod tests {
     fn a_natural_solo_death_records_incomplete() {
         let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, 1); // spawn
-                                 // Bury the seat: queue far more garbage than the board holds, then a
-                                 // clear-less lock rises it (the human seat plays neutral frames, so
-                                 // gravity locks the piece eventually).
+        // Bury the seat: queue far more garbage than the board holds, then a
+        // clear-less lock rises it (the human seat plays neutral frames, so
+        // gravity locks the piece eventually).
         {
             let mut seats = app.world_mut().query::<&mut SeatEngine>();
             let mut engine = seats.iter_mut(app.world_mut()).next().unwrap();

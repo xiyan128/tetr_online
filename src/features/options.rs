@@ -22,11 +22,11 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::screens::OptionsRoot;
 use crate::settings::{GameAction, GameSettings, Keybinds, MAX_NEXT_COUNT, MIN_NEXT_COUNT};
-use crate::storage::{keys, StorageResource};
-use crate::ui::focus::{focus_navigation, FocusList, Focusable};
+use crate::storage::{StorageResource, keys};
+use crate::ui::focus::{FocusList, Focusable, focus_navigation};
 use crate::ui::theme;
 use crate::ui::widgets::label_text;
-use crate::{engine::LockDownMode, GameState};
+use crate::{GameState, engine::LockDownMode};
 
 /// Options-screen settings editor.
 pub struct OptionsPlugin;
@@ -114,10 +114,10 @@ impl OptionRow {
 
     /// The current value rendered on the right of the row.
     fn value(self, settings: &GameSettings, rebind: &RebindState) -> String {
-        if let OptionRow::Rebind(action) = self {
-            if rebind.capturing == Some(action) {
-                return "press a key...".into();
-            }
+        if let OptionRow::Rebind(action) = self
+            && rebind.capturing == Some(action)
+        {
+            return "press a key...".into();
         }
         match self {
             OptionRow::NextCount => settings.next_count.to_string(),
@@ -132,11 +132,7 @@ impl OptionRow {
 }
 
 fn on_off(value: bool) -> String {
-    if value {
-        "On".into()
-    } else {
-        "Off".into()
-    }
+    if value { "On".into() } else { "Off".into() }
 }
 
 fn volume_label(value: f32) -> String {
@@ -421,11 +417,11 @@ fn clear_rebind_state(mut rebind: ResMut<RebindState>) {
 // ---------------------------------------------------------------------------
 
 fn load_settings(storage: Res<StorageResource>, mut settings: ResMut<GameSettings>) {
-    if let Some(raw) = storage.0.load(keys::SETTINGS) {
-        if let Some(loaded) = crate::settings::decode_settings(&raw) {
-            *settings = loaded;
-            settings.sanitize();
-        }
+    if let Some(raw) = storage.0.load(keys::SETTINGS)
+        && let Some(loaded) = crate::settings::decode_settings(&raw)
+    {
+        *settings = loaded;
+        settings.sanitize();
     }
 }
 

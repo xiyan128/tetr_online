@@ -11,7 +11,7 @@
 use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
 use tetr_research::downstack::evaluate_downstack;
-use tetr_research::marathon::{evaluate_capped, DEFAULT_MAX_FRAMES};
+use tetr_research::marathon::{DEFAULT_MAX_FRAMES, evaluate_capped};
 use tetr_research::seeds::seed_set;
 use tetr_research::versus::evaluate_versus;
 

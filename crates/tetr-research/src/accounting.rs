@@ -6,7 +6,7 @@
 //! convention the engine is gated against
 //! (`engine_attack_events_match_the_research_fold` in [`crate::versus`]).
 
-use tetr_core::engine::{attack_lines, Engine, EngineEvent, EngineScoreAction};
+use tetr_core::engine::{Engine, EngineEvent, EngineScoreAction, attack_lines};
 
 /// Derive the controller RNG seed from the game seed (decorrelated from the
 /// engine's piece stream, but fully determined by it — matches the arena harness).

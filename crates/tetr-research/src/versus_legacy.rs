@@ -91,9 +91,9 @@ impl GarbageQueue {
 pub fn versus_hole(rng: &mut u64) -> usize {
     // Thread the caller's bare `u64` state through the shared SplitMix64 step: one
     // `next_u64` advances the word exactly as the inlined fold did, then write it back.
-    let mut gen = SplitMix64::from_raw(*rng);
-    let hole = (gen.next_u64() % 10) as usize;
-    *rng = gen.into_raw();
+    let mut generator = SplitMix64::from_raw(*rng);
+    let hole = (generator.next_u64() % 10) as usize;
+    *rng = generator.into_raw();
     hole
 }
 

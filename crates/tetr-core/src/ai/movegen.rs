@@ -50,8 +50,8 @@ use rustc_hash::FxHashSet;
 use smallvec::SmallVec;
 
 use crate::engine::{
-    classify_t_spin, is_t_slot, ActivePiece, MoveDirection, Occupancy, Piece, PieceAction,
-    PieceRotation, PieceType, RotationDirection, TSpinKind,
+    ActivePiece, MoveDirection, Occupancy, Piece, PieceAction, PieceRotation, PieceType,
+    RotationDirection, TSpinKind, classify_t_spin, is_t_slot,
 };
 
 /// One button press in the path to a placement.
@@ -221,12 +221,12 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
 
         // Expand neighbours: lateral shifts, both rotations, and a soft-drop.
         for mv in [Move::Left, Move::Right, Move::Cw, Move::Ccw, Move::SoftDrop] {
-            if let Some(next) = apply_move(board, &piece, mv) {
-                if visited.insert((pose_key(&next), spin_rank(&next))) {
-                    let mut next_path = path.clone();
-                    next_path.push(mv);
-                    frontier.push_back((next, next_path));
-                }
+            if let Some(next) = apply_move(board, &piece, mv)
+                && visited.insert((pose_key(&next), spin_rank(&next)))
+            {
+                let mut next_path = path.clone();
+                next_path.push(mv);
+                frontier.push_back((next, next_path));
             }
         }
     }

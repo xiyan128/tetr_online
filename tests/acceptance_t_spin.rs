@@ -18,8 +18,8 @@
 //!     existing back-to-back chain.
 
 use tetr_online::engine::{
-    classify_t_spin, ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent,
-    EngineScoreAction, PieceAction, PieceRotation, PieceType, RotationDirection, TSpinKind,
+    ActivePiece, Board, CellKind, Engine, EngineConfig, EngineEvent, EngineScoreAction,
+    PieceAction, PieceRotation, PieceType, RotationDirection, TSpinKind, classify_t_spin,
 };
 
 /// Origin shared by the hand-built recognition scenarios. The T-Slot center is

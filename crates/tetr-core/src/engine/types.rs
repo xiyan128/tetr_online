@@ -6,7 +6,7 @@ use crate::engine::garbage::GarbageBatch;
 use crate::engine::goals::GoalSystem;
 use crate::engine::pieces::{PieceRotation, PieceType};
 use crate::engine::scoring::EngineScoreAction;
-use crate::engine::{LockDownMode, LOCK_DOWN_SECONDS, MIN_LEVEL};
+use crate::engine::{LOCK_DOWN_SECONDS, LockDownMode, MIN_LEVEL};
 
 /// Hidden rows above the visible field — the guideline buffer zone where
 /// pieces spawn and can lock (§16.4). A constant, not a config knob: nothing

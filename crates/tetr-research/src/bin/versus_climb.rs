@@ -85,10 +85,10 @@ use std::time::Instant;
 
 use tetr_core::ai::Cc2Weights;
 use tetr_research::bots::BotSpec;
-use tetr_research::cli::{env_f64, env_usize, SplitMix64};
+use tetr_research::cli::{SplitMix64, env_f64, env_usize};
 use tetr_research::seeds::{regions, seed_set, seed_set_from};
-use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
-use tetr_research::versus::{evaluate_versus_format, VersusFormat};
+use tetr_research::sprt::{SprtConfig, SprtVerdict, sprt_race};
+use tetr_research::versus::{VersusFormat, evaluate_versus_format};
 
 /// One standard-normal draw (Box-Muller over the deterministic SplitMix64).
 fn gauss(rng: &mut SplitMix64) -> f64 {

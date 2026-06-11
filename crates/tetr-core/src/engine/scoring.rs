@@ -6,7 +6,7 @@
 //! placement/replay code can score without owning an `Engine`.
 
 use crate::engine::goals::{
-    breaks_back_to_back, qualifies_for_back_to_back, variable_goal_units, GoalProgress, GoalSystem,
+    GoalProgress, GoalSystem, breaks_back_to_back, qualifies_for_back_to_back, variable_goal_units,
 };
 use crate::engine::gravity::MIN_LEVEL;
 use crate::engine::t_spin::TSpinKind;

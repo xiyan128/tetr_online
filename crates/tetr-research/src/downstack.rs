@@ -5,7 +5,7 @@
 
 use rayon::prelude::*;
 use tetr_core::engine::{CellKind, Engine, EngineConfig, EngineEvent, PieceType};
-use tetr_core::player::{drive_engine, PlayerController};
+use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{controller_seed, fold_combo};
 use crate::cli::SplitMix64;

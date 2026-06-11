@@ -91,7 +91,7 @@ pub(crate) fn resolve_horizontal(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ai::{AiController, Handicap, DEFAULT_AI_SEED};
+    use crate::ai::{AiController, DEFAULT_AI_SEED, Handicap};
     use crate::engine::{Engine, EngineConfig};
 
     /// The integration seam: an engine can be driven entirely through a

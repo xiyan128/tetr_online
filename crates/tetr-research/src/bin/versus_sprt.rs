@@ -30,7 +30,7 @@ use tetr_core::ai::Cc2Weights;
 use tetr_research::bots::BotSpec;
 use tetr_research::cli::{env_f64, env_usize};
 use tetr_research::seeds::regions;
-use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
+use tetr_research::sprt::{SprtConfig, SprtVerdict, sprt_race};
 use tetr_research::versus::VersusFormat;
 
 /// The climb's v3 candidate (versus_climb.rs RUN RECORD v3) — judged and

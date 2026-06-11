@@ -14,13 +14,13 @@
 use std::collections::VecDeque;
 use std::time::Duration;
 
-use tetr_core::engine::{attack_lines, EngineScoreAction, PieceGenerator, PieceType, TSpinKind};
+use tetr_core::engine::{EngineScoreAction, PieceGenerator, PieceType, TSpinKind, attack_lines};
 use tetr_research::bots::BotSpec;
 use tetr_research::cc2::{Cc2, TbpBoard, TbpMove};
 use tetr_research::downstack::{cheese_holes, evaluate_downstack};
 use tetr_research::seeds::seed_set;
-use tetr_research::versus::{decide_versus, VersusResult};
-use tetr_research::versus_legacy::{versus_hole, GarbageQueue, VersusEngine};
+use tetr_research::versus::{VersusResult, decide_versus};
+use tetr_research::versus_legacy::{GarbageQueue, VersusEngine, versus_hole};
 
 const WIDTH: i32 = 10;
 const FULL_ROW: u16 = (1 << WIDTH) - 1;
@@ -277,8 +277,10 @@ fn score_cc2_clear(sim: &Sim, spin: &str, lines: usize, combo: &mut u32, b2b: &m
 
 /// Play CC2 over one seeded game of `pieces` placements; return total attack.
 fn run_one(bin: &str, seed: u64, pieces: usize, think: Duration) -> std::io::Result<u32> {
-    let mut gen = PieceGenerator::with_seed(seed);
-    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE).map(|_| gen.next().unwrap()).collect();
+    let mut generator = PieceGenerator::with_seed(seed);
+    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE)
+        .map(|_| generator.next().unwrap())
+        .collect();
     let mut hold: Option<PieceType> = None;
 
     let mut cc2 = Cc2::spawn(bin)?;
@@ -308,7 +310,7 @@ fn run_one(bin: &str, seed: u64, pieces: usize, think: Duration) -> std::io::Res
         total_attack += score_cc2_clear(&sim, &mv.spin, lines, &mut combo, &mut b2b);
 
         // Reveal the next piece (one per move keeps our queue in sync with CC2's).
-        let revealed = gen.next().unwrap();
+        let revealed = generator.next().unwrap();
         queue.push_back(revealed);
         cc2.play(&mv, piece_letter(revealed))?;
     }
@@ -326,8 +328,10 @@ fn run_downstack(
     think: Duration,
 ) -> std::io::Result<(u32, bool)> {
     let rows = garbage_rows as usize;
-    let mut gen = PieceGenerator::with_seed(seed);
-    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE).map(|_| gen.next().unwrap()).collect();
+    let mut generator = PieceGenerator::with_seed(seed);
+    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE)
+        .map(|_| generator.next().unwrap())
+        .collect();
     let mut hold: Option<PieceType> = None;
 
     let mut cc2 = Cc2::spawn(bin)?;
@@ -363,7 +367,7 @@ fn run_downstack(
             return Ok((pieces, true));
         }
 
-        let revealed = gen.next().unwrap();
+        let revealed = generator.next().unwrap();
         queue.push_back(revealed);
         cc2.play(&mv, piece_letter(revealed))?;
     }
@@ -394,8 +398,10 @@ fn run_versus(
     let mut ours_attack = 0u32;
 
     // B = CC2, mirrored in `sim`, fed the same seeded 7-bag as ours.
-    let mut gen = PieceGenerator::with_seed(seed);
-    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE).map(|_| gen.next().unwrap()).collect();
+    let mut generator = PieceGenerator::with_seed(seed);
+    let mut queue: VecDeque<PieceType> = (0..VISIBLE_QUEUE)
+        .map(|_| generator.next().unwrap())
+        .collect();
     let mut hold: Option<PieceType> = None;
     let bag: Vec<String> = PieceType::all()
         .iter()
@@ -461,7 +467,7 @@ fn run_versus(
                     cc2_attack += leftover;
                 }
 
-                let revealed = gen.next().unwrap();
+                let revealed = generator.next().unwrap();
                 queue.push_back(revealed);
                 cc2.play(&mv, piece_letter(revealed))?;
 

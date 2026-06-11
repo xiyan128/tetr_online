@@ -13,13 +13,13 @@
 use std::time::Instant;
 
 use tetr_core::engine::{CellKind, Engine, EngineEvent, EngineScoreAction, PieceType, TSpinKind};
-use tetr_core::player::{drive_engine, PlayerController};
+use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{action_clear_lines, controller_seed, fold_combo};
 use crate::downstack::cheese_holes;
 use crate::marathon::marathon_config;
 use crate::versus::MAX_PIECE_FRAMES;
-use crate::versus_legacy::{versus_hole, GarbageQueue};
+use crate::versus_legacy::{GarbageQueue, versus_hole};
 
 /// A garbage scenario to measure the bot in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -221,25 +221,28 @@ pub fn play_scenario(
 
         // Faucet tick: dump whatever survived cancellation, then queue the next batch
         // (giving the bot `period` pieces to cancel it before it lands).
-        if let Scenario::Faucet { period, lines, .. } = scenario {
-            if locked && period > 0 && stats.pieces % period == 0 {
-                let received = pending.pending();
-                if received > 0 {
-                    stats.garbage_received += received;
-                    if pending.dump(&mut engine) {
-                        stats.topped_out = true;
-                        break;
-                    }
+        if let Scenario::Faucet { period, lines, .. } = scenario
+            && locked
+            && period > 0
+            && stats.pieces % period == 0
+        {
+            let received = pending.pending();
+            if received > 0 {
+                stats.garbage_received += received;
+                if pending.dump(&mut engine) {
+                    stats.topped_out = true;
+                    break;
                 }
-                pending.push(lines, versus_hole(&mut hole_rng));
             }
+            pending.push(lines, versus_hole(&mut hole_rng));
         }
 
         // Cheese: stop once the garbage has been dug out.
-        if let Scenario::Cheese { rows, .. } = scenario {
-            if locked && engine.snapshot().lines as u32 >= rows {
-                break;
-            }
+        if let Scenario::Cheese { rows, .. } = scenario
+            && locked
+            && engine.snapshot().lines as u32 >= rows
+        {
+            break;
         }
     }
 

@@ -20,9 +20,9 @@
 //! (lib.rs:11-20), which exposes every name these tests need.
 
 use tetr_online::{
-    apply_grounded_move_or_rotation, fall_speed_seconds, ActivePiece, Engine, EngineConfig,
-    EngineEvent, InputFrame, LockDownMode, PieceAction, PieceType, EXTENDED_LOCK_RESET_BUDGET,
-    LOCK_DOWN_SECONDS,
+    ActivePiece, EXTENDED_LOCK_RESET_BUDGET, Engine, EngineConfig, EngineEvent, InputFrame,
+    LOCK_DOWN_SECONDS, LockDownMode, PieceAction, PieceType, apply_grounded_move_or_rotation,
+    fall_speed_seconds,
 };
 
 const SEED: u64 = 0;

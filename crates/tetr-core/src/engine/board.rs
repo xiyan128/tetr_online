@@ -416,10 +416,12 @@ mod tests {
 
         assert!(overflow);
         // No T cell survived anywhere; the bottom two rows are garbage, hole at col 0.
-        assert!(board
-            .cells()
-            .iter()
-            .all(|&(_, _, kind)| kind != CellKind::Some(PieceType::T)));
+        assert!(
+            board
+                .cells()
+                .iter()
+                .all(|&(_, _, kind)| kind != CellKind::Some(PieceType::T))
+        );
         assert_eq!(board.get_cell_kind(0, 0), CellKind::None);
         assert_eq!(board.get_cell_kind(1, 0), CellKind::Garbage);
         assert_eq!(board.get_cell_kind(1, 1), CellKind::Garbage);

@@ -6,9 +6,9 @@
 //! short preview window is always available.
 
 use crate::engine::pieces::PieceType;
+use rand::SeedableRng;
 use rand::rngs::StdRng;
 use rand::seq::SliceRandom;
-use rand::SeedableRng;
 
 pub struct PieceGenerator {
     /// Deal stack: pieces pop from the END. Layout invariant (kept by `with_seed`
