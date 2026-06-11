@@ -114,7 +114,7 @@ fn activate(
                 next.set(GameState::ModeSelect);
             }
             // Versus has its own setup screen and never reads the sandbox flag.
-            MainMenuAction::Versus => next.set(GameState::VersusSetup),
+            MainMenuAction::Versus => next.set(GameState::SessionSetup),
             MainMenuAction::WatchAi => {
                 *sandbox = AiSandbox(true);
                 // Watch-AI picks a model first, then the mode.

@@ -26,13 +26,13 @@ use crate::engine::{Piece, PieceType, SnapshotCell};
 use crate::level::common::{mino_render_color, to_translation, GameplayCamera};
 use crate::GameState;
 
-use super::{Participant, Seat, SeatSnapshot, SeatStats, VersusConfig};
+use super::{Participant, Seat, SeatSnapshot, SeatStats, SessionConfig};
 
 /// World-space layout of the two-board scene, in cells and pixels. One home
 /// for every magic number the renderer and overlays share.
-pub struct VersusLayout;
+pub struct SessionLayout;
 
-impl VersusLayout {
+impl SessionLayout {
     pub const BLOCK: f32 = 32.0;
     pub const BOARD_W: usize = 10;
     pub const BOARD_H: usize = 20;
@@ -119,7 +119,7 @@ pub struct VersusRenderPlugin;
 
 impl Plugin for VersusRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Versus), setup_scene)
+        app.add_systems(OnEnter(GameState::Session), setup_scene)
             .add_systems(
                 Update,
                 (
@@ -131,7 +131,7 @@ impl Plugin for VersusRenderPlugin {
                     reconcile_preview_views,
                     update_atk_texts,
                 )
-                    .run_if(in_state(GameState::Versus)),
+                    .run_if(in_state(GameState::Session)),
             );
     }
 }
@@ -169,26 +169,26 @@ fn cell_color(cell: &SnapshotCell) -> Color {
 fn setup_scene(
     mut commands: Commands,
     assets: Res<GameAssets>,
-    config: Res<VersusConfig>,
+    config: Res<SessionConfig>,
     registry: Res<crate::ai::ModelRegistry>,
 ) {
-    let block = VersusLayout::BLOCK;
+    let block = SessionLayout::BLOCK;
 
     for seat in 0..2 {
-        let origin = VersusLayout::board_origin(seat);
+        let origin = SessionLayout::board_origin(seat);
         let root = commands
             .spawn((
                 BoardRoot { seat },
                 Transform::from_translation(origin),
                 Visibility::default(),
-                DespawnOnExit(GameState::Versus),
+                DespawnOnExit(GameState::Session),
             ))
             .id();
 
         // Background grid (decorative, drawn once).
         let mut grid = Vec::new();
-        for x in 0..VersusLayout::BOARD_W as isize {
-            for y in 0..VersusLayout::BOARD_H as isize {
+        for x in 0..SessionLayout::BOARD_W as isize {
+            for y in 0..SessionLayout::BOARD_H as isize {
                 let mut sprite = Sprite::from_color(Color::srgb(0.1, 0.1, 0.1), Vec2::splat(block));
                 sprite.custom_size = Some(Vec2::splat(block));
                 let mut transform = Transform::from_translation(to_translation(x, y, block));
@@ -219,7 +219,7 @@ fn setup_scene(
         // seat 0's on its right, seat 1's on its left. Segments stack upward
         // from the board floor, one per pending batch.
         let meter_x = if seat == 0 {
-            VersusLayout::BOARD_W as f32 * block + 0.35 * block
+            SessionLayout::BOARD_W as f32 * block + 0.35 * block
         } else {
             -0.7 * block
         };
@@ -239,7 +239,7 @@ fn setup_scene(
                 SeatHoldView { seat },
                 Transform::from_translation(Vec3::new(
                     -0.5 * block,
-                    VersusLayout::BOARD_H as f32 * block,
+                    SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
                 Visibility::default(),
@@ -249,8 +249,8 @@ fn setup_scene(
             .spawn((
                 SeatPreviewView { seat, cache: None },
                 Transform::from_translation(Vec3::new(
-                    (VersusLayout::BOARD_W as f32 + 0.5) * block,
-                    VersusLayout::BOARD_H as f32 * block,
+                    (SessionLayout::BOARD_W as f32 + 0.5) * block,
+                    SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
                 Visibility::default(),
@@ -274,8 +274,8 @@ fn setup_scene(
                 TextColor(Color::WHITE),
                 Anchor::BOTTOM_CENTER,
                 Transform::from_translation(Vec3::new(
-                    VersusLayout::BOARD_W as f32 * block / 2.0,
-                    (VersusLayout::BOARD_H as f32 + 0.6) * block,
+                    SessionLayout::BOARD_W as f32 * block / 2.0,
+                    (SessionLayout::BOARD_H as f32 + 0.6) * block,
                     0.0,
                 )),
             ))
@@ -294,7 +294,7 @@ fn setup_scene(
                 TextColor(Color::srgb(0.85, 0.55, 0.55)),
                 Anchor::TOP_CENTER,
                 Transform::from_translation(Vec3::new(
-                    VersusLayout::BOARD_W as f32 * block / 2.0,
+                    SessionLayout::BOARD_W as f32 * block / 2.0,
                     -0.6 * block,
                     0.0,
                 )),
@@ -310,13 +310,13 @@ fn setup_scene(
         GameplayCamera,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: ScalingMode::AutoMin {
-                min_width: VersusLayout::SCENE_MIN_WIDTH,
-                min_height: VersusLayout::SCENE_MIN_HEIGHT,
+                min_width: SessionLayout::SCENE_MIN_WIDTH,
+                min_height: SessionLayout::SCENE_MIN_HEIGHT,
             },
             ..OrthographicProjection::default_2d()
         }),
-        Transform::from_translation(VersusLayout::scene_center()),
-        DespawnOnExit(GameState::Versus),
+        Transform::from_translation(SessionLayout::scene_center()),
+        DespawnOnExit(GameState::Session),
     ));
 }
 
@@ -357,7 +357,7 @@ fn reconcile_locked_boards(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         cell_color(cell),
@@ -393,7 +393,7 @@ fn reconcile_active_pieces(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         cell_color(cell),
@@ -438,7 +438,7 @@ fn reconcile_ghost_pieces(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
@@ -482,10 +482,10 @@ fn reconcile_garbage_meters(
         let mut y = 0.0;
         let mut ids = Vec::new();
         for (lines, _) in &batches {
-            let height = *lines as f32 * VersusLayout::BLOCK - NOTCH;
+            let height = *lines as f32 * SessionLayout::BLOCK - NOTCH;
             let sprite = Sprite::from_color(
                 Color::srgb_u8(214, 48, 49),
-                Vec2::new(0.35 * VersusLayout::BLOCK, height.max(NOTCH)),
+                Vec2::new(0.35 * SessionLayout::BLOCK, height.max(NOTCH)),
             );
             ids.push(
                 commands
@@ -496,7 +496,7 @@ fn reconcile_garbage_meters(
                     ))
                     .id(),
             );
-            y += *lines as f32 * VersusLayout::BLOCK;
+            y += *lines as f32 * SessionLayout::BLOCK;
         }
         commands.entity(meter).add_children(&ids);
         cache[index] = Some(batches);
@@ -515,7 +515,7 @@ fn spawn_avatar(
     align_right: bool,
 ) -> f32 {
     let piece = Piece::from(piece_type);
-    let block = VersusLayout::BLOCK * VersusLayout::PREVIEW_SCALE;
+    let block = SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
     let (avatar_w, avatar_h) = piece.avatar_dims();
     let height = avatar_h as f32 * block;
     let x_off = if align_right {
@@ -592,7 +592,7 @@ fn reconcile_preview_views(
             continue;
         }
         commands.entity(view).despawn_related::<Children>();
-        let gap = 0.5 * VersusLayout::BLOCK * VersusLayout::PREVIEW_SCALE;
+        let gap = 0.5 * SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
         let mut y_top = 0.0;
         for &piece_type in queue {
             let height = spawn_avatar(&mut commands, &assets, view, piece_type, y_top, false);

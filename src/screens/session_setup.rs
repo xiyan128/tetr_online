@@ -5,25 +5,25 @@
 //! every input path works); P1 offers "You" plus every registry model, P2
 //! offers the models (one keyboard, so exactly one human seat in v1 — making
 //! P1 a bot gives bot-vs-bot, the versus twin of Watch-AI). The selection
-//! writes [`VersusConfig`], which the match reads once on spawn; the resource
+//! writes [`SessionConfig`], which the match reads once on spawn; the resource
 //! persists, so the screen remembers the last matchup.
 
 use bevy::prelude::*;
 
 use crate::ai::ModelRegistry;
 use crate::assets::GameAssets;
+use crate::session::{Participant, SessionConfig};
 use crate::ui::focus::{
     clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
 };
 use crate::ui::widgets::{label_text, menu_button_sized, screen_root, title_text};
-use crate::versus::{Participant, VersusConfig};
 use crate::GameState;
 
 pub struct VersusSetupPlugin;
 
 impl Plugin for VersusSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::VersusSetup), setup)
+        app.add_systems(OnEnter(GameState::SessionSetup), setup)
             .add_systems(
                 Update,
                 (
@@ -33,7 +33,7 @@ impl Plugin for VersusSetupPlugin {
                     activate,
                 )
                     .chain()
-                    .run_if(in_state(GameState::VersusSetup)),
+                    .run_if(in_state(GameState::SessionSetup)),
             );
     }
 }
@@ -41,7 +41,7 @@ impl Plugin for VersusSetupPlugin {
 #[derive(Component)]
 struct VersusSetupRoot;
 
-/// Row 0 or 1: configures `VersusConfig.seats[seat]`.
+/// Row 0 or 1: configures `SessionConfig.seats[seat]`.
 #[derive(Component, Clone, Copy)]
 struct SeatRow {
     seat: usize,
@@ -71,13 +71,13 @@ fn participant_label(participant: Participant, registry: &ModelRegistry) -> Stri
 }
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::VersusSetup)));
+    commands.spawn((Camera2d, DespawnOnExit(GameState::SessionSetup)));
     let root = commands
         .spawn((
             VersusSetupRoot,
             FocusList::new(3),
             screen_root(),
-            DespawnOnExit(GameState::VersusSetup),
+            DespawnOnExit(GameState::SessionSetup),
             children![title_text("VERSUS", assets.font.clone())],
         ))
         .id();
@@ -113,7 +113,7 @@ fn cycle_participants(
     list: Single<&FocusList, With<VersusSetupRoot>>,
     rows: Query<(&Focusable, &SeatRow)>,
     registry: Res<ModelRegistry>,
-    mut config: ResMut<VersusConfig>,
+    mut config: ResMut<SessionConfig>,
 ) {
     let step: isize = if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD)
     {
@@ -130,7 +130,7 @@ fn cycle_participants(
 }
 
 /// Advance `seats[seat]` by `step` through its option ring.
-fn cycle_seat(config: &mut VersusConfig, registry: &ModelRegistry, seat: usize, step: isize) {
+fn cycle_seat(config: &mut SessionConfig, registry: &ModelRegistry, seat: usize, step: isize) {
     let options = options_for(seat, registry);
     let current = options
         .iter()
@@ -143,7 +143,7 @@ fn cycle_seat(config: &mut VersusConfig, registry: &ModelRegistry, seat: usize, 
 /// Keep the seat-row labels mirroring the config (initial fill included —
 /// rows spawn with empty labels and this runs the same frame).
 fn refresh_row_labels(
-    config: Res<VersusConfig>,
+    config: Res<SessionConfig>,
     registry: Res<ModelRegistry>,
     rows: Query<(&SeatRow, &Children)>,
     mut texts: Query<&mut Text>,
@@ -172,7 +172,7 @@ fn activate(
     rows: Query<(&Focusable, Option<&SeatRow>, Has<StartRow>)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     registry: Res<ModelRegistry>,
-    mut config: ResMut<VersusConfig>,
+    mut config: ResMut<SessionConfig>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     let nav =
@@ -189,7 +189,7 @@ fn activate(
                         "versus setup: starting {:?} vs {:?}",
                         config.seats[0], config.seats[1]
                     );
-                    next.set(GameState::Versus);
+                    next.set(GameState::Session);
                 } else if let Some(row) = seat_row {
                     cycle_seat(&mut config, &registry, row.seat, 1);
                 }

@@ -9,8 +9,8 @@
 //! pending queue, and ends the match when a seat dies. The engine already owns
 //! every garbage *rule* (`docs/adr-versus-rules.md`); this module only routes.
 //!
-//! The match lives in [`GameState::Versus`] with its own
-//! [`VersusPhase`] lifecycle (countdown → running ⇄ paused → over). The
+//! The match lives in [`GameState::Session`] with its own
+//! [`SessionPhase`] lifecycle (countdown → running ⇄ paused → over). The
 //! single-player `level` module is untouched: nothing here reads or writes its
 //! resources, and its systems never run in `Versus`.
 
@@ -28,13 +28,13 @@ mod feel;
 mod overlay;
 mod render;
 
-/// Lifecycle of a live match, as a sub-state of [`GameState::Versus`] — the
+/// Lifecycle of a live match, as a sub-state of [`GameState::Session`] — the
 /// session (seat entities, boards, camera) is scoped to `Versus` itself, so
 /// phase changes never despawn it. `Over` keeps the final boards on screen
 /// under the result banner.
 #[derive(SubStates, Clone, PartialEq, Eq, Hash, Debug, Default)]
-#[source(GameState = GameState::Versus)]
-pub enum VersusPhase {
+#[source(GameState = GameState::Session)]
+pub enum SessionPhase {
     /// 3-2-1-GO. Engines hold (no first spawn) until the countdown ends, so
     /// both first pieces appear simultaneously.
     #[default]
@@ -64,12 +64,12 @@ pub enum Participant {
 /// match spawns. `seed` is a test/replay override; a live match draws fresh
 /// entropy per game (a rematch is a new deal, not a replay).
 #[derive(Resource, Clone, Copy, Debug)]
-pub struct VersusConfig {
+pub struct SessionConfig {
     pub seats: [Participant; 2],
     pub seed: Option<u64>,
 }
 
-impl Default for VersusConfig {
+impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             // You vs the Tier-2 beam — a mid-strength opener (registry index 1).
@@ -124,7 +124,7 @@ pub struct HumanSeat {
 /// the same reason as the sandbox's `AiPlayer`: `AiController` is
 /// `Send`-but-not-`Sync`, and the fixed-update driver runs on the main thread.
 #[derive(Default)]
-pub struct VersusBots(pub Vec<(usize, crate::ai::AiController)>);
+pub struct SessionBots(pub Vec<(usize, crate::ai::AiController)>);
 
 /// How the match ended. Inserted exactly once, when a seat dies.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
@@ -155,39 +155,39 @@ fn versus_engine_config(settings: &crate::settings::GameSettings) -> EngineConfi
     }
 }
 
-pub struct VersusPlugin;
+pub struct SessionPlugin;
 
-impl Plugin for VersusPlugin {
+impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_sub_state::<VersusPhase>()
-            .init_resource::<VersusConfig>()
+        app.add_sub_state::<SessionPhase>()
+            .init_resource::<SessionConfig>()
             .init_resource::<MatchClock>()
             // Self-sufficiency for headless tests (idempotent: `GamePlugin`
             // stays the canonical owner of the shared contracts).
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::ai::ModelRegistry>()
             .init_resource::<LevelConfig>()
-            .add_systems(OnEnter(GameState::Versus), versus_setup)
-            .add_systems(OnExit(GameState::Versus), versus_teardown)
+            .add_systems(OnEnter(GameState::Session), session_setup)
+            .add_systems(OnExit(GameState::Session), versus_teardown)
             .add_systems(
                 PreUpdate,
                 (clear_seat_events, latch_human_input)
                     .chain()
                     .after(bevy::input::InputSystems)
-                    .run_if(in_state(VersusPhase::Running)),
+                    .run_if(in_state(SessionPhase::Running)),
             )
             .add_systems(
                 FixedUpdate,
-                versus_step.run_if(in_state(VersusPhase::Running)),
+                versus_step.run_if(in_state(SessionPhase::Running)),
             )
             .add_systems(
                 Update,
-                advance_match_clock.run_if(in_state(VersusPhase::Running)),
+                advance_match_clock.run_if(in_state(SessionPhase::Running)),
             )
             // A press latched in the same render frame as a pause (a frame
             // that ran zero slices) must not fire on the first slice after a
             // resume, minutes later.
-            .add_systems(OnEnter(VersusPhase::Running), reset_human_latch)
+            .add_systems(OnEnter(SessionPhase::Running), reset_human_latch)
             .add_plugins(render::VersusRenderPlugin)
             .add_plugins(overlay::VersusOverlayPlugin)
             .add_plugins(feel::VersusFeelPlugin);
@@ -198,8 +198,8 @@ impl Plugin for VersusPlugin {
 /// the guideline fairness convention; the hole streams stay decorrelated by
 /// the engine's own salt) and one controller per bot seat. Exclusive because
 /// bot controllers go into a non-send resource.
-fn versus_setup(world: &mut World) {
-    let config = *world.resource::<VersusConfig>();
+fn session_setup(world: &mut World) {
+    let config = *world.resource::<SessionConfig>();
     let settings = world.resource::<crate::settings::GameSettings>().clone();
     let engine_config = versus_engine_config(&settings);
 
@@ -215,7 +215,7 @@ fn versus_setup(world: &mut World) {
     });
     info!("versus match: seed {seed}, seats {:?}", config.seats);
 
-    let mut bots = VersusBots::default();
+    let mut bots = SessionBots::default();
     let das = das_config_from_level(world.resource::<LevelConfig>());
 
     for (index, participant) in config.seats.into_iter().enumerate() {
@@ -250,7 +250,7 @@ fn versus_setup(world: &mut World) {
             SeatSnapshot(snapshot),
             SeatEvents::default(),
             SeatStats::default(),
-            DespawnOnExit(GameState::Versus),
+            DespawnOnExit(GameState::Session),
         ));
         if let Some(human) = human {
             seat.insert(human);
@@ -263,9 +263,9 @@ fn versus_setup(world: &mut World) {
 }
 
 /// Drop the bots and the outcome when the session ends. Seat entities are
-/// `DespawnOnExit(GameState::Versus)`-scoped, so Bevy tears those down.
+/// `DespawnOnExit(GameState::Session)`-scoped, so Bevy tears those down.
 fn versus_teardown(world: &mut World) {
-    world.remove_non_send_resource::<VersusBots>();
+    world.remove_non_send_resource::<SessionBots>();
     world.remove_resource::<MatchOutcome>();
 }
 
@@ -323,10 +323,10 @@ type SeatStepQuery<'w, 's> = Query<
 
 fn versus_step(
     mut seats: SeatStepQuery,
-    bots: Option<NonSendMut<VersusBots>>,
+    bots: Option<NonSendMut<SessionBots>>,
     outcome: Option<Res<MatchOutcome>>,
     mut commands: Commands,
-    mut next: ResMut<NextState<VersusPhase>>,
+    mut next: ResMut<NextState<SessionPhase>>,
 ) {
     // `Option`: every legal path into `Running` passes through the `OnEnter`
     // that seats the bots, but a dev-inspector state poke does not — be inert
@@ -418,7 +418,7 @@ fn versus_step(
         };
         info!("versus over: winner {winner:?}");
         commands.insert_resource(MatchOutcome { winner });
-        next.set(VersusPhase::Over);
+        next.set(SessionPhase::Over);
     }
 }
 
@@ -461,11 +461,11 @@ pub(crate) fn restart_match(world: &mut World) {
         world.entity_mut(entity).despawn();
     }
     versus_teardown(world);
-    versus_setup(world);
+    session_setup(world);
     // Render roots rebuild from the fresh seats on their next reconcile pass.
     world
-        .resource_mut::<NextState<VersusPhase>>()
-        .set(VersusPhase::Countdown);
+        .resource_mut::<NextState<SessionPhase>>()
+        .set(SessionPhase::Countdown);
 }
 
 #[cfg(test)]
@@ -495,18 +495,18 @@ mod tests {
     /// A headless versus app on a frozen clock: enter `Versus`, force the
     /// phase to `Running` (skipping the countdown), and advance only via
     /// explicit fixed slices.
-    fn headless_versus_app(config: VersusConfig) -> App {
+    fn headless_versus_app(config: SessionConfig) -> App {
         let mut app = bare_versus_app(config);
         app.world_mut()
-            .resource_mut::<NextState<VersusPhase>>()
-            .set(VersusPhase::Running);
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
         app.update(); // apply the phase
         app
     }
 
     /// The harness without the phase override: enters `Versus` and leaves the
     /// match on its natural opening phase (the countdown).
-    fn bare_versus_app(config: VersusConfig) -> App {
+    fn bare_versus_app(config: SessionConfig) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
@@ -517,10 +517,10 @@ mod tests {
             .insert_resource(bevy::input::mouse::AccumulatedMouseMotion::default())
             .insert_resource(test_assets())
             .insert_resource(config)
-            .add_plugins(VersusPlugin);
+            .add_plugins(SessionPlugin);
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
-            .set(GameState::Versus);
+            .set(GameState::Session);
         app.update(); // queue the transition
         app.update(); // apply Versus + run setup
         app
@@ -540,8 +540,8 @@ mod tests {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
     }
 
-    fn bot_match(seed: u64) -> VersusConfig {
-        VersusConfig {
+    fn bot_match(seed: u64) -> SessionConfig {
+        SessionConfig {
             // Greedy DT-20 on both seats: fast and deterministic.
             seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
             seed: Some(seed),
@@ -566,8 +566,8 @@ mod tests {
         // Running on its own once the beats elapse.
         let mut app = bare_versus_app(bot_match(7));
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown,
             "a match opens on the countdown"
         );
 
@@ -579,7 +579,7 @@ mod tests {
         for _ in 0..16 {
             app.update();
             let snaps = snapshots(&mut app);
-            if app.world().resource::<State<VersusPhase>>().get() == &VersusPhase::Countdown {
+            if app.world().resource::<State<SessionPhase>>().get() == &SessionPhase::Countdown {
                 assert!(
                     snaps[0].1.active.is_none(),
                     "engines hold during the countdown (no first spawn)"
@@ -587,8 +587,8 @@ mod tests {
             }
         }
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Running,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Running,
             "the countdown hands off to Running by itself"
         );
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
@@ -614,8 +614,8 @@ mod tests {
             .clear_just_pressed(KeyCode::Escape);
         app.update(); // the transition applies
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Paused
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Paused
         );
 
         let frozen = snapshots(&mut app);
@@ -639,8 +639,8 @@ mod tests {
             .clear_just_pressed(KeyCode::Escape);
         app.update();
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Running,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Running,
             "Esc on the pause menu resumes the match"
         );
     }
@@ -767,8 +767,8 @@ mod tests {
         // next state-transition pass — run one more frame before asserting.
         app.update();
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Over,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Over,
             "the match parks in Over (boards stay on screen)"
         );
     }
@@ -817,8 +817,8 @@ mod tests {
             "fresh engines: empty boards"
         );
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown,
             "a rematch re-runs the countdown"
         );
     }
@@ -929,15 +929,15 @@ mod tests {
             "a rematch deals a fresh match"
         );
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown
         );
     }
 
     #[test]
     fn leaving_versus_tears_down_seats_and_bots() {
         let mut app = headless_versus_app(bot_match(7));
-        assert!(app.world().get_non_send_resource::<VersusBots>().is_some());
+        assert!(app.world().get_non_send_resource::<SessionBots>().is_some());
 
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
@@ -946,7 +946,7 @@ mod tests {
         app.update();
 
         assert!(
-            app.world().get_non_send_resource::<VersusBots>().is_none(),
+            app.world().get_non_send_resource::<SessionBots>().is_none(),
             "bots are dropped with the session"
         );
         let seats = app.world_mut().query::<&Seat>().iter(app.world()).count();

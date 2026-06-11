@@ -20,8 +20,8 @@ use crate::features::screen_shake::{trauma_for_clear, ScreenShake};
 use crate::level::common::{AudioCue, GameplayCamera};
 use crate::GameState;
 
-use super::render::VersusLayout;
-use super::{HumanSeat, Seat, SeatEvents, VersusPhase};
+use super::render::SessionLayout;
+use super::{HumanSeat, Seat, SeatEvents, SessionPhase};
 
 /// How long a "+n" attack pop lives, and how far it drifts up.
 const POP_SECONDS: f32 = 0.8;
@@ -36,21 +36,21 @@ impl Plugin for VersusFeelPlugin {
             // full game; the inits keep a headless versus app self-sufficient.
             .init_resource::<ScreenShake>()
             .init_resource::<crate::vfx::VfxToggles>()
-            .add_systems(OnEnter(GameState::Versus), reset_versus_shake)
+            .add_systems(OnEnter(GameState::Session), reset_versus_shake)
             .add_systems(
                 Update,
-                (emit_seat_audio, spawn_attack_pops).run_if(in_state(VersusPhase::Running)),
+                (emit_seat_audio, spawn_attack_pops).run_if(in_state(SessionPhase::Running)),
             )
             // Same kill-switch as the single-player trauma feed (the dev VFX
             // panel); the apply below keeps running and bleeds to rest.
             .add_systems(
                 Update,
                 feed_versus_trauma
-                    .run_if(in_state(VersusPhase::Running).and(crate::vfx::shake_enabled)),
+                    .run_if(in_state(SessionPhase::Running).and(crate::vfx::shake_enabled)),
             )
             .add_systems(
                 Update,
-                animate_attack_pops.run_if(in_state(GameState::Versus)),
+                animate_attack_pops.run_if(in_state(GameState::Session)),
             )
             // Move the camera in PostUpdate before transforms propagate, like
             // the single-player mover — but resting at the two-board center.
@@ -58,7 +58,7 @@ impl Plugin for VersusFeelPlugin {
                 PostUpdate,
                 apply_versus_shake
                     .before(TransformSystems::Propagate)
-                    .run_if(in_state(GameState::Versus)),
+                    .run_if(in_state(GameState::Session)),
             );
     }
 }
@@ -124,11 +124,11 @@ fn spawn_attack_pops(
         }
         // Next to the seat's meter (the inner board edge), just above the
         // current stack area — world space, scoped to the session.
-        let origin = VersusLayout::board_origin(seat.index);
+        let origin = SessionLayout::board_origin(seat.index);
         let x = if seat.index == 0 {
-            origin.x + (VersusLayout::BOARD_W as f32 + 1.6) * VersusLayout::BLOCK
+            origin.x + (SessionLayout::BOARD_W as f32 + 1.6) * SessionLayout::BLOCK
         } else {
-            origin.x - 1.6 * VersusLayout::BLOCK
+            origin.x - 1.6 * SessionLayout::BLOCK
         };
         commands.spawn((
             AttackPop { age: 0.0 },
@@ -140,8 +140,8 @@ fn spawn_attack_pops(
             },
             TextColor(Color::srgb_u8(255, 120, 90)),
             Anchor::CENTER,
-            Transform::from_translation(Vec3::new(x, 10.0 * VersusLayout::BLOCK, 0.8)),
-            DespawnOnExit(GameState::Versus),
+            Transform::from_translation(Vec3::new(x, 10.0 * SessionLayout::BLOCK, 0.8)),
+            DespawnOnExit(GameState::Session),
         ));
     }
 }
@@ -195,7 +195,7 @@ fn apply_versus_shake(
     let (translation, rotation) = shake.pose_and_decay(
         time.elapsed_secs(),
         time.delta_secs(),
-        VersusLayout::scene_center(),
+        SessionLayout::scene_center(),
     );
     for mut transform in &mut cameras {
         transform.translation = translation;

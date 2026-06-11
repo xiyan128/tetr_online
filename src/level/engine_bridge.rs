@@ -34,7 +34,7 @@ pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
 pub const DEFAULT_SEED: u64 = 0;
 
 /// Optional seed override for the next gameplay session (the versus
-/// `VersusConfig.seed` idiom): `None` = fresh app-clock entropy per run,
+/// `SessionConfig.seed` idiom): `None` = fresh app-clock entropy per run,
 /// `Some` = pinned (tests, future replays).
 #[derive(Resource, Default)]
 pub struct RunSeed(pub Option<u64>);
