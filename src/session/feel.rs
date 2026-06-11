@@ -20,8 +20,8 @@ use crate::features::screen_shake::{trauma_for_clear, ScreenShake};
 use crate::level::common::{AudioCue, GameplayCamera};
 use crate::GameState;
 
-use super::render::VersusLayout;
-use super::{HumanSeat, Seat, SeatEvents, VersusPhase};
+use super::render::SessionLayout;
+use super::{HumanSeat, Seat, SeatEvents, SessionPhase};
 
 /// How long a "+n" attack pop lives, and how far it drifts up.
 const POP_SECONDS: f32 = 0.8;
@@ -36,21 +36,22 @@ impl Plugin for VersusFeelPlugin {
             // full game; the inits keep a headless versus app self-sufficient.
             .init_resource::<ScreenShake>()
             .init_resource::<crate::vfx::VfxToggles>()
-            .add_systems(OnEnter(GameState::Versus), reset_versus_shake)
+            .add_systems(OnEnter(GameState::Session), reset_versus_shake)
             .add_systems(
                 Update,
-                (emit_seat_audio, spawn_attack_pops).run_if(in_state(VersusPhase::Running)),
+                (emit_seat_audio, spawn_attack_pops, spawn_seat_callouts)
+                    .run_if(in_state(SessionPhase::Running)),
             )
             // Same kill-switch as the single-player trauma feed (the dev VFX
             // panel); the apply below keeps running and bleeds to rest.
             .add_systems(
                 Update,
                 feed_versus_trauma
-                    .run_if(in_state(VersusPhase::Running).and(crate::vfx::shake_enabled)),
+                    .run_if(in_state(SessionPhase::Running).and(crate::vfx::shake_enabled)),
             )
             .add_systems(
                 Update,
-                animate_attack_pops.run_if(in_state(GameState::Versus)),
+                (animate_attack_pops, animate_seat_callouts).run_if(in_state(GameState::Session)),
             )
             // Move the camera in PostUpdate before transforms propagate, like
             // the single-player mover — but resting at the two-board center.
@@ -58,7 +59,7 @@ impl Plugin for VersusFeelPlugin {
                 PostUpdate,
                 apply_versus_shake
                     .before(TransformSystems::Propagate)
-                    .run_if(in_state(GameState::Versus)),
+                    .run_if(in_state(GameState::Session)),
             );
     }
 }
@@ -98,6 +99,101 @@ fn emit_seat_audio(mut commands: Commands, seats: Query<(&SeatEvents, Option<&Hu
     }
 }
 
+/// A clear callout ("TETRIS", "T-SPIN", "COMBO x3", with B2B prefix) floating
+/// above a seat's board — the guideline §19.2 wording, seat-native.
+#[derive(Component)]
+struct SeatCallout {
+    age: f32,
+}
+
+const CALLOUT_TTL: f32 = 1.1;
+
+fn callout_label(action: &crate::engine::EngineScoreAction, b2b: bool) -> Option<String> {
+    use crate::engine::{EngineScoreAction as A, TSpinKind};
+    let core = match action {
+        A::Single => "SINGLE".to_string(),
+        A::Double => "DOUBLE".to_string(),
+        A::Triple => "TRIPLE".to_string(),
+        A::Tetris => "TETRIS".to_string(),
+        A::TSpin { kind, lines } => {
+            let spin = match kind {
+                TSpinKind::Mini => "T-SPIN MINI",
+                TSpinKind::Full => "T-SPIN",
+            };
+            match lines {
+                0 => spin.to_string(),
+                1 => format!("{spin} SINGLE"),
+                2 => format!("{spin} DOUBLE"),
+                _ => format!("{spin} TRIPLE"),
+            }
+        }
+        _ => return None,
+    };
+    Some(if b2b {
+        format!("BACK-TO-BACK {core}")
+    } else {
+        core
+    })
+}
+
+/// Spawn a callout per scoring clear on any seat (both modes — reading the
+/// opponent's Tetris matters in versus too).
+fn spawn_seat_callouts(
+    mut commands: Commands,
+    assets: Res<crate::assets::GameAssets>,
+    seats: Query<(&Seat, &SeatEvents)>,
+) {
+    use crate::engine::EngineEvent;
+    for (seat, events) in &seats {
+        for event in &events.0 {
+            let EngineEvent::ScoreAwarded {
+                action,
+                back_to_back_bonus,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            let Some(label) = callout_label(action, *back_to_back_bonus) else {
+                continue;
+            };
+            let origin = SessionLayout::board_origin(seat.index);
+            let center_x = SessionLayout::BOARD_W as f32 * SessionLayout::BLOCK / 2.0;
+            let top_y = (SessionLayout::BOARD_H as f32 - 2.5) * SessionLayout::BLOCK;
+            commands.spawn((
+                SeatCallout { age: 0.0 },
+                Text2d::new(label),
+                TextFont {
+                    font: assets.font.clone(),
+                    font_size: 28.0,
+                    ..Default::default()
+                },
+                TextColor(Color::WHITE),
+                Transform::from_translation(origin + Vec3::new(center_x, top_y, 2.0)),
+                DespawnOnExit(GameState::Session),
+            ));
+        }
+    }
+}
+
+/// Callouts drift up and fade out.
+fn animate_seat_callouts(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut callouts: Query<(Entity, &mut SeatCallout, &mut Transform, &mut TextColor)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut callout, mut transform, mut color) in &mut callouts {
+        callout.age += dt;
+        transform.translation.y += 18.0 * dt;
+        let life = (callout.age / CALLOUT_TTL).clamp(0.0, 1.0);
+        color.0 = color.0.with_alpha(1.0 - life);
+        if callout.age >= CALLOUT_TTL {
+            commands.entity(entity).despawn();
+        }
+    }
+}
+
 /// A floating "+n" by the sender's meter when net attack leaves a board.
 /// `pub(crate)` so the match tests can assert the feedback fires.
 #[derive(Component)]
@@ -124,11 +220,11 @@ fn spawn_attack_pops(
         }
         // Next to the seat's meter (the inner board edge), just above the
         // current stack area — world space, scoped to the session.
-        let origin = VersusLayout::board_origin(seat.index);
+        let origin = SessionLayout::board_origin(seat.index);
         let x = if seat.index == 0 {
-            origin.x + (VersusLayout::BOARD_W as f32 + 1.6) * VersusLayout::BLOCK
+            origin.x + (SessionLayout::BOARD_W as f32 + 1.6) * SessionLayout::BLOCK
         } else {
-            origin.x - 1.6 * VersusLayout::BLOCK
+            origin.x - 1.6 * SessionLayout::BLOCK
         };
         commands.spawn((
             AttackPop { age: 0.0 },
@@ -140,8 +236,8 @@ fn spawn_attack_pops(
             },
             TextColor(Color::srgb_u8(255, 120, 90)),
             Anchor::CENTER,
-            Transform::from_translation(Vec3::new(x, 10.0 * VersusLayout::BLOCK, 0.8)),
-            DespawnOnExit(GameState::Versus),
+            Transform::from_translation(Vec3::new(x, 10.0 * SessionLayout::BLOCK, 0.8)),
+            DespawnOnExit(GameState::Session),
         ));
     }
 }
@@ -190,12 +286,13 @@ fn feed_versus_trauma(seats: Query<&SeatEvents>, mut shake: ResMut<ScreenShake>)
 fn apply_versus_shake(
     time: Res<Time>,
     mut shake: ResMut<ScreenShake>,
+    config: Res<super::SessionConfig>,
     mut cameras: Query<&mut Transform, With<GameplayCamera>>,
 ) {
     let (translation, rotation) = shake.pose_and_decay(
         time.elapsed_secs(),
         time.delta_secs(),
-        VersusLayout::scene_center(),
+        SessionLayout::scene_center(config.mode.seat_count()),
     );
     for mut transform in &mut cameras {
         transform.translation = translation;

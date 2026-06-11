@@ -18,8 +18,6 @@
 use bevy::prelude::*;
 
 use crate::engine::{EngineEvent, EngineScoreAction, TSpinKind};
-use crate::level::common::LevelSystems;
-use crate::level::FrameEvents;
 use crate::GameState;
 
 /// Freeze length (seconds of *real* time) for a Tetris.
@@ -47,17 +45,18 @@ impl Plugin for HitStopPlugin {
         app.init_resource::<HitStop>()
             // Defence in depth: never carry a freeze across a session boundary, so
             // a game can't start — and a menu can't sit — on a paused clock.
-            .add_systems(OnEnter(GameState::Playing), clear_freeze)
-            .add_systems(OnExit(GameState::Playing), clear_freeze)
-            // Detect marquee clears in the Reconcile set (gated on
-            // `PauseState::Running`, after the engine has stepped). The toggle only
+            .add_systems(OnEnter(GameState::Session), clear_freeze)
+            .add_systems(OnExit(GameState::Session), clear_freeze)
+            // Detect marquee clears in the Reconcile set (gated on the
+            // session running). The toggle only
             // gates *new* freezes; `tick_hit_stop` always runs so an in-flight
             // freeze still resolves if the effect is switched off mid-freeze.
             .add_systems(
                 Update,
-                trigger_hit_stop
-                    .in_set(LevelSystems::Reconcile)
-                    .run_if(crate::vfx::hit_stop_enabled),
+                trigger_hit_stop.run_if(
+                    in_state(crate::session::SessionPhase::Running)
+                        .and(crate::vfx::hit_stop_enabled),
+                ),
             )
             // Tick the countdown on the REAL clock so it advances while virtual time
             // is paused. Ordered after the trigger so a freeze begun this frame is
@@ -69,7 +68,7 @@ impl Plugin for HitStopPlugin {
                 Update,
                 tick_hit_stop
                     .after(trigger_hit_stop)
-                    .run_if(in_state(crate::PauseState::Running)),
+                    .run_if(in_state(crate::session::SessionPhase::Running)),
             );
     }
 }
@@ -83,19 +82,27 @@ fn clear_freeze(mut hit_stop: ResMut<HitStop>, mut virtual_time: ResMut<Time<Vir
 /// Start a freeze when this frame produced a Tetris or T-spin. Refreshes (never
 /// stacks) the timer so a multi-event frame can't compound into a long stall.
 fn trigger_hit_stop(
-    frame_events: Res<FrameEvents>,
+    config: Res<crate::session::SessionConfig>,
+    seats: Query<&crate::session::SeatEvents>,
     mut hit_stop: ResMut<HitStop>,
     mut virtual_time: ResMut<Time<Virtual>>,
 ) {
+    // Solo only: pausing Time<Virtual> freezes EVERY seat's fixed stepping,
+    // which in versus would let one player's Tetris stop the opponent's clock.
+    if !matches!(config.mode, crate::session::SessionMode::Solo { .. }) {
+        return;
+    }
     let mut freeze = 0.0_f32;
-    for event in &frame_events.0 {
-        if let EngineEvent::ScoreAwarded {
-            action,
-            back_to_back_bonus,
-            ..
-        } = event
-        {
-            freeze = freeze.max(freeze_for_clear(*action, *back_to_back_bonus));
+    for events in &seats {
+        for event in &events.0 {
+            if let EngineEvent::ScoreAwarded {
+                action,
+                back_to_back_bonus,
+                ..
+            } = event
+            {
+                freeze = freeze.max(freeze_for_clear(*action, *back_to_back_bonus));
+            }
         }
     }
     if freeze > 0.0 {
@@ -209,7 +216,16 @@ mod tests {
         let mut app = App::new();
         app.add_plugins(MinimalPlugins)
             .init_resource::<HitStop>()
-            .init_resource::<FrameEvents>()
+            .insert_resource(crate::session::SessionConfig {
+                seats: [
+                    crate::session::Participant::Human,
+                    crate::session::Participant::Bot { model: 0 },
+                ],
+                mode: crate::session::SessionMode::Solo {
+                    variant: crate::variant::Variant::Marathon,
+                },
+                seed: Some(0),
+            })
             // Advance the real clock by a fixed 16 ms per update, independent of
             // wall time, so the countdown is deterministic.
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::from_millis(
@@ -217,11 +233,14 @@ mod tests {
             )))
             .add_systems(Update, (trigger_hit_stop, tick_hit_stop).chain());
 
-        // Frame 1: a Tetris award is on the event bus → freeze begins.
-        app.world_mut()
-            .resource_mut::<FrameEvents>()
-            .0
-            .push(tetris_award());
+        // Frame 1: a Tetris award is on a seat's bus → freeze begins.
+        let seat = app
+            .world_mut()
+            .spawn((
+                crate::session::Seat { index: 0 },
+                crate::session::SeatEvents(vec![tetris_award()]),
+            ))
+            .id();
         app.update();
         assert!(
             app.world().resource::<Time<Virtual>>().is_paused(),
@@ -230,7 +249,12 @@ mod tests {
 
         // Clear the bus so it can't re-trigger, then let real time march past the
         // freeze length (10 × 16 ms = 160 ms > any freeze).
-        app.world_mut().resource_mut::<FrameEvents>().0.clear();
+        app.world_mut()
+            .entity_mut(seat)
+            .get_mut::<crate::session::SeatEvents>()
+            .unwrap()
+            .0
+            .clear();
         for _ in 0..10 {
             app.update();
         }

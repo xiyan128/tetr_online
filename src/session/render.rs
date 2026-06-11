@@ -26,13 +26,13 @@ use crate::engine::{Piece, PieceType, SnapshotCell};
 use crate::level::common::{mino_render_color, to_translation, GameplayCamera};
 use crate::GameState;
 
-use super::{Participant, Seat, SeatSnapshot, SeatStats, VersusConfig};
+use super::{Participant, Seat, SeatSnapshot, SeatStats, SessionConfig};
 
 /// World-space layout of the two-board scene, in cells and pixels. One home
 /// for every magic number the renderer and overlays share.
-pub struct VersusLayout;
+pub struct SessionLayout;
 
-impl VersusLayout {
+impl SessionLayout {
     pub const BLOCK: f32 = 32.0;
     pub const BOARD_W: usize = 10;
     pub const BOARD_H: usize = 20;
@@ -48,16 +48,25 @@ impl VersusLayout {
         Vec3::new(seat as f32 * stride, 0.0, 0.0)
     }
 
-    /// Center of the whole scene (the camera's rest position).
-    pub fn scene_center() -> Vec3 {
-        let right = Self::board_origin(1).x + Self::BOARD_W as f32 * Self::BLOCK;
+    /// Center of the whole scene (the camera's rest position), for however
+    /// many seats this session plays with.
+    pub fn scene_center(seat_count: usize) -> Vec3 {
+        let right =
+            Self::board_origin(seat_count.saturating_sub(1)).x + Self::BOARD_W as f32 * Self::BLOCK;
         Vec3::new(right / 2.0, Self::BOARD_H as f32 * Self::BLOCK / 2.0, 1.0)
     }
 
-    /// Minimum world-space rectangle the camera must keep visible: both
-    /// boards, the outer hold/preview columns, the texts above and below.
-    pub const SCENE_MIN_WIDTH: f32 = 40.0 * Self::BLOCK;
-    pub const SCENE_MIN_HEIGHT: f32 = 25.0 * Self::BLOCK;
+    /// Minimum world-space rectangle the camera must keep visible: every
+    /// board, the outer hold/preview columns, the texts above and below.
+    pub fn scene_min(seat_count: usize) -> (f32, f32) {
+        let width_cells = match seat_count {
+            // hold column + board + preview column + breathing room.
+            0 | 1 => 20.0,
+            // two board groups + the gutter between them.
+            _ => 40.0,
+        };
+        (width_cells * Self::BLOCK, 25.0 * Self::BLOCK)
+    }
 }
 
 /// Neutral gray for garbage cells — full alpha (the half-alpha gray is the
@@ -119,7 +128,7 @@ pub struct VersusRenderPlugin;
 
 impl Plugin for VersusRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Versus), setup_scene)
+        app.add_systems(OnEnter(GameState::Session), setup_scene)
             .add_systems(
                 Update,
                 (
@@ -130,8 +139,9 @@ impl Plugin for VersusRenderPlugin {
                     reconcile_hold_views,
                     reconcile_preview_views,
                     update_atk_texts,
+                    update_seat_timer_bars,
                 )
-                    .run_if(in_state(GameState::Versus)),
+                    .run_if(in_state(GameState::Session)),
             );
     }
 }
@@ -169,26 +179,26 @@ fn cell_color(cell: &SnapshotCell) -> Color {
 fn setup_scene(
     mut commands: Commands,
     assets: Res<GameAssets>,
-    config: Res<VersusConfig>,
+    config: Res<SessionConfig>,
     registry: Res<crate::ai::ModelRegistry>,
 ) {
-    let block = VersusLayout::BLOCK;
+    let block = SessionLayout::BLOCK;
 
-    for seat in 0..2 {
-        let origin = VersusLayout::board_origin(seat);
+    for seat in 0..config.mode.seat_count() {
+        let origin = SessionLayout::board_origin(seat);
         let root = commands
             .spawn((
                 BoardRoot { seat },
                 Transform::from_translation(origin),
                 Visibility::default(),
-                DespawnOnExit(GameState::Versus),
+                DespawnOnExit(GameState::Session),
             ))
             .id();
 
         // Background grid (decorative, drawn once).
         let mut grid = Vec::new();
-        for x in 0..VersusLayout::BOARD_W as isize {
-            for y in 0..VersusLayout::BOARD_H as isize {
+        for x in 0..SessionLayout::BOARD_W as isize {
+            for y in 0..SessionLayout::BOARD_H as isize {
                 let mut sprite = Sprite::from_color(Color::srgb(0.1, 0.1, 0.1), Vec2::splat(block));
                 sprite.custom_size = Some(Vec2::splat(block));
                 let mut transform = Transform::from_translation(to_translation(x, y, block));
@@ -219,7 +229,7 @@ fn setup_scene(
         // seat 0's on its right, seat 1's on its left. Segments stack upward
         // from the board floor, one per pending batch.
         let meter_x = if seat == 0 {
-            VersusLayout::BOARD_W as f32 * block + 0.35 * block
+            SessionLayout::BOARD_W as f32 * block + 0.35 * block
         } else {
             -0.7 * block
         };
@@ -232,6 +242,22 @@ fn setup_scene(
             .id();
         commands.entity(root).add_child(meter);
 
+        // Lock-down progress bar, under the field (grows left→right toward lock).
+        let bar_height = SessionLayout::BLOCK * 0.2;
+        let bar = commands
+            .spawn((
+                SeatTimerBar { seat },
+                Sprite {
+                    custom_size: Some(Vec2::new(0.0, bar_height)),
+                    color: Color::srgb(0.5, 0.5, 0.5),
+                    ..Default::default()
+                },
+                Anchor::BOTTOM_LEFT,
+                Transform::from_translation(Vec3::new(0.0, -bar_height, 1.0)),
+            ))
+            .id();
+        commands.entity(root).add_child(bar);
+
         // Hold column (top-left of the board) and preview column (top-right) —
         // the single-player arrangement, duplicated per seat.
         let hold = commands
@@ -239,7 +265,7 @@ fn setup_scene(
                 SeatHoldView { seat },
                 Transform::from_translation(Vec3::new(
                     -0.5 * block,
-                    VersusLayout::BOARD_H as f32 * block,
+                    SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
                 Visibility::default(),
@@ -249,8 +275,8 @@ fn setup_scene(
             .spawn((
                 SeatPreviewView { seat, cache: None },
                 Transform::from_translation(Vec3::new(
-                    (VersusLayout::BOARD_W as f32 + 0.5) * block,
-                    VersusLayout::BOARD_H as f32 * block,
+                    (SessionLayout::BOARD_W as f32 + 0.5) * block,
+                    SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
                 Visibility::default(),
@@ -274,8 +300,8 @@ fn setup_scene(
                 TextColor(Color::WHITE),
                 Anchor::BOTTOM_CENTER,
                 Transform::from_translation(Vec3::new(
-                    VersusLayout::BOARD_W as f32 * block / 2.0,
-                    (VersusLayout::BOARD_H as f32 + 0.6) * block,
+                    SessionLayout::BOARD_W as f32 * block / 2.0,
+                    (SessionLayout::BOARD_H as f32 + 0.6) * block,
                     0.0,
                 )),
             ))
@@ -294,7 +320,7 @@ fn setup_scene(
                 TextColor(Color::srgb(0.85, 0.55, 0.55)),
                 Anchor::TOP_CENTER,
                 Transform::from_translation(Vec3::new(
-                    VersusLayout::BOARD_W as f32 * block / 2.0,
+                    SessionLayout::BOARD_W as f32 * block / 2.0,
                     -0.6 * block,
                     0.0,
                 )),
@@ -309,14 +335,17 @@ fn setup_scene(
         Camera2d,
         GameplayCamera,
         Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMin {
-                min_width: VersusLayout::SCENE_MIN_WIDTH,
-                min_height: VersusLayout::SCENE_MIN_HEIGHT,
+            scaling_mode: {
+                let (min_width, min_height) = SessionLayout::scene_min(config.mode.seat_count());
+                ScalingMode::AutoMin {
+                    min_width,
+                    min_height,
+                }
             },
             ..OrthographicProjection::default_2d()
         }),
-        Transform::from_translation(VersusLayout::scene_center()),
-        DespawnOnExit(GameState::Versus),
+        Transform::from_translation(SessionLayout::scene_center(config.mode.seat_count())),
+        DespawnOnExit(GameState::Session),
     ));
 }
 
@@ -357,7 +386,7 @@ fn reconcile_locked_boards(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         cell_color(cell),
@@ -393,7 +422,7 @@ fn reconcile_active_pieces(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         cell_color(cell),
@@ -438,7 +467,7 @@ fn reconcile_ghost_pieces(
                 commands
                     .spawn(block_sprite(
                         &assets,
-                        VersusLayout::BLOCK,
+                        SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
                         Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
@@ -482,10 +511,10 @@ fn reconcile_garbage_meters(
         let mut y = 0.0;
         let mut ids = Vec::new();
         for (lines, _) in &batches {
-            let height = *lines as f32 * VersusLayout::BLOCK - NOTCH;
+            let height = *lines as f32 * SessionLayout::BLOCK - NOTCH;
             let sprite = Sprite::from_color(
                 Color::srgb_u8(214, 48, 49),
-                Vec2::new(0.35 * VersusLayout::BLOCK, height.max(NOTCH)),
+                Vec2::new(0.35 * SessionLayout::BLOCK, height.max(NOTCH)),
             );
             ids.push(
                 commands
@@ -496,7 +525,7 @@ fn reconcile_garbage_meters(
                     ))
                     .id(),
             );
-            y += *lines as f32 * VersusLayout::BLOCK;
+            y += *lines as f32 * SessionLayout::BLOCK;
         }
         commands.entity(meter).add_children(&ids);
         cache[index] = Some(batches);
@@ -515,7 +544,7 @@ fn spawn_avatar(
     align_right: bool,
 ) -> f32 {
     let piece = Piece::from(piece_type);
-    let block = VersusLayout::BLOCK * VersusLayout::PREVIEW_SCALE;
+    let block = SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
     let (avatar_w, avatar_h) = piece.avatar_dims();
     let height = avatar_h as f32 * block;
     let x_off = if align_right {
@@ -592,7 +621,7 @@ fn reconcile_preview_views(
             continue;
         }
         commands.entity(view).despawn_related::<Children>();
-        let gap = 0.5 * VersusLayout::BLOCK * VersusLayout::PREVIEW_SCALE;
+        let gap = 0.5 * SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
         let mut y_top = 0.0;
         for &piece_type in queue {
             let height = spawn_avatar(&mut commands, &assets, view, piece_type, y_top, false);
@@ -602,16 +631,141 @@ fn reconcile_preview_views(
     }
 }
 
-/// Keep each seat's cumulative-attack readout current.
-fn update_atk_texts(
-    seats: Query<(&Seat, &SeatStats), Changed<SeatStats>>,
-    mut texts: Query<(&SeatAtkText, &mut Text2d)>,
+/// Keep each seat's under-board readout current.
+/// The lock-down progress bar under a seat's playfield: width tracks progress
+/// (`1.0 - lock_timer_fraction` — the engine reports the fraction REMAINING),
+/// visible only while the seat's active piece is grounded.
+#[derive(Component)]
+pub struct SeatTimerBar {
+    pub seat: usize,
+}
+
+fn update_seat_timer_bars(
+    seats: Query<(&Seat, &SeatSnapshot)>,
+    mut bars: Query<(&SeatTimerBar, &mut Sprite)>,
 ) {
-    for (seat, stats) in &seats {
-        for (atk, mut text) in &mut texts {
-            if atk.seat == seat.index {
-                text.0 = format!("ATK {}", stats.attack_sent);
+    for (seat, snapshot) in &seats {
+        for (bar, mut sprite) in &mut bars {
+            if bar.seat != seat.index {
+                continue;
+            }
+            let progress = lock_bar_progress(&snapshot.0);
+            let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32 * progress;
+            if let Some(size) = sprite.custom_size {
+                sprite.custom_size = Some(Vec2::new(width, size.y));
             }
         }
+    }
+}
+
+/// Lock-bar fill for a snapshot: only a GROUNDED piece shows progress. The
+/// engine reports `lock_timer_fraction` as the fraction REMAINING — but `0.0`
+/// also means "timer not running" (a falling piece), which without the
+/// `landed` gate rendered as a permanently full bar (the old pipeline hid the
+/// hazard by despawning the bar entirely outside its Locking sub-state).
+fn lock_bar_progress(snapshot: &crate::engine::EngineSnapshot) -> f32 {
+    match snapshot.active.as_ref() {
+        Some(active) if active.landed => 1.0 - active.lock_timer_fraction,
+        _ => 0.0,
+    }
+}
+
+fn update_atk_texts(
+    config: Res<super::SessionConfig>,
+    clock: Res<super::MatchClock>,
+    seats: Query<(&Seat, &SeatStats, &SeatSnapshot)>,
+    mut texts: Query<(&SeatAtkText, &mut Text2d)>,
+) {
+    for (seat, stats, snapshot) in &seats {
+        for (atk, mut text) in &mut texts {
+            if atk.seat != seat.index {
+                continue;
+            }
+            let line = match config.mode {
+                // Versus: the pressure scoreboard.
+                super::SessionMode::Versus => format!("ATK {}", stats.attack_sent),
+                // Solo: the run line — score, lines, level, and the variant
+                // clock (Sprint counts up; Ultra counts down to its limit).
+                super::SessionMode::Solo { variant } => {
+                    let snap = &snapshot.0;
+                    let shown = match variant.def().end_condition {
+                        crate::variant::EndCondition::TimeLimit(limit) => {
+                            (limit - clock.0).max(0.0)
+                        }
+                        _ => clock.0,
+                    };
+                    format!(
+                        "SCORE {}   LINES {}   LVL {}   {}:{:04.1}",
+                        snap.score,
+                        snap.lines,
+                        snap.level,
+                        (shown / 60.0) as u32,
+                        shown % 60.0
+                    )
+                }
+            };
+            if text.0 != line {
+                text.0 = line;
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod timer_bar_tests {
+    use super::lock_bar_progress;
+    use crate::engine::{Engine, EngineConfig, InputFrame};
+
+    #[test]
+    fn a_falling_piece_shows_no_lock_progress() {
+        // The regression: lock_timer_fraction is 0.0 for an INACTIVE timer,
+        // which without the landed gate read as a full bar on every falling
+        // piece (user-reported: "the bar shows up by default").
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.step(InputFrame::default()); // spawn; piece is high and falling
+        let snapshot = engine.snapshot();
+        assert!(!snapshot.active.as_ref().unwrap().landed);
+        assert_eq!(lock_bar_progress(&snapshot), 0.0);
+    }
+
+    #[test]
+    fn a_grounded_piece_fills_the_bar_as_the_timer_drains() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.step(InputFrame::default());
+        // Hard-drop-free grounding: step gravity until the piece lands.
+        for _ in 0..4000 {
+            engine.step(InputFrame {
+                dt_seconds: 1.0 / 60.0,
+                soft_drop: true,
+                ..Default::default()
+            });
+            let snap = engine.snapshot();
+            if snap.active.as_ref().is_some_and(|a| a.landed) {
+                // Just landed: full timer remaining ⇒ bar starts (near) empty.
+                assert!(lock_bar_progress(&snap) < 0.1);
+                // Drain half the lock-down; the bar fills accordingly.
+                engine.step(InputFrame {
+                    dt_seconds: 0.25,
+                    ..Default::default()
+                });
+                let drained = engine.snapshot();
+                if drained.active.as_ref().is_some_and(|a| a.landed) {
+                    assert!(
+                        lock_bar_progress(&drained) > 0.3,
+                        "a draining lock timer must fill the bar"
+                    );
+                }
+                return;
+            }
+        }
+        panic!("the piece never landed");
+    }
+
+    #[test]
+    fn no_active_piece_shows_no_lock_progress() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        let snapshot = engine.snapshot(); // pre-spawn: no active piece
+        assert!(snapshot.active.is_none());
+        assert_eq!(lock_bar_progress(&snapshot), 0.0);
     }
 }

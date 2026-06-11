@@ -11,16 +11,14 @@
 //! * [`ActiveVariant`] resource (default [`Variant::Marathon`]) holds the chosen
 //!   variant. Mode-select writes it; the engine bridge reads its
 //!   [`VariantDef::apply_engine_overrides`] when building the engine.
-//! * [`VariantProgress`] tracks wall-clock elapsed time for the active run.
+//! * the session's `MatchClock` tracks wall-clock elapsed time for a run.
 //! * [`check_variant_end_conditions`] runs each frame while `Playing` and
-//!   transitions to [`GameState::GameOver`] when the variant's goal/limit is met
+//!   the session ends the run when the variant's goal/limit is met
 //!   (engine-driven block/lock-out is handled separately by the level plugin).
 
 use bevy::prelude::*;
 
 use crate::engine::{EngineConfig, EngineSnapshot, GoalSystem, MAX_LEVEL};
-use crate::level::engine_bridge::LatestSnapshot;
-use crate::GameState;
 
 /// Default Sprint line target (clear N lines as fast as possible).
 pub const DEFAULT_SPRINT_LINES: usize = 40;
@@ -140,62 +138,17 @@ impl Default for ActiveVariant {
     }
 }
 
-/// Wall-clock progress for the active run. `elapsed_seconds` advances each frame
-/// while `Playing`; `ended` latches once an end condition fires so we transition
-/// to GameOver exactly once. The info-panel reads `elapsed_seconds` for the Ultra
-/// countdown / Sprint timer; high-scores read it for the Sprint time result.
-#[derive(Resource, Debug, Clone, Copy, Default, PartialEq, Reflect)]
-#[reflect(Resource)]
-pub struct VariantProgress {
-    pub elapsed_seconds: f32,
-    pub ended: bool,
-}
-
-impl VariantProgress {
-    /// Whether the variant-level end condition has been met for `snapshot` at the
-    /// current elapsed time. Pure so it can be unit-tested without a running app.
-    pub fn end_condition_met(
-        def: &VariantDef,
-        snapshot: &EngineSnapshot,
-        elapsed_seconds: f32,
-    ) -> bool {
-        match def.end_condition {
-            EndCondition::ReachLevel(level) => snapshot.level >= level,
-            EndCondition::ClearLines(lines) => snapshot.lines >= lines,
-            EndCondition::TimeLimit(limit) => elapsed_seconds >= limit,
-        }
-    }
-}
-
-/// Reset [`VariantProgress`] when a game starts. Registered on `OnEnter(Playing)`.
-pub fn reset_variant_progress(mut progress: ResMut<VariantProgress>) {
-    *progress = VariantProgress::default();
-}
-
-/// Advance the run clock and transition to [`GameState::GameOver`] when the
-/// active variant's end condition is met. Runs while `Playing`. Engine-driven
-/// game-over (block/lock-out) is handled by the level plugin; this only adds the
-/// variant goal/time/limit endings.
-pub fn check_variant_end_conditions(
-    time: Res<Time>,
-    active: Res<ActiveVariant>,
-    snapshot: Res<LatestSnapshot>,
-    mut progress: ResMut<VariantProgress>,
-    mut next_state: ResMut<NextState<GameState>>,
-) {
-    if progress.ended {
-        return;
-    }
-    progress.elapsed_seconds += time.delta_secs();
-
-    let def = active.0.def();
-    if VariantProgress::end_condition_met(&def, &snapshot.0, progress.elapsed_seconds) {
-        progress.ended = true;
-        info!(
-            "variant end condition met for {}: transitioning to game over",
-            def.display_name
-        );
-        next_state.set(GameState::GameOver);
+/// Whether the variant-level end condition has been met for `snapshot` at the
+/// current elapsed time. Pure so it can be unit-tested without a running app.
+pub fn end_condition_met(
+    def: &VariantDef,
+    snapshot: &EngineSnapshot,
+    elapsed_seconds: f32,
+) -> bool {
+    match def.end_condition {
+        EndCondition::ReachLevel(level) => snapshot.level >= level,
+        EndCondition::ClearLines(lines) => snapshot.lines >= lines,
+        EndCondition::TimeLimit(limit) => elapsed_seconds >= limit,
     }
 }
 
@@ -219,12 +172,8 @@ mod tests {
     #[test]
     fn marathon_ends_at_final_level() {
         let def = Variant::Marathon.def();
-        assert!(!VariantProgress::end_condition_met(
-            &def,
-            &snapshot_with(14, 0),
-            9_999.0
-        ));
-        assert!(VariantProgress::end_condition_met(
+        assert!(!end_condition_met(&def, &snapshot_with(14, 0), 9_999.0));
+        assert!(end_condition_met(
             &def,
             &snapshot_with(MARATHON_END_LEVEL, 0),
             0.0
@@ -236,28 +185,16 @@ mod tests {
         let def = Variant::Sprint.def();
         assert_eq!(def.line_target, Some(DEFAULT_SPRINT_LINES));
         assert_eq!(def.score_kind, ScoreKind::Time);
-        assert!(!VariantProgress::end_condition_met(
-            &def,
-            &snapshot_with(1, 39),
-            0.0
-        ));
-        assert!(VariantProgress::end_condition_met(
-            &def,
-            &snapshot_with(1, 40),
-            0.0
-        ));
+        assert!(!end_condition_met(&def, &snapshot_with(1, 39), 0.0));
+        assert!(end_condition_met(&def, &snapshot_with(1, 40), 0.0));
     }
 
     #[test]
     fn ultra_ends_at_time_limit() {
         let def = Variant::Ultra.def();
         assert_eq!(def.score_kind, ScoreKind::Score);
-        assert!(!VariantProgress::end_condition_met(
-            &def,
-            &snapshot_with(1, 0),
-            119.9
-        ));
-        assert!(VariantProgress::end_condition_met(
+        assert!(!end_condition_met(&def, &snapshot_with(1, 0), 119.9));
+        assert!(end_condition_met(
             &def,
             &snapshot_with(1, 0),
             DEFAULT_ULTRA_SECONDS

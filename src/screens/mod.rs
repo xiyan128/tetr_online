@@ -15,10 +15,9 @@ mod help;
 mod high_scores;
 mod main_menu;
 mod mode_select;
-mod model_select;
 mod options;
+mod session_setup;
 mod title;
-mod versus_setup;
 
 // Screen-root markers, re-exported so the corresponding feature plugins in
 // `crate::features` can attach their content under the right entity.
@@ -41,8 +40,7 @@ impl Plugin for ScreensPlugin {
                 title::TitleScreenPlugin,
                 main_menu::MainMenuPlugin,
                 mode_select::ModeSelectPlugin,
-                model_select::ModelSelectPlugin,
-                versus_setup::VersusSetupPlugin,
+                session_setup::VersusSetupPlugin,
                 options::OptionsScreenPlugin,
                 help::HelpScreenPlugin,
                 high_scores::HighScoresScreenPlugin,

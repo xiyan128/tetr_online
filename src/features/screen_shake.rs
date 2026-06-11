@@ -19,12 +19,8 @@
 //! every render backend — it never leaves the CPU.
 
 use bevy::prelude::*;
-use bevy::transform::TransformSystems;
 
-use crate::engine::{EngineEvent, EngineScoreAction, TSpinKind};
-use crate::level::common::{camera_center, GameplayCamera, LevelConfig, LevelSystems};
-use crate::level::FrameEvents;
-use crate::GameState;
+use crate::engine::{EngineScoreAction, TSpinKind};
 
 /// How fast trauma bleeds off, in trauma-units per second. Tuned so a full
 /// game-over jolt settles in well under a second and a single-line tap is gone in
@@ -93,62 +89,11 @@ pub struct ScreenShakePlugin;
 
 impl Plugin for ScreenShakePlugin {
     fn build(&self, app: &mut App) {
+        // The resource and its tuning live here; the DRIVER is the session's
+        // feel module (seat events in, camera pose out) — one driver, so the
+        // camera can never be fought over.
         app.init_resource::<ScreenShake>()
-            .register_type::<ScreenShake>()
-            // A fresh game always starts calm, even if the last one ended mid-shake
-            // (the resource persists across sessions).
-            .add_systems(OnEnter(GameState::Playing), reset_shake)
-            // Read this frame's engine events in the Reconcile set — gated on
-            // `PauseState::Running`, after the engine has stepped — exactly like
-            // the other event-driven effects. When the toggle is off we stop
-            // feeding trauma; `apply_shake` keeps running and bleeds the camera
-            // back to rest.
-            .add_systems(
-                Update,
-                accumulate_trauma
-                    .in_set(LevelSystems::Reconcile)
-                    .run_if(crate::vfx::shake_enabled),
-            )
-            // Move the camera in PostUpdate, before transform propagation feeds the
-            // offset to the renderer. Runs whenever a game is live (not gated on
-            // pause) so any residual jolt always settles back to center.
-            .add_systems(
-                PostUpdate,
-                apply_shake
-                    .before(TransformSystems::Propagate)
-                    .run_if(in_state(GameState::Playing)),
-            );
-    }
-}
-
-/// Zero the trauma so each new game starts from a still camera.
-fn reset_shake(mut shake: ResMut<ScreenShake>) {
-    shake.reset();
-}
-
-/// Bump trauma from this frame's engine events. Severity scales with how
-/// impactful the moment is: a Tetris or T-spin jolts hard, a single barely stirs,
-/// a hard drop that actually travels adds a small kick.
-///
-/// Game over is deliberately *not* shaken here: the gameplay camera is despawned on
-/// the same `Playing -> GameOver` transition, so a jolt would render for at most one
-/// (invisible) frame — game-over juice belongs to the game-over screen.
-fn accumulate_trauma(frame_events: Res<FrameEvents>, mut shake: ResMut<ScreenShake>) {
-    for event in &frame_events.0 {
-        match event {
-            EngineEvent::ScoreAwarded {
-                action,
-                back_to_back_bonus,
-                ..
-            } => shake.add(trauma_for_clear(*action, *back_to_back_bonus)),
-            // A small kick that grows with the drop distance but stays modest — hard
-            // drops are constant, so a big shake here would fatigue. A zero-distance
-            // drop (tapping hard-drop on an already-grounded piece) gets no kick.
-            EngineEvent::HardDropped { cells_dropped, .. } if *cells_dropped > 0 => {
-                shake.add((0.06 + 0.008 * *cells_dropped as f32).min(0.18));
-            }
-            _ => {}
-        }
+            .register_type::<ScreenShake>();
     }
 }
 
@@ -184,31 +129,6 @@ pub(crate) fn trauma_for_clear(action: EngineScoreAction, back_to_back: bool) ->
         (base + 0.10).min(1.0)
     } else {
         base
-    }
-}
-
-/// Offset the gameplay camera by `trauma²`-scaled smooth noise, then bleed off
-/// trauma. Always rewrites the camera from its rest center, so zero trauma means a
-/// perfectly centered, level camera.
-fn apply_shake(
-    time: Res<Time>,
-    config: Res<LevelConfig>,
-    mut shake: ResMut<ScreenShake>,
-    mut cameras: Query<&mut Transform, With<GameplayCamera>>,
-) {
-    // Compute the pose once, then write it to the gameplay camera(s). Iterating
-    // (rather than `single_mut`) keeps trauma bleeding off even on the frames the
-    // camera is briefly absent, and never leaves a stray camera stuck off-center.
-    // (Decay happens inside `pose_and_decay`, after the pose, so a fresh jolt
-    // shows at full strength this frame.)
-    let (translation, rotation) = shake.pose_and_decay(
-        time.elapsed_secs(),
-        time.delta_secs(),
-        camera_center(&config),
-    );
-    for mut transform in &mut cameras {
-        transform.translation = translation;
-        transform.rotation = rotation;
     }
 }
 

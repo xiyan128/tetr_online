@@ -9,8 +9,8 @@
 //! pending queue, and ends the match when a seat dies. The engine already owns
 //! every garbage *rule* (`docs/adr-versus-rules.md`); this module only routes.
 //!
-//! The match lives in [`GameState::Versus`] with its own
-//! [`VersusPhase`] lifecycle (countdown → running ⇄ paused → over). The
+//! The match lives in [`GameState::Session`] with its own
+//! [`SessionPhase`] lifecycle (countdown → running ⇄ paused → over). The
 //! single-player `level` module is untouched: nothing here reads or writes its
 //! resources, and its systems never run in `Versus`.
 
@@ -26,15 +26,15 @@ use crate::GameState;
 
 mod feel;
 mod overlay;
-mod render;
+pub(crate) mod render;
 
-/// Lifecycle of a live match, as a sub-state of [`GameState::Versus`] — the
+/// Lifecycle of a live match, as a sub-state of [`GameState::Session`] — the
 /// session (seat entities, boards, camera) is scoped to `Versus` itself, so
 /// phase changes never despawn it. `Over` keeps the final boards on screen
 /// under the result banner.
 #[derive(SubStates, Clone, PartialEq, Eq, Hash, Debug, Default)]
-#[source(GameState = GameState::Versus)]
-pub enum VersusPhase {
+#[source(GameState = GameState::Session)]
+pub enum SessionPhase {
     /// 3-2-1-GO. Engines hold (no first spawn) until the countdown ends, so
     /// both first pieces appear simultaneously.
     #[default]
@@ -60,20 +60,44 @@ pub enum Participant {
     },
 }
 
-/// Match configuration, written by the setup screen and read once when the
-/// match spawns. `seed` is a test/replay override; a live match draws fresh
-/// entropy per game (a rematch is a new deal, not a replay).
+/// What a session is FOR — the per-mode rules the seat machinery reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionMode {
+    /// A solo variant run on one seat (a human's game, or Watch-AI's bot):
+    /// variant rules (leveling gravity, goals, end conditions), the score HUD,
+    /// high-score capture for human runs.
+    Solo { variant: crate::variant::Variant },
+    /// The versus match on two seats: flat gravity, attack exchange, meters.
+    Versus,
+}
+
+impl SessionMode {
+    /// Seats this mode plays with (the prefix of [`SessionConfig::seats`]).
+    pub fn seat_count(self) -> usize {
+        match self {
+            SessionMode::Solo { .. } => 1,
+            SessionMode::Versus => 2,
+        }
+    }
+}
+
+/// Session configuration, written by the menus and read once when the session
+/// spawns. `seats[..mode.seat_count()]` are the live seats. `seed` is a
+/// test/replay override; a live session draws fresh entropy per game (a
+/// rematch/retry is a new deal, not a replay).
 #[derive(Resource, Clone, Copy, Debug)]
-pub struct VersusConfig {
+pub struct SessionConfig {
     pub seats: [Participant; 2],
+    pub mode: SessionMode,
     pub seed: Option<u64>,
 }
 
-impl Default for VersusConfig {
+impl Default for SessionConfig {
     fn default() -> Self {
         Self {
             // You vs the Tier-2 beam — a mid-strength opener (registry index 1).
             seats: [Participant::Human, Participant::Bot { model: 1 }],
+            mode: SessionMode::Versus,
             seed: None,
         }
     }
@@ -124,70 +148,93 @@ pub struct HumanSeat {
 /// the same reason as the sandbox's `AiPlayer`: `AiController` is
 /// `Send`-but-not-`Sync`, and the fixed-update driver runs on the main thread.
 #[derive(Default)]
-pub struct VersusBots(pub Vec<(usize, crate::ai::AiController)>);
+pub struct SessionBots(pub Vec<(usize, crate::ai::AiController)>);
 
-/// How the match ended. Inserted exactly once, when a seat dies.
+/// How the session ended. Inserted exactly once.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MatchOutcome {
-    /// The winning seat, or `None` for a simultaneous draw.
-    pub winner: Option<usize>,
+pub enum SessionOutcome {
+    /// Versus: the winning seat, or `None` for a simultaneous draw.
+    Versus { winner: Option<usize> },
+    /// Solo: the run ended — `completed` iff the variant's goal was met
+    /// (vs a top-out). The banner reads the final snapshot for the numbers.
+    Solo { completed: bool },
 }
 
-/// Wall-clock match length (advances only while `Running`); the result banner
-/// reports it.
+/// Wall-clock session length (advances only while `Running`); the result
+/// banner reports it, and solo variants read it for time-limit/ranking rules.
 #[derive(Resource, Default)]
 pub struct MatchClock(pub f32);
 
-/// The engine rules of a versus seat: flat level-1 gravity (no goal system —
-/// pressure comes from the opponent, not the clock), the player's preview and
-/// lock-down preferences applied symmetrically to both seats, and the standard
-/// garbage cap.
-fn versus_engine_config(settings: &crate::settings::GameSettings) -> EngineConfig {
-    EngineConfig {
-        board_width: 10,
-        visible_height: 20,
-        preview_count: settings.next_count,
-        lock_down_mode: settings.lock_down_mode,
-        lock_down_seconds: LOCK_DOWN_SECONDS,
-        starting_level: MIN_LEVEL,
-        goal_system: GoalSystem::None,
-        garbage_cap: EngineConfig::default().garbage_cap,
+/// The rank a finished solo run earned on the leaderboard (None = did not
+/// place, or a bot/unqualified run). Written when the session ends; the
+/// result banner reads it.
+#[derive(Resource, Clone, Copy)]
+pub struct SoloRecorded(pub Option<usize>);
+
+/// The engine rules for this session's seats, by mode. Versus: flat level-1
+/// gravity (no goal system — pressure comes from the opponent, not the clock)
+/// with the player's preview/lock-down preferences applied symmetrically.
+/// Solo: the variant's own rules through the same config seam single-player
+/// always used (leveling gravity, goal systems, variant overrides).
+fn session_engine_config(
+    mode: SessionMode,
+    level: &LevelConfig,
+    settings: &crate::settings::GameSettings,
+) -> EngineConfig {
+    match mode {
+        SessionMode::Solo { variant } => {
+            crate::level::engine_bridge::engine_config_for_game(level, settings, variant)
+        }
+        SessionMode::Versus => EngineConfig {
+            board_width: 10,
+            visible_height: 20,
+            preview_count: settings.next_count,
+            lock_down_mode: settings.lock_down_mode,
+            lock_down_seconds: LOCK_DOWN_SECONDS,
+            starting_level: MIN_LEVEL,
+            goal_system: GoalSystem::None,
+            garbage_cap: EngineConfig::default().garbage_cap,
+        },
     }
 }
 
-pub struct VersusPlugin;
+pub struct SessionPlugin;
 
-impl Plugin for VersusPlugin {
+impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_sub_state::<VersusPhase>()
-            .init_resource::<VersusConfig>()
+        app.add_sub_state::<SessionPhase>()
+            .init_resource::<SessionConfig>()
             .init_resource::<MatchClock>()
             // Self-sufficiency for headless tests (idempotent: `GamePlugin`
             // stays the canonical owner of the shared contracts).
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::ai::ModelRegistry>()
             .init_resource::<LevelConfig>()
-            .add_systems(OnEnter(GameState::Versus), versus_setup)
-            .add_systems(OnExit(GameState::Versus), versus_teardown)
+            .init_resource::<crate::high_scores::HighScores>()
+            .add_systems(OnEnter(GameState::Session), session_setup)
+            .add_systems(OnExit(GameState::Session), versus_teardown)
             .add_systems(
                 PreUpdate,
                 (clear_seat_events, latch_human_input)
                     .chain()
                     .after(bevy::input::InputSystems)
-                    .run_if(in_state(VersusPhase::Running)),
+                    .run_if(in_state(SessionPhase::Running)),
             )
             .add_systems(
                 FixedUpdate,
-                versus_step.run_if(in_state(VersusPhase::Running)),
+                versus_step.run_if(in_state(SessionPhase::Running)),
             )
             .add_systems(
                 Update,
-                advance_match_clock.run_if(in_state(VersusPhase::Running)),
+                (advance_match_clock, check_solo_end)
+                    .chain()
+                    .run_if(in_state(SessionPhase::Running)),
             )
+            .add_systems(OnEnter(SessionPhase::Over), record_solo_run)
             // A press latched in the same render frame as a pause (a frame
             // that ran zero slices) must not fire on the first slice after a
             // resume, minutes later.
-            .add_systems(OnEnter(VersusPhase::Running), reset_human_latch)
+            .add_systems(OnEnter(SessionPhase::Running), reset_human_latch)
             .add_plugins(render::VersusRenderPlugin)
             .add_plugins(overlay::VersusOverlayPlugin)
             .add_plugins(feel::VersusFeelPlugin);
@@ -198,10 +245,13 @@ impl Plugin for VersusPlugin {
 /// the guideline fairness convention; the hole streams stay decorrelated by
 /// the engine's own salt) and one controller per bot seat. Exclusive because
 /// bot controllers go into a non-send resource.
-fn versus_setup(world: &mut World) {
-    let config = *world.resource::<VersusConfig>();
+fn session_setup(world: &mut World) {
+    let config = *world.resource::<SessionConfig>();
     let settings = world.resource::<crate::settings::GameSettings>().clone();
-    let engine_config = versus_engine_config(&settings);
+    let engine_config = {
+        let level = world.resource::<LevelConfig>();
+        session_engine_config(config.mode, level, &settings)
+    };
 
     // Fresh deal per match: app-clock entropy unless a test/replay pinned it.
     // (Headless tests freeze the clock, so they pin the seed explicitly.)
@@ -215,10 +265,15 @@ fn versus_setup(world: &mut World) {
     });
     info!("versus match: seed {seed}, seats {:?}", config.seats);
 
-    let mut bots = VersusBots::default();
+    let mut bots = SessionBots::default();
     let das = das_config_from_level(world.resource::<LevelConfig>());
 
-    for (index, participant) in config.seats.into_iter().enumerate() {
+    for (index, participant) in config
+        .seats
+        .into_iter()
+        .take(config.mode.seat_count())
+        .enumerate()
+    {
         // Resolve the participant's driver before spawning (bot construction
         // reads the registry resource, which can't overlap the spawn borrow).
         let mut human = None;
@@ -250,7 +305,7 @@ fn versus_setup(world: &mut World) {
             SeatSnapshot(snapshot),
             SeatEvents::default(),
             SeatStats::default(),
-            DespawnOnExit(GameState::Versus),
+            DespawnOnExit(GameState::Session),
         ));
         if let Some(human) = human {
             seat.insert(human);
@@ -259,14 +314,15 @@ fn versus_setup(world: &mut World) {
 
     world.insert_non_send_resource(bots);
     world.insert_resource(MatchClock::default());
-    world.remove_resource::<MatchOutcome>();
+    world.remove_resource::<SessionOutcome>();
+    world.remove_resource::<SoloRecorded>();
 }
 
 /// Drop the bots and the outcome when the session ends. Seat entities are
-/// `DespawnOnExit(GameState::Versus)`-scoped, so Bevy tears those down.
+/// `DespawnOnExit(GameState::Session)`-scoped, so Bevy tears those down.
 fn versus_teardown(world: &mut World) {
-    world.remove_non_send_resource::<VersusBots>();
-    world.remove_resource::<MatchOutcome>();
+    world.remove_non_send_resource::<SessionBots>();
+    world.remove_resource::<SessionOutcome>();
 }
 
 /// Clear every seat's per-frame event buffer before this frame's fixed slices
@@ -323,10 +379,11 @@ type SeatStepQuery<'w, 's> = Query<
 
 fn versus_step(
     mut seats: SeatStepQuery,
-    bots: Option<NonSendMut<VersusBots>>,
-    outcome: Option<Res<MatchOutcome>>,
+    bots: Option<NonSendMut<SessionBots>>,
+    outcome: Option<Res<SessionOutcome>>,
+    config: Res<SessionConfig>,
     mut commands: Commands,
-    mut next: ResMut<NextState<VersusPhase>>,
+    mut next: ResMut<NextState<SessionPhase>>,
 ) {
     // `Option`: every legal path into `Running` passes through the `OnEnter`
     // that seats the bots, but a dev-inspector state poke does not — be inert
@@ -411,15 +468,76 @@ fn versus_step(
         }
     }
     if dead[0] || dead[1] {
-        let winner = match (dead[0], dead[1]) {
-            (true, true) => None,
-            (true, false) => Some(1),
-            _ => Some(0),
+        let outcome = match config.mode {
+            SessionMode::Versus => {
+                let winner = match (dead[0], dead[1]) {
+                    (true, true) => None,
+                    (true, false) => Some(1),
+                    _ => Some(0),
+                };
+                info!("versus over: winner {winner:?}");
+                SessionOutcome::Versus { winner }
+            }
+            // Solo: a death is an incomplete run (the variant goal ends runs
+            // via `check_solo_end`, not here).
+            SessionMode::Solo { .. } => SessionOutcome::Solo { completed: false },
         };
-        info!("versus over: winner {winner:?}");
-        commands.insert_resource(MatchOutcome { winner });
-        next.set(VersusPhase::Over);
+        commands.insert_resource(outcome);
+        next.set(SessionPhase::Over);
     }
+}
+
+/// Solo only: end the run when the active variant's goal/time condition is
+/// met (Marathon level cap, Sprint line target, Ultra time limit). Death is
+/// the step's job; this is the *successful* ending.
+fn check_solo_end(
+    config: Res<SessionConfig>,
+    clock: Res<MatchClock>,
+    seats: Query<&SeatSnapshot, With<Seat>>,
+    outcome: Option<Res<SessionOutcome>>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<SessionPhase>>,
+) {
+    let SessionMode::Solo { variant } = config.mode else {
+        return;
+    };
+    if outcome.is_some() {
+        return;
+    }
+    let Some(snapshot) = seats.iter().next() else {
+        return;
+    };
+    let def = variant.def();
+    if crate::variant::end_condition_met(&def, &snapshot.0, clock.0) {
+        info!("solo run complete ({})", def.display_name);
+        commands.insert_resource(SessionOutcome::Solo { completed: true });
+        next.set(SessionPhase::Over);
+    }
+}
+
+/// Solo only: when the run ends, file a HUMAN run for the leaderboard (bot
+/// seats — Watch-AI — never rank against the player) and stash the rank for
+/// the result banner.
+fn record_solo_run(
+    config: Res<SessionConfig>,
+    clock: Res<MatchClock>,
+    seats: Query<(&SeatSnapshot, Option<&HumanSeat>), With<Seat>>,
+    storage: Option<Res<crate::storage::StorageResource>>,
+    mut scores: ResMut<crate::high_scores::HighScores>,
+    mut commands: Commands,
+) {
+    let SessionMode::Solo { variant } = config.mode else {
+        return;
+    };
+    let Some((snapshot, human)) = seats.iter().next() else {
+        return;
+    };
+    let rank = if human.is_some() {
+        crate::features::high_scores::record(&snapshot.0, clock.0, variant, &mut scores, &storage)
+    } else {
+        None
+    };
+    commands.insert_resource(SoloRecorded(rank));
 }
 
 /// Total net attack in a slice's events.
@@ -461,11 +579,11 @@ pub(crate) fn restart_match(world: &mut World) {
         world.entity_mut(entity).despawn();
     }
     versus_teardown(world);
-    versus_setup(world);
+    session_setup(world);
     // Render roots rebuild from the fresh seats on their next reconcile pass.
     world
-        .resource_mut::<NextState<VersusPhase>>()
-        .set(VersusPhase::Countdown);
+        .resource_mut::<NextState<SessionPhase>>()
+        .set(SessionPhase::Countdown);
 }
 
 #[cfg(test)]
@@ -495,18 +613,18 @@ mod tests {
     /// A headless versus app on a frozen clock: enter `Versus`, force the
     /// phase to `Running` (skipping the countdown), and advance only via
     /// explicit fixed slices.
-    fn headless_versus_app(config: VersusConfig) -> App {
+    fn headless_versus_app(config: SessionConfig) -> App {
         let mut app = bare_versus_app(config);
         app.world_mut()
-            .resource_mut::<NextState<VersusPhase>>()
-            .set(VersusPhase::Running);
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
         app.update(); // apply the phase
         app
     }
 
     /// The harness without the phase override: enters `Versus` and leaves the
     /// match on its natural opening phase (the countdown).
-    fn bare_versus_app(config: VersusConfig) -> App {
+    fn bare_versus_app(config: SessionConfig) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
@@ -517,10 +635,10 @@ mod tests {
             .insert_resource(bevy::input::mouse::AccumulatedMouseMotion::default())
             .insert_resource(test_assets())
             .insert_resource(config)
-            .add_plugins(VersusPlugin);
+            .add_plugins(SessionPlugin);
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
-            .set(GameState::Versus);
+            .set(GameState::Session);
         app.update(); // queue the transition
         app.update(); // apply Versus + run setup
         app
@@ -540,10 +658,309 @@ mod tests {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
     }
 
-    fn bot_match(seed: u64) -> VersusConfig {
-        VersusConfig {
+    /// The reviewer's race hypothesis, settled empirically: a NATURAL death
+    /// (not a manual phase poke) must end a solo run as completed=false, with
+    /// the goal checker unable to overwrite it in the same frame. Garbage
+    /// overflow kills the seat mid-schedule exactly like a real top-out.
+    #[test]
+    fn a_natural_solo_death_records_incomplete() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 1); // spawn
+                                 // Bury the seat: queue far more garbage than the board holds, then a
+                                 // clear-less lock rises it (the human seat plays neutral frames, so
+                                 // gravity locks the piece eventually).
+        {
+            let mut seats = app.world_mut().query::<&mut SeatEngine>();
+            let mut engine = seats.iter_mut(app.world_mut()).next().unwrap();
+            engine.0.queue_garbage(48);
+        }
+        // Hard-drop every other frame (press/release so each edge latches):
+        // every lock is clear-less, rising 8 queued lines, so the overflow
+        // death arrives within a handful of pieces.
+        for i in 0..240 {
+            {
+                let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+                if i % 2 == 0 {
+                    keys.press(KeyCode::Space);
+                } else {
+                    keys.release(KeyCode::Space);
+                }
+            }
+            tick_fixed(&mut app, 1);
+            if app.world().get_resource::<SessionOutcome>().is_some() {
+                break;
+            }
+        }
+        let outcome = *app
+            .world()
+            .get_resource::<SessionOutcome>()
+            .expect("48 queued lines must kill the solo seat");
+        assert_eq!(
+            outcome,
+            SessionOutcome::Solo { completed: false },
+            "a death is an incomplete run — and nothing may overwrite it"
+        );
+        // Drop the key AND its edges: this harness has no InputPlugin, so
+        // nothing clears just_pressed — a stale Space edge would Select the
+        // result banner's Retry row every frame. (Production clears edges in
+        // PreUpdate; en route this stale edge DID drive death → banner →
+        // retry end-to-end, which was a nice accidental flow check.)
+        {
+            let mut keys = app.world_mut().resource_mut::<ButtonInput<KeyCode>>();
+            keys.release(KeyCode::Space);
+            keys.clear();
+        }
+        // Run several more frames: the settled outcome must stay settled.
+        for _ in 0..5 {
+            app.update();
+        }
+        assert_eq!(
+            *app.world().resource::<SessionOutcome>(),
+            SessionOutcome::Solo { completed: false },
+            "the outcome must not be rewritten after the run ends"
+        );
+    }
+
+    /// The natural GOAL path: an Ultra time-limit expiry ends the run as
+    /// completed=true (check_solo_end's verdict), exercising the clock-based
+    /// ending with no death anywhere near.
+    #[test]
+    fn a_solo_goal_completion_records_complete() {
+        let mut app = headless_versus_app(SessionConfig {
+            seats: [Participant::Human, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Ultra,
+            },
+            seed: Some(7),
+        });
+        // Ultra's limit is minutes of sim time; instead of ticking it out,
+        // pre-load the clock just under the limit and tick across it.
+        let limit = match crate::variant::Variant::Ultra.def().end_condition {
+            crate::variant::EndCondition::TimeLimit(limit) => limit,
+            _ => unreachable!("Ultra is time-limited"),
+        };
+        app.world_mut().resource_mut::<MatchClock>().0 = limit - 0.01;
+        for _ in 0..30 {
+            tick_fixed(&mut app, 1);
+            if app.world().get_resource::<SessionOutcome>().is_some() {
+                break;
+            }
+        }
+        assert_eq!(
+            *app.world().resource::<SessionOutcome>(),
+            SessionOutcome::Solo { completed: true },
+            "a met time limit is a completed run"
+        );
+    }
+
+    /// Solo pause conceals the field (the anti-pause-think rule); resume
+    /// restores it. Versus pause is covered by the overlay's own tests.
+    #[test]
+    fn solo_pause_conceals_the_board() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 2);
+
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Paused);
+        app.update();
+        {
+            let mut roots = app.world_mut().query::<(&render::BoardRoot, &Visibility)>();
+            for (_, visibility) in roots.iter(app.world()) {
+                assert_eq!(
+                    *visibility,
+                    Visibility::Hidden,
+                    "a solo pause must conceal the field"
+                );
+            }
+        }
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
+        app.update();
+        let mut roots = app.world_mut().query::<(&render::BoardRoot, &Visibility)>();
+        for (_, visibility) in roots.iter(app.world()) {
+            assert_eq!(
+                *visibility,
+                Visibility::Inherited,
+                "resume must reveal the field"
+            );
+        }
+    }
+
+    fn solo_human(seed: u64) -> SessionConfig {
+        SessionConfig {
+            seats: [Participant::Human, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            seed: Some(seed),
+        }
+    }
+
+    /// THE schedule-determinism pin, re-homed from the deleted level driver:
+    /// N fixed slices through the real schedule must leave a keys-untouched
+    /// human seat's engine byte-identical to a directly-stepped reference
+    /// (neutral frames, same dt) — gravity and lock-down advance independent
+    /// of render framing.
+    #[test]
+    fn solo_schedule_matches_direct_engine_stepping() {
+        let slices = 10u32;
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, slices);
+
+        let level = LevelConfig::default();
+        let settings = crate::settings::GameSettings::default();
+        let config = session_engine_config(
+            SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            &level,
+            &settings,
+        );
+        let mut reference = Engine::new(config, 7);
+        for _ in 0..slices {
+            reference.step(crate::engine::InputFrame {
+                dt_seconds: SIM_DT_SECONDS,
+                ..Default::default()
+            });
+        }
+
+        let mut seats = app.world_mut().query::<&SeatSnapshot>();
+        let snapshot = seats.iter(app.world()).next().expect("one seat");
+        assert_eq!(
+            snapshot.0,
+            reference.snapshot(),
+            "schedule-driven solo play must match direct fixed stepping"
+        );
+    }
+
+    /// One press = one action even when several fixed slices run in a single
+    /// render frame — the edge-latch property, re-homed from the level driver.
+    #[test]
+    fn one_press_yields_one_action_across_slices() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 1); // spawn the first piece
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft); // the default Hold bind
+        tick_fixed(&mut app, 3); // three slices, one render frame each chunk
+
+        let mut seats = app.world_mut().query::<&SeatEngine>();
+        let engine = seats.iter(app.world()).next().expect("one seat");
+        assert!(
+            engine.0.snapshot().hold.is_some(),
+            "the held piece should occupy the hold slot"
+        );
+        // A second hold in the same lifetime is illegal; a duplicated edge
+        // would be invisible in `hold`. The latch discipline is pinned by the
+        // versus-side reset tests; here the observable is one successful hold.
+    }
+
+    /// Pause must freeze WITHOUT despawning: the seat entities and the
+    /// engine's exact state survive a pause/resume round-trip (the property
+    /// the old computed-states pause bug violated).
+    #[test]
+    fn pause_preserves_the_session() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 30);
+
+        let before: Vec<_> = {
+            let mut q = app.world_mut().query::<(&Seat, &SeatSnapshot)>();
+            q.iter(app.world())
+                .map(|(s, snap)| (s.index, snap.0.clone()))
+                .collect()
+        };
+
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Paused);
+        app.update();
+        tick_fixed(&mut app, 10); // time passes; nothing may step
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
+        app.update();
+
+        let after: Vec<_> = {
+            let mut q = app.world_mut().query::<(&Seat, &SeatSnapshot)>();
+            q.iter(app.world())
+                .map(|(s, snap)| (s.index, snap.0.clone()))
+                .collect()
+        };
+        assert_eq!(before, after, "pause must freeze, not rebuild or advance");
+    }
+
+    /// Watch-AI re-homed: a one-seat BOT session plays the game (the deleted
+    /// sandbox plugin's contract).
+    #[test]
+    fn a_solo_bot_seat_drives_the_engine() {
+        let mut app = headless_versus_app(SessionConfig {
+            seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            seed: Some(7),
+        });
+        let mut locked = false;
+        for _ in 0..240 {
+            tick_fixed(&mut app, 1);
+            let mut seats = app.world_mut().query::<&SeatSnapshot>();
+            if !seats
+                .iter(app.world())
+                .next()
+                .unwrap()
+                .0
+                .board_cells
+                .is_empty()
+            {
+                locked = true;
+                break;
+            }
+        }
+        assert!(locked, "the bot must lock a piece with no keyboard input");
+    }
+
+    /// The leaderboard rules, re-homed: a finished HUMAN solo run files (and
+    /// stashes its rank); a BOT solo run never does.
+    #[test]
+    fn solo_recording_files_humans_and_skips_bots() {
+        for (config, expect_recorded) in [
+            (solo_human(7), true),
+            (
+                SessionConfig {
+                    seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+                    mode: SessionMode::Solo {
+                        variant: crate::variant::Variant::Marathon,
+                    },
+                    seed: Some(7),
+                },
+                false,
+            ),
+        ] {
+            let mut app = headless_versus_app(config);
+            tick_fixed(&mut app, 5);
+            app.world_mut()
+                .resource_mut::<NextState<SessionPhase>>()
+                .set(SessionPhase::Over);
+            app.update();
+
+            let scores = app.world().resource::<crate::high_scores::HighScores>();
+            let table = scores.table(crate::variant::Variant::Marathon);
+            assert_eq!(
+                !table.is_empty(),
+                expect_recorded,
+                "human files, bot does not (expect_recorded={expect_recorded})"
+            );
+        }
+    }
+
+    fn bot_match(seed: u64) -> SessionConfig {
+        SessionConfig {
             // Greedy DT-20 on both seats: fast and deterministic.
             seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+            mode: SessionMode::Versus,
             seed: Some(seed),
         }
     }
@@ -566,8 +983,8 @@ mod tests {
         // Running on its own once the beats elapse.
         let mut app = bare_versus_app(bot_match(7));
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown,
             "a match opens on the countdown"
         );
 
@@ -579,7 +996,7 @@ mod tests {
         for _ in 0..16 {
             app.update();
             let snaps = snapshots(&mut app);
-            if app.world().resource::<State<VersusPhase>>().get() == &VersusPhase::Countdown {
+            if app.world().resource::<State<SessionPhase>>().get() == &SessionPhase::Countdown {
                 assert!(
                     snaps[0].1.active.is_none(),
                     "engines hold during the countdown (no first spawn)"
@@ -587,8 +1004,8 @@ mod tests {
             }
         }
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Running,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Running,
             "the countdown hands off to Running by itself"
         );
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
@@ -614,8 +1031,8 @@ mod tests {
             .clear_just_pressed(KeyCode::Escape);
         app.update(); // the transition applies
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Paused
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Paused
         );
 
         let frozen = snapshots(&mut app);
@@ -639,8 +1056,8 @@ mod tests {
             .clear_just_pressed(KeyCode::Escape);
         app.update();
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Running,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Running,
             "Esc on the pause menu resumes the match"
         );
     }
@@ -720,7 +1137,7 @@ mod tests {
                 routed = true;
                 break;
             }
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
@@ -754,21 +1171,25 @@ mod tests {
         }
         for _ in 0..600 {
             tick_fixed(&mut app, 1);
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
         let outcome = *app
             .world()
-            .get_resource::<MatchOutcome>()
+            .get_resource::<SessionOutcome>()
             .expect("48 queued lines must kill seat 1 well within 10 seconds");
-        assert_eq!(outcome.winner, Some(0), "the survivor takes the match");
+        assert_eq!(
+            outcome,
+            SessionOutcome::Versus { winner: Some(0) },
+            "the survivor takes the match"
+        );
         // The phase transition queued by `detect_match_end` applies on the
         // next state-transition pass — run one more frame before asserting.
         app.update();
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Over,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Over,
             "the match parks in Over (boards stay on screen)"
         );
     }
@@ -817,8 +1238,8 @@ mod tests {
             "fresh engines: empty boards"
         );
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown,
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown,
             "a rematch re-runs the countdown"
         );
     }
@@ -895,16 +1316,16 @@ mod tests {
         }
         for _ in 0..60 {
             tick_fixed(&mut app, 10); // multi-slice frames, like a hitch
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
         let outcome = *app
             .world()
-            .get_resource::<MatchOutcome>()
+            .get_resource::<SessionOutcome>()
             .expect("both seats buried: someone must die");
         assert!(
-            outcome.winner.is_some(),
+            matches!(outcome, SessionOutcome::Versus { winner: Some(_) }),
             "deaths slices apart in one frame must crown the survivor, not draw"
         );
     }
@@ -929,15 +1350,15 @@ mod tests {
             "a rematch deals a fresh match"
         );
         assert_eq!(
-            app.world().resource::<State<VersusPhase>>().get(),
-            &VersusPhase::Countdown
+            app.world().resource::<State<SessionPhase>>().get(),
+            &SessionPhase::Countdown
         );
     }
 
     #[test]
     fn leaving_versus_tears_down_seats_and_bots() {
         let mut app = headless_versus_app(bot_match(7));
-        assert!(app.world().get_non_send_resource::<VersusBots>().is_some());
+        assert!(app.world().get_non_send_resource::<SessionBots>().is_some());
 
         app.world_mut()
             .resource_mut::<NextState<GameState>>()
@@ -946,7 +1367,7 @@ mod tests {
         app.update();
 
         assert!(
-            app.world().get_non_send_resource::<VersusBots>().is_none(),
+            app.world().get_non_send_resource::<SessionBots>().is_none(),
             "bots are dropped with the session"
         );
         let seats = app.world_mut().query::<&Seat>().iter(app.world()).count();

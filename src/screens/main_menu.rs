@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 
-use crate::ai::AiSandbox;
 use crate::assets::GameAssets;
 use crate::ui::focus::{
     clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
@@ -79,17 +78,19 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 /// menu is the root). Also paints the focused row's "pressed" color briefly via
 /// the focus helper's normal restyle on the next frame.
 ///
-/// Both **Play** and **Watch AI** lead to mode select (pick a variant) and then a
-/// gameplay session; they differ only in the [`AiSandbox`] flag, which decides
-/// whether the keyboard or the bot drives the engine. Arming it *here* (and
-/// clearing it on the Play path) means the flag is always fresh for the next
-/// session — a previous "Watch AI" run can never leave a keyboard game bot-driven.
+/// **Play** seats you and goes to mode select; **Watch AI** picks its bot in
+/// the seat picker first, then the mode — both land in a one-seat Solo
+/// session, differing only in who occupies the seat. **Versus** configures
+/// two seats. The seats are written HERE (and by the pickers), so a previous
+/// run's configuration can never leak into the next.
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
-    mut sandbox: ResMut<AiSandbox>,
+    mut session: ResMut<crate::session::SessionConfig>,
+    mut setup_kind: ResMut<crate::screens::session_setup::SetupKind>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     // Select via keyboard (Enter/Space on the focused row) or a mouse click on a
@@ -110,15 +111,17 @@ fn activate(
         }
         match action {
             MainMenuAction::Play => {
-                *sandbox = AiSandbox(false);
+                session.seats[0] = crate::session::Participant::Human;
                 next.set(GameState::ModeSelect);
             }
-            // Versus has its own setup screen and never reads the sandbox flag.
-            MainMenuAction::Versus => next.set(GameState::VersusSetup),
+            MainMenuAction::Versus => {
+                *setup_kind = crate::screens::session_setup::SetupKind::Versus;
+                next.set(GameState::SessionSetup);
+            }
             MainMenuAction::WatchAi => {
-                *sandbox = AiSandbox(true);
-                // Watch-AI picks a model first, then the mode.
-                next.set(GameState::ModelSelect);
+                *setup_kind = crate::screens::session_setup::SetupKind::WatchAi;
+                // Watch-AI picks its bot in the seat picker, then the mode.
+                next.set(GameState::SessionSetup);
             }
             MainMenuAction::Options => next.set(GameState::Options),
             MainMenuAction::Help => next.set(GameState::Help),

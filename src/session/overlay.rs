@@ -1,6 +1,6 @@
 //! Versus overlays: the countdown, the pause screen, and the result banner.
 //!
-//! All three are screen-space UI scoped to their [`VersusPhase`], drawn over
+//! All three are screen-space UI scoped to their [`SessionPhase`], drawn over
 //! the live board scene (the result banner deliberately leaves the final
 //! boards visible under a dim scrim — reading the losing stack is part of the
 //! result). Navigation reuses the shared `FocusList` idiom so these screens
@@ -15,7 +15,9 @@ use crate::ui::focus::{
 use crate::ui::widgets::{label_text, menu_button, theme, title_text};
 use crate::GameState;
 
-use super::{MatchClock, MatchOutcome, Participant, Seat, SeatStats, VersusConfig, VersusPhase};
+use super::{
+    MatchClock, Participant, Seat, SeatStats, SessionConfig, SessionOutcome, SessionPhase,
+};
 
 /// Countdown pacing: three number beats, then a shorter "GO!".
 const NUMBER_BEAT_SECONDS: f32 = 0.7;
@@ -27,35 +29,39 @@ impl Plugin for VersusOverlayPlugin {
     fn build(&self, app: &mut App) {
         app
             // Countdown
-            .add_systems(OnEnter(VersusPhase::Countdown), spawn_countdown)
+            .add_systems(OnEnter(SessionPhase::Countdown), spawn_countdown)
             .add_systems(
                 Update,
-                tick_countdown.run_if(in_state(VersusPhase::Countdown)),
+                tick_countdown.run_if(in_state(SessionPhase::Countdown)),
             )
             // Pause (and the countdown's escape hatch: Esc before GO returns
             // to the setup screen — you can always leave a match).
             .add_systems(
                 Update,
-                pause_on_keybind.run_if(in_state(VersusPhase::Running)),
+                pause_on_keybind.run_if(in_state(SessionPhase::Running)),
             )
             .add_systems(
                 Update,
-                countdown_escape.run_if(in_state(VersusPhase::Countdown)),
+                countdown_escape.run_if(in_state(SessionPhase::Countdown)),
             )
-            .add_systems(OnEnter(VersusPhase::Paused), spawn_pause_overlay)
+            .add_systems(
+                OnEnter(SessionPhase::Paused),
+                (spawn_pause_overlay, conceal_boards_on_solo_pause),
+            )
+            .add_systems(OnExit(SessionPhase::Paused), reveal_boards)
             .add_systems(
                 Update,
                 (focus_navigation::<PauseRoot>, pause_menu_activate)
                     .chain()
-                    .run_if(in_state(VersusPhase::Paused)),
+                    .run_if(in_state(SessionPhase::Paused)),
             )
             // Result
-            .add_systems(OnEnter(VersusPhase::Over), spawn_result_banner)
+            .add_systems(OnEnter(SessionPhase::Over), spawn_result_banner)
             .add_systems(
                 Update,
                 (focus_navigation::<ResultRoot>, result_menu_activate)
                     .chain()
-                    .run_if(in_state(VersusPhase::Over)),
+                    .run_if(in_state(SessionPhase::Over)),
             )
             .add_systems(
                 Update,
@@ -64,7 +70,7 @@ impl Plugin for VersusOverlayPlugin {
                     // Over-gated, but a stray request must never reseat a
                     // match outside `Versus` (the seats would leak past their
                     // DespawnOnExit and the phase would dangle).
-                    resource_exists::<RematchRequested>.and(in_state(GameState::Versus)),
+                    resource_exists::<RematchRequested>.and(in_state(GameState::Session)),
                 ),
             );
     }
@@ -99,7 +105,7 @@ fn overlay_root(scrim_alpha: f32) -> impl Bundle {
 fn spawn_countdown(mut commands: Commands, assets: Res<GameAssets>) {
     commands.spawn((
         overlay_root(0.0), // no scrim: the boards stay bright behind the count
-        DespawnOnExit(VersusPhase::Countdown),
+        DespawnOnExit(SessionPhase::Countdown),
         children![(
             CountdownText { elapsed: 0.0 },
             Text::new("3"),
@@ -119,13 +125,13 @@ fn spawn_countdown(mut commands: Commands, assets: Res<GameAssets>) {
 fn tick_countdown(
     time: Res<Time>,
     text: Single<(&mut CountdownText, &mut Text)>,
-    mut next: ResMut<NextState<VersusPhase>>,
+    mut next: ResMut<NextState<SessionPhase>>,
 ) {
     let (mut state, mut text) = text.into_inner();
     state.elapsed += time.delta_secs();
     let total = 3.0 * NUMBER_BEAT_SECONDS + GO_BEAT_SECONDS;
     if state.elapsed >= total {
-        next.set(VersusPhase::Running);
+        next.set(SessionPhase::Running);
         return;
     }
     let label = match (state.elapsed / NUMBER_BEAT_SECONDS) as u32 {
@@ -145,7 +151,7 @@ fn tick_countdown(
 /// where you were two seconds ago.
 fn countdown_escape(keys: Res<ButtonInput<KeyCode>>, mut next: ResMut<NextState<GameState>>) {
     if keys.just_pressed(KeyCode::Escape) {
-        next.set(GameState::VersusSetup);
+        next.set(GameState::SessionSetup);
     }
 }
 
@@ -167,12 +173,32 @@ enum PauseAction {
 fn pause_on_keybind(
     keys: Res<ButtonInput<KeyCode>>,
     settings: Res<crate::settings::GameSettings>,
-    mut next: ResMut<NextState<VersusPhase>>,
+    mut next: ResMut<NextState<SessionPhase>>,
 ) {
     let (primary, secondary) = settings.keybinds.pause;
     let pressed = keys.just_pressed(primary) || secondary.is_some_and(|key| keys.just_pressed(key));
     if pressed {
-        next.set(VersusPhase::Paused);
+        next.set(SessionPhase::Paused);
+    }
+}
+
+/// Solo pause CONCEALS the field (the guideline-era anti-pause-to-think rule
+/// the old single-player pause enforced); a versus pause keeps both boards
+/// visible under the scrim — pausing a local match is mutual anyway.
+fn conceal_boards_on_solo_pause(
+    config: Res<super::SessionConfig>,
+    mut roots: Query<&mut Visibility, With<super::render::BoardRoot>>,
+) {
+    if matches!(config.mode, super::SessionMode::Solo { .. }) {
+        for mut visibility in &mut roots {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+fn reveal_boards(mut roots: Query<&mut Visibility, With<super::render::BoardRoot>>) {
+    for mut visibility in &mut roots {
+        *visibility = Visibility::Inherited;
     }
 }
 
@@ -182,7 +208,7 @@ fn spawn_pause_overlay(mut commands: Commands, assets: Res<GameAssets>) {
             PauseRoot,
             FocusList::new(2),
             overlay_root(0.55),
-            DespawnOnExit(VersusPhase::Paused),
+            DespawnOnExit(SessionPhase::Paused),
             children![title_text("PAUSED", assets.font.clone())],
         ))
         .id();
@@ -209,21 +235,21 @@ fn pause_menu_activate(
     list: Single<&FocusList, With<PauseRoot>>,
     actions: Query<(&Focusable, &PauseAction)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
-    mut next_phase: ResMut<NextState<VersusPhase>>,
+    mut next_phase: ResMut<NextState<SessionPhase>>,
     mut next_state: ResMut<NextState<GameState>>,
 ) {
     let nav =
         read_nav_action(&keys, *list).or_else(|| clicked_focusable(&clicks).map(NavAction::Select));
     match nav {
         // Esc toggles straight back into the match.
-        Some(NavAction::Back) => next_phase.set(VersusPhase::Running),
+        Some(NavAction::Back) => next_phase.set(SessionPhase::Running),
         Some(NavAction::Select(index)) => {
             for (focusable, action) in &actions {
                 if focusable.index != index {
                     continue;
                 }
                 match action {
-                    PauseAction::Resume => next_phase.set(VersusPhase::Running),
+                    PauseAction::Resume => next_phase.set(SessionPhase::Running),
                     PauseAction::Quit => next_state.set(GameState::MainMenu),
                 }
             }
@@ -252,74 +278,112 @@ enum ResultAction {
 pub(crate) struct RematchRequested;
 
 /// The seat's display name, as the HUD labels it.
-fn seat_label(config: &VersusConfig, registry: &crate::ai::ModelRegistry, seat: usize) -> String {
+fn seat_label(config: &SessionConfig, registry: &crate::ai::ModelRegistry, seat: usize) -> String {
     match config.seats[seat] {
         Participant::Human => "YOU".to_string(),
         Participant::Bot { model } => registry.label(model).to_uppercase(),
     }
 }
 
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn spawn_result_banner(
     mut commands: Commands,
     assets: Res<GameAssets>,
-    outcome: Option<Res<MatchOutcome>>,
-    config: Res<VersusConfig>,
+    outcome: Option<Res<SessionOutcome>>,
+    config: Res<SessionConfig>,
     registry: Res<crate::ai::ModelRegistry>,
     clock: Res<MatchClock>,
     seats: Query<(&Seat, &SeatStats)>,
+    seats_snapshot: Query<&super::SeatSnapshot>,
+    recorded: Option<Res<super::SoloRecorded>>,
 ) {
     // The banner reads the world it was raised over; a missing outcome (manual
-    // state poke in a test) reads as a draw rather than a panic.
-    let winner = outcome.map(|o| o.winner).unwrap_or(None);
-    let title = match winner {
-        None => "DRAW".to_string(),
-        Some(seat) => match config.seats[seat] {
-            Participant::Human => "YOU WIN!".to_string(),
-            Participant::Bot { .. } => {
-                // A bot won. Against a human that reads as a loss; in
-                // bot-vs-bot, name the victor.
-                if config.seats.contains(&Participant::Human) {
-                    "YOU LOSE".to_string()
-                } else {
-                    format!("{} WINS", seat_label(&config, &registry, seat))
-                }
-            }
-        },
-    };
-
-    let mut stats = [SeatStats::default(); 2];
-    for (seat, stat) in &seats {
-        if seat.index < 2 {
-            stats[seat.index] = *stat;
-        }
-    }
+    // state poke in a test) reads as a versus draw rather than a panic.
+    let outcome = outcome
+        .map(|o| *o)
+        .unwrap_or(super::SessionOutcome::Versus { winner: None });
     let minutes = (clock.0 / 60.0) as u32;
     let seconds = clock.0 % 60.0;
-    let summary = format!(
-        "{}  ATK {}   ·   {}  ATK {}   ·   TIME {}:{:04.1}",
-        seat_label(&config, &registry, 0),
-        stats[0].attack_sent,
-        seat_label(&config, &registry, 1),
-        stats[1].attack_sent,
-        minutes,
-        seconds,
-    );
+
+    let (title, summary) = match outcome {
+        super::SessionOutcome::Versus { winner } => {
+            let title = match winner {
+                None => "DRAW".to_string(),
+                Some(seat) => match config.seats[seat] {
+                    Participant::Human => "YOU WIN!".to_string(),
+                    Participant::Bot { .. } => {
+                        // A bot won. Against a human that reads as a loss; in
+                        // bot-vs-bot, name the victor.
+                        if config.seats[..config.mode.seat_count()].contains(&Participant::Human) {
+                            "YOU LOSE".to_string()
+                        } else {
+                            format!("{} WINS", seat_label(&config, &registry, seat))
+                        }
+                    }
+                },
+            };
+            let mut stats = [SeatStats::default(); 2];
+            for (seat, stat) in &seats {
+                if seat.index < 2 {
+                    stats[seat.index] = *stat;
+                }
+            }
+            let summary = format!(
+                "{}  ATK {}   ·   {}  ATK {}   ·   TIME {}:{:04.1}",
+                seat_label(&config, &registry, 0),
+                stats[0].attack_sent,
+                seat_label(&config, &registry, 1),
+                stats[1].attack_sent,
+                minutes,
+                seconds,
+            );
+            (title, summary)
+        }
+        super::SessionOutcome::Solo { completed } => {
+            let title = if completed {
+                "COMPLETE!".to_string()
+            } else {
+                "GAME OVER".to_string()
+            };
+            // The final numbers come straight off the seat's last snapshot.
+            let snap = seats_snapshot.iter().next().map(|s| s.0.clone());
+            let summary = match snap {
+                Some(snap) => {
+                    let rank = recorded
+                        .as_ref()
+                        .and_then(|r| r.0)
+                        .map(|rank| format!("   ·   HIGH SCORE #{}", rank + 1))
+                        .unwrap_or_default();
+                    format!(
+                        "SCORE {}   ·   LINES {}   ·   LEVEL {}   ·   TIME {}:{:04.1}{}",
+                        snap.score, snap.lines, snap.level, minutes, seconds, rank
+                    )
+                }
+                None => format!("TIME {minutes}:{seconds:04.1}"),
+            };
+            (title, summary)
+        }
+    };
 
     let root = commands
         .spawn((
             ResultRoot,
             FocusList::new(2),
             overlay_root(0.55),
-            DespawnOnExit(VersusPhase::Over),
+            DespawnOnExit(SessionPhase::Over),
             children![title_text(title, assets.font.clone())],
         ))
         .id();
     let summary_id = commands
         .spawn(label_text(summary, assets.font.clone()))
         .id();
+    let rematch_label = match config.mode {
+        super::SessionMode::Solo { .. } => "Retry",
+        super::SessionMode::Versus => "Rematch",
+    };
     let rematch = commands
         .spawn((
-            menu_button(0, "Rematch", assets.font.clone()),
+            menu_button(0, rematch_label, assets.font.clone()),
             ResultAction::Rematch,
         ))
         .id();

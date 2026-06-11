@@ -10,9 +10,9 @@
 
 use bevy::prelude::*;
 
-use crate::engine::{Engine, EngineConfig, EngineEvent, EngineSnapshot};
+use crate::engine::EngineConfig;
 use crate::level::common::LevelConfig;
-use crate::player::{DasConfig, KeyboardController, RawKeyboardFrame};
+use crate::player::{DasConfig, RawKeyboardFrame};
 use crate::settings::GameSettings;
 use crate::variant::Variant;
 
@@ -24,54 +24,6 @@ use crate::variant::Variant;
 /// and the few places that need the constant directly.
 pub const SIM_HZ: f32 = 60.0;
 pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
-
-/// The pinned piece-generator seed for **tests** (headless suites pin it via
-/// [`RunSeed`] so schedule-driven games reproduce byte-for-byte). Live sessions
-/// draw per-run entropy instead — the audit found every single-player game was
-/// dealing the identical bag sequence, which made Sprint's leaderboard a
-/// route-memorization contest.
-#[cfg(test)]
-pub const DEFAULT_SEED: u64 = 0;
-
-/// Optional seed override for the next gameplay session (the versus
-/// `VersusConfig.seed` idiom): `None` = fresh app-clock entropy per run,
-/// `Some` = pinned (tests, future replays).
-#[derive(Resource, Default)]
-pub struct RunSeed(pub Option<u64>);
-
-/// The single authoritative simulation.
-#[derive(Resource)]
-pub struct EngineState(pub Engine);
-
-/// Latest snapshot produced by the driver this frame. Every render/UI system
-/// reads from here instead of from parallel Bevy state.
-#[derive(Resource)]
-pub struct LatestSnapshot(pub EngineSnapshot);
-
-/// Events emitted by the engine during the steps that ran this frame. Replaced
-/// wholesale each frame by the driver. Read by SFX / score / game-over systems.
-/// Stored as a plain resource (not a Bevy message stream) so the canonical
-/// consumers can each iterate the same list without double-buffering games.
-#[derive(Resource, Default)]
-pub struct FrameEvents(pub Vec<EngineEvent>);
-
-/// The player's keyboard controller (owns player-side DAS; P2.1).
-#[derive(Resource)]
-pub struct PlayerInput(pub KeyboardController);
-
-/// This render frame's *held* keyboard state (continuous flags + per-slice `dt`),
-/// sampled once in `PreUpdate` and consumed by the `FixedUpdate` engine step.
-///
-/// Held flags (`left_pressed` / `right_pressed` / `soft_drop`) must be sampled
-/// fresh every render frame, but the fixed step runs in a *different* schedule
-/// (`FixedUpdate`, between `PreUpdate` and `Update`) zero-or-more times per frame.
-/// We therefore stage the held sample here and pair it with the edge latch
-/// ([`PendingEdges`]) when building each slice's [`RawKeyboardFrame`]. The edge
-/// fields of this sample are ignored by the step (edges come from the latch); we
-/// keep the full frame anyway so the staged `dt_seconds` and held flags travel
-/// together as one value.
-#[derive(Resource, Default)]
-pub struct HeldInput(pub RawKeyboardFrame);
 
 /// Just-pressed input edges latched for the fixed sim slices that run this frame.
 ///

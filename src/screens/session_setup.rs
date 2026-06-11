@@ -1,29 +1,39 @@
-//! Versus setup: who sits at each board.
+//! Session setup: who sits at each board.
 //!
-//! Two seat rows plus Start, in the shared `FocusList` idiom. A seat row
-//! cycles its participant with Left/Right (Enter and click also cycle, so
-//! every input path works); P1 offers "You" plus every registry model, P2
-//! offers the models (one keyboard, so exactly one human seat in v1 — making
-//! P1 a bot gives bot-vs-bot, the versus twin of Watch-AI). The selection
-//! writes [`VersusConfig`], which the match reads once on spawn; the resource
-//! persists, so the screen remembers the last matchup.
+//! Seat rows plus Start, in the shared `FocusList` idiom; [`SetupKind`] picks
+//! the face. **Versus**: two rows (P1 offers "You" plus every registry model,
+//! P2 the models — one keyboard, so exactly one human seat; a bot P1 gives
+//! bot-vs-bot) and Start launches the match. **Watch AI**: one bot row, and
+//! Start continues to mode select (the bot then plays the chosen variant on
+//! one seat). A row cycles with Left/Right (Enter and click also cycle). The
+//! selection writes [`SessionConfig`], which the session reads once on spawn;
+//! the resource persists, so the screen remembers the last choice.
 
 use bevy::prelude::*;
 
 use crate::ai::ModelRegistry;
 use crate::assets::GameAssets;
+use crate::session::{Participant, SessionConfig};
 use crate::ui::focus::{
     clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
 };
 use crate::ui::widgets::{label_text, menu_button_sized, screen_root, title_text};
-use crate::versus::{Participant, VersusConfig};
 use crate::GameState;
+
+/// Which face the setup screen wears (set by the main menu before entering).
+#[derive(Resource, Clone, Copy, PartialEq, Eq, Default)]
+pub enum SetupKind {
+    #[default]
+    Versus,
+    WatchAi,
+}
 
 pub struct VersusSetupPlugin;
 
 impl Plugin for VersusSetupPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::VersusSetup), setup)
+        app.init_resource::<SetupKind>()
+            .add_systems(OnEnter(GameState::SessionSetup), setup)
             .add_systems(
                 Update,
                 (
@@ -33,7 +43,7 @@ impl Plugin for VersusSetupPlugin {
                     activate,
                 )
                     .chain()
-                    .run_if(in_state(GameState::VersusSetup)),
+                    .run_if(in_state(GameState::SessionSetup)),
             );
     }
 }
@@ -41,7 +51,7 @@ impl Plugin for VersusSetupPlugin {
 #[derive(Component)]
 struct VersusSetupRoot;
 
-/// Row 0 or 1: configures `VersusConfig.seats[seat]`.
+/// Row 0 or 1: configures `SessionConfig.seats[seat]`.
 #[derive(Component, Clone, Copy)]
 struct SeatRow {
     seat: usize,
@@ -51,10 +61,11 @@ struct SeatRow {
 #[derive(Component)]
 struct StartRow;
 
-/// The participants a seat row cycles through, in display order.
-fn options_for(seat: usize, registry: &ModelRegistry) -> Vec<Participant> {
+/// The participants a seat row cycles through, in display order. Watch-AI
+/// rows are bot-only (the whole point is watching one).
+fn options_for(kind: SetupKind, seat: usize, registry: &ModelRegistry) -> Vec<Participant> {
     let mut options = Vec::new();
-    if seat == 0 {
+    if kind == SetupKind::Versus && seat == 0 {
         options.push(Participant::Human);
     }
     for model in 0..registry.len() {
@@ -70,20 +81,37 @@ fn participant_label(participant: Participant, registry: &ModelRegistry) -> Stri
     }
 }
 
-fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::VersusSetup)));
+fn setup(
+    mut commands: Commands,
+    assets: Res<GameAssets>,
+    kind: Res<SetupKind>,
+    registry: Res<ModelRegistry>,
+    mut config: ResMut<SessionConfig>,
+) {
+    commands.spawn((Camera2d, DespawnOnExit(GameState::SessionSetup)));
+    let (title, seat_rows) = match *kind {
+        SetupKind::Versus => ("VERSUS", 2),
+        SetupKind::WatchAi => ("WATCH AI", 1),
+    };
+    // A Watch-AI visit must find a bot on seat 0 even if Play seated a human
+    // there earlier; snap to the registry's first entry.
+    if *kind == SetupKind::WatchAi && config.seats[0] == Participant::Human {
+        config.seats[0] = Participant::Bot { model: 0 };
+    }
+    let _ = &registry; // (options are derived per-row below)
+
     let root = commands
         .spawn((
             VersusSetupRoot,
-            FocusList::new(3),
+            FocusList::new(seat_rows + 1),
             screen_root(),
-            DespawnOnExit(GameState::VersusSetup),
-            children![title_text("VERSUS", assets.font.clone())],
+            DespawnOnExit(GameState::SessionSetup),
+            children![title_text(title, assets.font.clone())],
         ))
         .id();
 
     // Seat rows are wide: "P2  < Best-First Attack >" needs the room.
-    for seat in 0..2 {
+    for seat in 0..seat_rows {
         let row = commands
             .spawn((
                 menu_button_sized(seat, "", assets.font.clone(), 460.0),
@@ -94,7 +122,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
     }
     let start = commands
         .spawn((
-            menu_button_sized(2, "Start", assets.font.clone(), 220.0),
+            menu_button_sized(seat_rows, "Start", assets.font.clone(), 220.0),
             StartRow,
         ))
         .id();
@@ -113,7 +141,8 @@ fn cycle_participants(
     list: Single<&FocusList, With<VersusSetupRoot>>,
     rows: Query<(&Focusable, &SeatRow)>,
     registry: Res<ModelRegistry>,
-    mut config: ResMut<VersusConfig>,
+    kind: Res<SetupKind>,
+    mut config: ResMut<SessionConfig>,
 ) {
     let step: isize = if keys.just_pressed(KeyCode::ArrowRight) || keys.just_pressed(KeyCode::KeyD)
     {
@@ -126,12 +155,18 @@ fn cycle_participants(
     let Some((_, row)) = rows.iter().find(|(f, _)| f.index == list.index) else {
         return;
     };
-    cycle_seat(&mut config, &registry, row.seat, step);
+    cycle_seat(&mut config, &registry, *kind, row.seat, step);
 }
 
 /// Advance `seats[seat]` by `step` through its option ring.
-fn cycle_seat(config: &mut VersusConfig, registry: &ModelRegistry, seat: usize, step: isize) {
-    let options = options_for(seat, registry);
+fn cycle_seat(
+    config: &mut SessionConfig,
+    registry: &ModelRegistry,
+    kind: SetupKind,
+    seat: usize,
+    step: isize,
+) {
+    let options = options_for(kind, seat, registry);
     let current = options
         .iter()
         .position(|p| *p == config.seats[seat])
@@ -143,15 +178,20 @@ fn cycle_seat(config: &mut VersusConfig, registry: &ModelRegistry, seat: usize, 
 /// Keep the seat-row labels mirroring the config (initial fill included —
 /// rows spawn with empty labels and this runs the same frame).
 fn refresh_row_labels(
-    config: Res<VersusConfig>,
+    config: Res<SessionConfig>,
     registry: Res<ModelRegistry>,
+    kind: Res<SetupKind>,
     rows: Query<(&SeatRow, &Children)>,
     mut texts: Query<&mut Text>,
 ) {
     for (row, children) in &rows {
+        let prefix = match *kind {
+            SetupKind::Versus => format!("P{}", row.seat + 1),
+            SetupKind::WatchAi => "BOT".to_string(),
+        };
         let label = format!(
-            "P{}  < {} >",
-            row.seat + 1,
+            "{}  < {} >",
+            prefix,
             participant_label(config.seats[row.seat], &registry)
         );
         for child in children.iter() {
@@ -166,13 +206,15 @@ fn refresh_row_labels(
 
 /// Enter on Start begins the match; Enter/click on a seat row cycles it (so a
 /// mouse-only player can configure everything); Esc backs out.
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<VersusSetupRoot>>,
     rows: Query<(&Focusable, Option<&SeatRow>, Has<StartRow>)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     registry: Res<ModelRegistry>,
-    mut config: ResMut<VersusConfig>,
+    kind: Res<SetupKind>,
+    mut config: ResMut<SessionConfig>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     let nav =
@@ -185,13 +227,21 @@ fn activate(
                     continue;
                 }
                 if is_start {
-                    info!(
-                        "versus setup: starting {:?} vs {:?}",
-                        config.seats[0], config.seats[1]
-                    );
-                    next.set(GameState::Versus);
+                    match *kind {
+                        SetupKind::Versus => {
+                            info!(
+                                "versus setup: starting {:?} vs {:?}",
+                                config.seats[0], config.seats[1]
+                            );
+                            config.mode = crate::session::SessionMode::Versus;
+                            next.set(GameState::Session);
+                        }
+                        // Watch-AI continues to mode select; the variant pick
+                        // writes Solo{variant} and launches.
+                        SetupKind::WatchAi => next.set(GameState::ModeSelect),
+                    }
                 } else if let Some(row) = seat_row {
-                    cycle_seat(&mut config, &registry, row.seat, 1);
+                    cycle_seat(&mut config, &registry, *kind, row.seat, 1);
                 }
             }
         }

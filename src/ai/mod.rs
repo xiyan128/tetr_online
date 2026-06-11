@@ -11,9 +11,3 @@ pub use tetr_core::ai::*;
 /// data; the picker screen and the sandbox both read it.
 pub mod registry;
 pub use registry::ModelRegistry;
-
-// `pub` so the level scheduler can name `crate::ai::sandbox::sandbox_active` /
-// `step_engine_ai` directly (it gates AI-vs-keyboard systems on them); the common
-// types are also re-exported flat for the menus.
-pub mod sandbox;
-pub use sandbox::{AiPlayer, AiSandbox, AiSandboxPlugin};

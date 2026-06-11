@@ -6,8 +6,6 @@
 //!
 //! | feature        | file                          | plugin                     | fills |
 //! |----------------|-------------------------------|----------------------------|-------|
-//! | pause          | `features/pause.rs`           | `PausePlugin`              | Paused overlay + Esc toggle |
-//! | info_panel     | `features/info_panel.rs`      | `InfoPanelPlugin`          | in-game variant/goal/time/score panel |
 //! | options        | `features/options.rs`         | `OptionsPlugin`            | Options-screen widgets that mutate `GameSettings` |
 //! | help           | `features/help.rs`            | `HelpPlugin`               | Help-screen controls/about content |
 //! | notifications  | `features/notifications.rs`   | `NotificationsPlugin`      | line-clear flash + hard-drop trail effects |
@@ -19,12 +17,10 @@
 use bevy::prelude::*;
 
 mod help;
-mod high_scores;
+pub(crate) mod high_scores;
 pub(crate) mod hit_stop;
-mod info_panel;
 mod notifications;
 pub(crate) mod options;
-mod pause;
 pub(crate) mod screen_shake;
 mod sfx;
 
@@ -34,8 +30,6 @@ pub struct FeaturesPlugin;
 impl Plugin for FeaturesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
-            pause::PausePlugin,
-            info_panel::InfoPanelPlugin,
             options::OptionsPlugin,
             help::HelpPlugin,
             notifications::NotificationsPlugin,

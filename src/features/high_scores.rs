@@ -2,9 +2,9 @@
 //!
 //! Two halves, both wired here:
 //!
-//! 1. **Record + persist.** On entering [`GameState::GameOver`] we build a
-//!    [`HighScore`] from the final [`LatestSnapshot`] (`score`, `lines`, `level`)
-//!    plus [`VariantProgress::elapsed_seconds`], try
+//! 1. **Record + persist.** When a solo session ends, the session calls
+//!    [`record`] with the seat's final snapshot (`score`, `lines`, `level`)
+//!    plus the session clock, try
 //!    [`HighScores::insert`] for the [`ActiveVariant`], and — if it landed on the
 //!    board — re-serialize every table and save it through
 //!    [`StorageResource`] under [`storage::keys::HIGH_SCORES`]. The board is
@@ -20,13 +20,10 @@
 //! [`HighScores::insert`], so a corrupt or over-long stored file degrades to a
 //! correctly sorted, truncated board rather than a panic.
 //!
-//! [`GameState::GameOver`]: crate::GameState::GameOver
 //! [`GameState::HighScores`]: crate::GameState::HighScores
 //! [`HighScore`]: crate::high_scores::HighScore
 //! [`HighScores::insert`]: crate::high_scores::HighScores::insert
 //! [`HighScores`]: crate::high_scores::HighScores
-//! [`LatestSnapshot`]: crate::level::engine_bridge::LatestSnapshot
-//! [`VariantProgress::elapsed_seconds`]: crate::variant::VariantProgress
 //! [`ActiveVariant`]: crate::variant::ActiveVariant
 //! [`StorageResource`]: crate::storage::StorageResource
 //! [`HighScoresRoot`]: crate::screens::HighScoresRoot
@@ -38,11 +35,10 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::engine::EngineSnapshot;
 use crate::high_scores::{HighScore, HighScores};
-use crate::level::engine_bridge::LatestSnapshot;
 use crate::screens::HighScoresRoot;
 use crate::storage::{keys, StorageResource};
 use crate::ui::widgets::label_text;
-use crate::variant::{ActiveVariant, ScoreKind, Variant, VariantDef, VariantProgress};
+use crate::variant::{ScoreKind, Variant, VariantDef};
 use crate::GameState;
 
 /// Records qualifying runs into [`HighScores`], persists the table, loads it on
@@ -56,8 +52,6 @@ impl Plugin for HighScoresFeaturePlugin {
             // runs after `GamePlugin`'s `init_resource::<HighScores>`, so the
             // resource exists; we fill it from storage if a blob is present.
             .add_systems(Startup, load_high_scores)
-            // On game over, file the just-finished run and persist on a change.
-            .add_systems(OnEnter(GameState::GameOver), record_run)
             // Populate the high-scores screen once its root entity is spawned.
             // Keyed off `Added<HighScoresRoot>` (set by the screen shell on
             // `OnEnter(HighScores)`) so we never depend on `OnEnter` system order.
@@ -74,65 +68,56 @@ impl Plugin for HighScoresFeaturePlugin {
 
 /// Build a [`HighScore`] from the final snapshot + run clock and try to file it
 /// for the active variant. Persists the whole board iff the run made the table.
-fn record_run(
-    snapshot: Res<LatestSnapshot>,
-    progress: Res<VariantProgress>,
-    active: Res<ActiveVariant>,
-    storage: Res<StorageResource>,
-    mut scores: ResMut<HighScores>,
-    sandbox: Option<Res<crate::ai::AiSandbox>>,
-) {
-    // A Watch-AI session ends on this same screen, but a bot's run is not a
-    // human achievement: it must never file into the leaderboard (the audit
-    // found bot runs silently ranking against the player).
-    if sandbox.is_some_and(|s| s.active()) {
-        return;
-    }
-
-    let snap = &snapshot.0;
-    let variant = active.0;
-
-    // Only file a run that actually qualifies for the board. A time-ranked
-    // variant (Sprint) ranks by *lowest* time, so a top-out before the line
-    // target would post a sub-target time that beats every legitimate
-    // completion — drop it. Score-ranked variants (Marathon, Ultra) record
-    // every run; a partial run's lower score already sorts correctly.
-    if !run_qualifies(&variant.def(), snap, progress.elapsed_seconds) {
-        return;
+/// File a finished run for `variant`, returning its rank when it made the
+/// table (and persisting the board). The qualify rule: a time-ranked variant
+/// (Sprint) ranks by *lowest* time, so a top-out before the line target would
+/// post a sub-target time that beats every legitimate completion — dropped.
+/// Score-ranked variants (Marathon, Ultra) record every run; a partial run's
+/// lower score already sorts correctly. Persistence is skipped when no
+/// storage is wired (headless tests).
+pub(crate) fn record(
+    snapshot: &crate::engine::EngineSnapshot,
+    elapsed_seconds: f32,
+    variant: crate::variant::Variant,
+    scores: &mut HighScores,
+    storage: &Option<bevy::prelude::Res<StorageResource>>,
+) -> Option<usize> {
+    if !run_qualifies(&variant.def(), snapshot, elapsed_seconds) {
+        return None;
     }
 
     let candidate = HighScore {
-        score: snap.score,
-        time_seconds: progress.elapsed_seconds,
-        lines: snap.lines,
-        level: snap.level,
+        score: snapshot.score,
+        time_seconds: elapsed_seconds,
+        lines: snapshot.lines,
+        level: snapshot.level,
     };
 
-    if let Some(rank) = scores.insert(variant, candidate) {
-        info!(
-            "high score recorded for {}: rank {} (score {}, {})",
-            variant.display_name(),
-            rank + 1,
-            candidate.score,
-            format_time(candidate.time_seconds),
-        );
-        storage
-            .0
-            .save(keys::HIGH_SCORES, &codec::serialize(&scores));
+    let rank = scores.insert(variant, candidate)?;
+    info!(
+        "high score recorded for {}: rank {} (score {}, {})",
+        variant.display_name(),
+        rank + 1,
+        candidate.score,
+        format_time(candidate.time_seconds),
+    );
+    if let Some(storage) = storage {
+        storage.0.save(keys::HIGH_SCORES, &codec::serialize(scores));
     }
+    Some(rank)
 }
 
 /// Whether a finished run should be filed for `def`.
 ///
 /// Time-ranked variants (Sprint) only produce a meaningful ranking time when the
 /// goal was actually reached — `end_condition_met` is the same predicate
-/// [`check_variant_end_conditions`](crate::variant::check_variant_end_conditions)
-/// uses to detect a legitimate finish. A top-out short of the target is *not*
-/// recorded. Score-ranked variants (Marathon, Ultra) always qualify: a partial
-/// run posts a legitimate, lower score that sorts correctly on its own.
+/// the session's solo end check uses to detect a legitimate finish. A top-out
+/// short of the target is *not* recorded. Score-ranked variants (Marathon,
+/// Ultra) always qualify: a partial run posts a legitimate, lower score that
+/// sorts correctly on its own.
 fn run_qualifies(def: &VariantDef, snapshot: &EngineSnapshot, elapsed_seconds: f32) -> bool {
     if def.score_kind == ScoreKind::Time {
-        return VariantProgress::end_condition_met(def, snapshot, elapsed_seconds);
+        return crate::variant::end_condition_met(def, snapshot, elapsed_seconds);
     }
     true
 }
@@ -456,32 +441,6 @@ S 1500 30.0 40 6
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_bot_run_never_files_into_the_leaderboard() {
-        // Watch-AI ends on the same GameOver screen as a human run; the
-        // sandbox guard must drop it before any qualify/insert logic runs.
-        use crate::storage::StorageResource;
-        use crate::variant::{ActiveVariant, VariantProgress};
-        use bevy::ecs::system::RunSystemOnce;
-        let mut world = bevy::prelude::World::new();
-        let mut engine = crate::engine::Engine::new(crate::engine::EngineConfig::default(), 1);
-        engine.step(crate::engine::InputFrame::default());
-        world.insert_resource(crate::level::LatestSnapshot(engine.snapshot()));
-        world.insert_resource(VariantProgress::default());
-        world.insert_resource(ActiveVariant(Variant::Marathon));
-        world.insert_resource(StorageResource(crate::storage::default_storage()));
-        world.insert_resource(HighScores::default());
-        world.insert_resource(crate::ai::AiSandbox(true));
-
-        world.run_system_once(record_run).unwrap();
-
-        let scores = world.resource::<HighScores>();
-        assert!(
-            scores.table(Variant::Marathon).is_empty(),
-            "an armed sandbox run must not insert a high score"
-        );
-    }
 
     use crate::engine::{Engine, EngineConfig};
 

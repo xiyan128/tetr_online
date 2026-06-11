@@ -33,13 +33,13 @@ pub mod high_scores;
 pub(crate) mod level;
 pub(crate) mod postfx;
 mod screens;
+/// Versus mode: two engines, attack routed between them, seats open to humans
+/// and bots (see `docs/adr-versus-mode-ui.md`).
+pub mod session;
 pub mod settings;
 pub mod storage;
 pub(crate) mod ui;
 pub mod variant;
-/// Versus mode: two engines, attack routed between them, seats open to humans
-/// and bots (see `docs/adr-versus-mode-ui.md`).
-pub mod versus;
 pub(crate) mod vfx;
 
 pub use crate::engine::{
@@ -51,13 +51,12 @@ pub use crate::engine::{
     LockDownMode, PieceAction, PieceRotation, PieceType, RotationDirection, SnapshotCell,
     TSpinCorners, TSpinKind, EXTENDED_LOCK_RESET_BUDGET, LOCK_DOWN_SECONDS, MAX_LEVEL, MIN_LEVEL,
 };
-use crate::level::LevelPlugin;
 
 /// Top-level screen the app is on. Drives which plugins' systems run and which
 /// UI is spawned. Flow: `Loading` (asset load) -> `Title` -> `MainMenu`, with
 /// `ModeSelect`/`Options`/`Help`/`HighScores` reachable from the menu, `Playing`
 /// the active game, and `GameOver` after it. Pausing is a sub-state of `Playing`
-/// (see [`PauseState`]), not a sibling state, so it never exits the session.
+/// (see [`session::SessionPhase`]) inside the Session state, never a sibling.
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 pub enum GameState {
     /// Asset loading; advances to [`GameState::Title`] when assets are ready.
@@ -67,9 +66,6 @@ pub enum GameState {
     Title,
     /// Root navigation menu (Play / Options / Help / High Scores).
     MainMenu,
-    /// Choose which AI model drives the Watch-AI session (Watch-AI path only,
-    /// before mode select). See [`screens`]/`model_select` + [`ai::ModelRegistry`].
-    ModelSelect,
     /// Choose a [`variant::Variant`] (Marathon/Sprint/Ultra) before playing.
     ModeSelect,
     /// Settings screen (filled by the options feature).
@@ -78,46 +74,14 @@ pub enum GameState {
     Help,
     /// Leaderboards (filled by the high-scores feature).
     HighScores,
-    /// Active gameplay (formerly `InGame`). The engine is authoritative here.
-    /// Pause is the [`PauseState`] sub-state of this, so the session persists
-    /// across pause/resume.
-    Playing,
-    /// Post-game results; offers restart / back to menu.
-    GameOver,
-    /// Configure a versus match (who sits at each board) before starting it.
-    VersusSetup,
-    /// A live versus match: two engines, attack routed between them. Its
-    /// lifecycle (countdown/running/paused/over) is the
-    /// [`versus::VersusPhase`] sub-state; the result screen is the `Over`
+    /// Configure a seated session (who sits at each board) before starting it
+    /// — the versus and Watch-AI entry point.
+    SessionSetup,
+    /// A live seated session — one seat (solo / Watch-AI) or two (versus).
+    /// Its lifecycle (countdown/running/paused/over) is the
+    /// [`session::SessionPhase`] sub-state; the result screen is the `Over`
     /// phase *inside* this state, so the final boards stay on screen.
-    Versus,
-}
-
-/// Pause sub-state of [`GameState::Playing`].
-///
-/// Pause is modeled as a **sub-state of the active game**, not a sibling
-/// `GameState`, so toggling it never exits `Playing`. The engine, board, camera,
-/// and HUD are all scoped to `OnEnter(GameState::Playing)` /
-/// `DespawnOnExit(GameState::Playing)`, so they survive a pause/resume round-trip
-/// with no rebuild.
-///
-/// (A previous design used a `Playing | Paused` **computed** state for this scope,
-/// but a `ComputedStates` re-runs its `OnEnter`/`OnExit` on *every* source change —
-/// including identity transitions where the computed value is unchanged — so
-/// pausing despawned and rebuilt the whole session, restarting the game on every
-/// resume. A sub-state's transitions fire only when the sub-state itself changes.)
-///
-/// Per-frame gameplay systems (the engine driver, reconcilers, score/UI updates)
-/// run on `in_state(PauseState::Running)`, so the simulation freezes while paused
-/// while every gameplay entity stays alive.
-#[derive(SubStates, Clone, PartialEq, Eq, Hash, Debug, Default)]
-#[source(GameState = GameState::Playing)]
-pub enum PauseState {
-    /// The game is live; the simulation advances.
-    #[default]
-    Running,
-    /// Paused: the overlay is shown and the simulation is frozen.
-    Paused,
+    Session,
 }
 
 pub struct GamePlugin;
@@ -133,7 +97,6 @@ impl Plugin for GamePlugin {
             // Shared M1 contracts (defined once, read everywhere).
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::variant::ActiveVariant>()
-            .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
             // The Watch-AI model registry (linear DT-20 + ported CC2 models on
             // greedy / beam / best-first). Read by the model-select screen and the
@@ -152,23 +115,18 @@ impl Plugin for GamePlugin {
             .register_type::<crate::settings::GameAction>()
             .register_type::<crate::variant::ActiveVariant>()
             .register_type::<crate::variant::Variant>()
-            .register_type::<crate::variant::VariantProgress>()
             .register_type::<crate::high_scores::HighScores>()
             .register_type::<crate::high_scores::HighScore>()
             .insert_resource(crate::storage::StorageResource(
                 crate::storage::default_storage(),
             ))
             // Gameplay + screen-shell + feature plugins.
-            .add_plugins(LevelPlugin)
-            // AI sandbox (AI3.6): the "Watch AI" mode that drives a gameplay
-            // session with the bot. Owns the `AiSandbox` flag the menus arm/clear
-            // and the AI engine driver; the level driver reads the flag to choose
-            // keyboard vs. AI, so adding this is purely additive.
-            .add_plugins(crate::ai::AiSandboxPlugin)
+            // The audio sink for the session's AudioCue triggers.
+            .add_plugins(crate::level::sound_effects::SoundEffectsPlugin)
             // Versus mode (two boards, attack exchange). Self-contained: its
-            // systems are scoped to `GameState::Versus`, so the single-player
+            // systems are scoped to `GameState::Session`, so the single-player
             // pipeline is untouched.
-            .add_plugins(crate::versus::VersusPlugin)
+            .add_plugins(crate::session::SessionPlugin)
             .add_plugins(crate::screens::ScreensPlugin)
             .add_plugins(crate::features::FeaturesPlugin)
             // Render-pipeline visual effects (CRT pass; bloom on capable builds).

@@ -33,10 +33,11 @@ systems. The duplication this buys is small (the reconcilers are ~40 lines
 each) and the risk it retires is large: the polished single-player path keeps
 its byte-identical pipeline and its deterministic-schedule tests.
 
-The recorded follow-up (not v1): once versus stabilizes, single-player can be
-re-homed as a one-seat match on the same architecture, retiring the global
-resources. The versus systems are written generically over seat entities
-precisely so that move is mechanical.
+~~The recorded follow-up~~ (DONE, same day — the no-compat audit's seat
+re-home): single-player and Watch-AI are one-seat sessions on this
+architecture now (`SessionMode::Solo{variant}`); the global resources, the
+parallel pipeline, the sandbox plugin, and the ModelSelect/GameOver screens
+are deleted, and the five load-bearing properties re-pinned seat-native
 
 `VersusPhase::Over` stays **inside** `Versus` — the final boards remain on
 screen under the result banner (reading the losing stack is half the fun), and
