@@ -40,3 +40,8 @@ jobs:
       - name: Tests (workspace)
         run: cargo test --workspace --locked
 
+      # The dev-tooling feature (egui inspector) is the one combination no other
+      # job compiles; a check keeps it from rotting silently.
+      - name: Check (dev feature)
+        run: cargo check --features dev --locked
+

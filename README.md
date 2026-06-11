@@ -10,9 +10,10 @@ share one source of truth.
 
 Try the web demo: https://www.xiyan.dev/tetr_online/
 
-> **Status:** single-player is fully playable — Marathon / Sprint / Ultra, menus,
-> options, and high scores — and a built-in AI can play any mode. Local and online
-> multiplayer are the next milestones (see [Roadmap](#roadmap)).
+> **Status:** fully playable — Marathon / Sprint / Ultra single-player, a
+> built-in AI for every mode, and local **Versus** (human-vs-AI and AI-vs-AI,
+> two boards exchanging real garbage). Online multiplayer is the next milestone
+> (see [Roadmap](#roadmap)).
 
 ## Features
 

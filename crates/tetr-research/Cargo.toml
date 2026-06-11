@@ -1,8 +1,8 @@
 [package]
 name = "tetr-research"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Headless research & evaluation harness for the Tetris bot — behavior metrics, benchmarks, CC2 baselines."
 publish = false
 
@@ -51,3 +51,6 @@ path = "src/bin/cc2_baseline.rs"
 [[bin]]
 name = "cc2-native"
 path = "src/bin/cc2_native.rs"
+
+[lints]
+workspace = true

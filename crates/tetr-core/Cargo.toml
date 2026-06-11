@@ -1,8 +1,8 @@
 [package]
 name = "tetr-core"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Engine-agnostic Tetris rule core, player abstraction, and AI — no Bevy."
 publish = false
 
@@ -29,3 +29,6 @@ rustc-hash = "2"
 # per-candidate heap allocation — allocation was the top profile hotspot after FxHash.
 smallvec = "1"
 
+
+[lints]
+workspace = true

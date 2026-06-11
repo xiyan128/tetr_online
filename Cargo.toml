@@ -1,8 +1,8 @@
 [package]
 name = "tetr_online"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 # Benchmark targets are declared explicitly under `[[bench]]` below (each uses the
 # criterion harness). Disable cargo's auto-discovery so the shared
 # `benches/common/` fixture module is never mistaken for its own bench target.
@@ -12,6 +12,22 @@ autobenches = false
 # `crates/tetr-core` (no Bevy); `crates/tetr-embed` adds the wasm embed component.
 [workspace]
 members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-research"]
+
+# One home for the shared package metadata; member crates inherit with
+# `version.workspace = true` etc. (Edition stays 2021 deliberately: the 2024
+# bump would force a workspace-wide rustfmt churn for zero capability.)
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Workspace-wide lint posture (crates opt in via [lints] workspace = true).
+[workspace.lints.rust]
+unused_must_use = "deny"
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +40,9 @@ bench = false
 [[bin]]
 name = "tetr_online"
 bench = false
+
+[lints]
+workspace = true
 
 [dependencies]
 # Engine-agnostic core (engine + player + ai), extracted to its own crate —
