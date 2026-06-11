@@ -69,20 +69,25 @@ const TAU_LEVEL: f32 = 1.5;
 const TAU_CALM: f32 = 0.8;
 const TAU_AMBER: f32 = 2.5;
 
-/// Wave shape. BOTH octaves travel along the same diagonal (cross-angled
-/// octaves interfere into blobs, not waves); their different wavelengths and
-/// speeds roll a slow beat envelope through the bands. A third, gentle
-/// modulation runs ALONG the crests so bands undulate in strength without
-/// losing their direction. All cycles ≥ 8 s.
-const CYCLE_PRIMARY_SECONDS: f32 = 11.0;
-const CYCLE_SECONDARY_SECONDS: f32 = 17.0;
-const CYCLE_BREADTH_SECONDS: f32 = 29.0;
-const WAVELENGTH_PRIMARY_TEXELS: f32 = 110.0;
-const WAVELENGTH_SECONDARY_TEXELS: f32 = 47.0;
-const WAVELENGTH_BREADTH_TEXELS: f32 = 260.0;
-/// Crest sharpening: raising the band profile to this power empties the
-/// troughs so crests read as distinct travelling bands, not an even wash.
-const CREST_GAMMA: f32 = 1.6;
+/// Wave shape — broad swells, not pinstripes. BOTH octaves travel along the
+/// same diagonal (cross-angled octaves interfere into blobs, not waves);
+/// their different wavelengths and speeds roll a slow beat through the
+/// swells, so waves arrive in sets the way swell does on water. A third,
+/// attenuating modulation runs ALONG the crests so parts of a wavefront
+/// bloom while others fade, without losing the direction. Long wavelengths
+/// give each crest a visible interior: sparse rim, crosshatch shoulder,
+/// dense heavy core. All cycles well past the 8 s floor.
+const CYCLE_PRIMARY_SECONDS: f32 = 19.0;
+const CYCLE_SECONDARY_SECONDS: f32 = 31.0;
+const CYCLE_BREADTH_SECONDS: f32 = 47.0;
+const WAVELENGTH_PRIMARY_TEXELS: f32 = 260.0;
+const WAVELENGTH_SECONDARY_TEXELS: f32 = 150.0;
+const WAVELENGTH_BREADTH_TEXELS: f32 = 420.0;
+/// Crest sharpening: raising the band profile to this power holds the
+/// troughs near zero for a third of each cycle — generous calm water
+/// between swells — while the long wavelength keeps the crests themselves
+/// wide and gradated.
+const CREST_GAMMA: f32 = 2.4;
 
 /// Grain ink: a dark warm neutral two steps under `bg` (#211E1B). Defined
 /// here, not in `theme` — it is this layer's only private color.
@@ -311,11 +316,11 @@ fn approach(current: f32, target: f32, dt: f32, tau: f32) -> f32 {
 ///
 /// `x + y` is the distance along the propagation diagonal: both octaves ride
 /// it (same direction, different wavelength and speed, so a beat envelope
-/// travels through the bands), and the profile is sharpened by
-/// [`CREST_GAMMA`] so the space between crests goes genuinely sparse.
-/// `x - y` runs along a crest; the breadth term modulates band strength
-/// there by a gentle 15% so the wavefronts breathe without dissolving into
-/// clumps.
+/// travels through the swells), and the profile is sharpened by
+/// [`CREST_GAMMA`] so the troughs between swells go genuinely calm.
+/// `x - y` runs along a crest; the breadth term only ATTENUATES (0.56..=1.0)
+/// so wavefronts bloom and fade along their length without ever exceeding
+/// the surface budget — the in-match cap stays exact.
 fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
     use std::f32::consts::TAU;
     let (x, y) = (
@@ -328,9 +333,9 @@ fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
     let secondary = 0.5
         + 0.5
             * (TAU * (along / WAVELENGTH_SECONDARY_TEXELS - phase / CYCLE_SECONDARY_SECONDS)).sin();
-    let band = (0.65 * primary + 0.35 * secondary).powf(CREST_GAMMA);
-    let breadth = 0.85
-        + 0.15
+    let band = (0.6 * primary + 0.4 * secondary).powf(CREST_GAMMA);
+    let breadth = 0.78
+        + 0.22
             * (TAU * ((x - y) / WAVELENGTH_BREADTH_TEXELS + phase / CYCLE_BREADTH_SECONDS)).sin();
     (level * band * breadth).clamp(0.0, 1.0)
 }
@@ -423,8 +428,11 @@ fn fill_square(
 mod tests {
     use super::*;
 
+    /// A probe canvas spanning at least two primary wavelengths along the
+    /// propagation diagonal, so every test sees full swells (crest cores
+    /// included) at any phase.
     fn grains_at(level: f32, amber: f32) -> (usize, Vec<u8>) {
-        let (w, h) = (64, 48);
+        let (w, h) = (384, 384);
         let mut buffer = vec![0u8; w * h * 4];
         let count = paint_grains(&mut buffer, w, h, 3.7, level, amber);
         (count, buffer)
@@ -437,7 +445,7 @@ mod tests {
         let dense = grains_at(1.0, 0.0).0;
         assert!(sparse < mid && mid < dense, "{sparse} < {mid} < {dense}");
         // The in-match cap reads as scattered isolated grains, not a texture.
-        let sites = (64usize / 4) * (48 / 4);
+        let sites = (384usize / 4) * (384 / 4);
         assert!(sparse * 5 < sites, "in-match density must stay subliminal");
     }
 
