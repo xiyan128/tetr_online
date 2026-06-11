@@ -33,6 +33,11 @@ pub mod behavior;
 /// Shared env-config + deterministic-RNG helpers for the research `bin/` tools.
 pub mod cli;
 
+/// Wald's SPRT over death-decisive paired matches — the adaptive-spend racer
+/// shared by `versus_sprt` (standalone verdicts) and `versus_climb`'s
+/// per-accept confirmer.
+pub mod sprt;
+
 use cli::SplitMix64;
 
 /// Fixed simulation rate: one engine step (one `drive_engine` poll) = 1/60 s.

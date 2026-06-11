@@ -52,14 +52,18 @@
 //! (re-priced garbage-aware weights, deeper search, or the NN round), not
 //! more of this walk.
 //!
-//! Next: longer budgets (the bar means ~1 accept/hour — that is the honest
-//! pace of real progress), or wire `versus_sprt` in as a second-stage
-//! confirmer per accept (~5 min each; screen with cheap blocks first).
+//! THE CONFIRMER (same day, post-epilogue): the rotate path now runs exactly
+//! that design — a screened accept must additionally win an SPRT race
+//! ([`tetr_research::sprt`], proposal vs the walk's current incumbent, fresh
+//! per-iter seed region at 32768+, capped by CONFIRM_MATCHES) before it moves
+//! the walk; H0 or in-budget inconclusive DEMOTES it. Block means at these
+//! sizes pass noise (v1/v2/v3 all proved it); the racer does not.
 //!
 //! Env: TIME_BUDGET_SECS (1800), SEEDS (24 train; the per-iter block size
 //!      when rotating), VAL_SEEDS (32), ROTATE (1), ACCEPT_MARGIN (25),
 //!      RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16),
-//!      SIGMA (0.15), CLIMB_SEED (1).
+//!      SIGMA (0.15), CLIMB_SEED (1), CONFIRM_MATCHES (800; 0 disables the
+//!      per-accept SPRT confirmer — rotate path only).
 //!
 //! ROTATE=1 (the default, the v2 regularization): every iteration draws a
 //! FRESH disjoint seed block and evaluates BOTH the incumbent and the proposal
@@ -73,6 +77,7 @@ use std::time::Instant;
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
 use tetr_research::cli::{env_usize, SplitMix64};
+use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{
     beam_cc2_weights_bot, evaluate_versus_format, seed_set, seed_set_from, VersusFormat,
 };
@@ -146,6 +151,12 @@ fn main() {
 
     let rotate = env_usize("ROTATE", 1) == 1;
     let accept_margin = env_usize("ACCEPT_MARGIN", 25) as f64;
+    // Per-accept SPRT confirmation (the v3 epilogue's design: the cheap block
+    // is the SCREEN, the racer is the JUDGE). `0` disables; the default caps
+    // a confirmation at ~800 matches ≈ 6 min — proposals whose edge is too
+    // small to prove in that budget are demoted, which is the point: only
+    // proven steps move the walk.
+    let confirm_matches = env_usize("CONFIRM_MATCHES", 800) as u32;
     let block = train_seeds.len();
 
     let start = Instant::now();
@@ -169,7 +180,7 @@ fn main() {
             *p += (scale * gauss(&mut rng)) as f32;
         }
 
-        let accepted;
+        let mut accepted;
         if rotate {
             // Fresh disjoint block this iteration; incumbent and proposal race
             // on it head-to-head (paired CRN within the iteration, no reuse
@@ -180,13 +191,61 @@ fn main() {
             accepted = proposal_score > incumbent_score + accept_margin;
             if accepted {
                 eprintln!(
-                    "iter {iter} | ACCEPT {proposal_score:+.1} vs {incumbent_score:+.1} | sigma {sigma:.3} | params {:?}",
-                    proposal
+                    "iter {iter} | screen PASS {proposal_score:+.1} vs {incumbent_score:+.1} | sigma {sigma:.3}"
                 );
             } else {
                 eprintln!(
                     "iter {iter} | reject {proposal_score:+.1} vs {incumbent_score:+.1} | sigma {sigma:.3}"
                 );
+            }
+
+            // The confirmer: a screened proposal must SURVIVE-beat the current
+            // incumbent in a sequential race before it may move the walk. H0
+            // or an in-budget inconclusive demotes it — the v1/v2/v3 lesson is
+            // that block means at this size pass noise; the racer does not.
+            if accepted && confirm_matches > 0 {
+                let cand_weights = Cc2Weights::attack_tuned().with_board_params(&proposal);
+                let inc_weights = Cc2Weights::attack_tuned().with_board_params(&best_params);
+                let cand = move |s: u64| -> Box<dyn PlayerController> {
+                    beam_cc2_weights_bot(s, width, depth, cand_weights)
+                };
+                let incumbent = move |s: u64| -> Box<dyn PlayerController> {
+                    beam_cc2_weights_bot(s, width, depth, inc_weights)
+                };
+                let report = sprt_race(
+                    &cand,
+                    &incumbent,
+                    format,
+                    SprtConfig {
+                        // A fresh region per confirmation (keyed by iter so
+                        // consecutive demoted races never share seeds — no
+                        // pick-the-lucky-region channel), disjoint from the
+                        // train (0..), validation (4096..), rotation (8192..),
+                        // and standalone-racer (16384..) regions.
+                        seed_base: 32768 + (iter as usize) * 4096,
+                        max_matches: confirm_matches,
+                        // The race respects the climb's overall clock.
+                        deadline: Some(start + std::time::Duration::from_secs(budget_secs)),
+                        ..SprtConfig::default()
+                    },
+                );
+                accepted = report.verdict == SprtVerdict::H1Accepted;
+                eprintln!(
+                    "iter {iter} | sprt {} | decisive {}-{} of {} | LLR {:+.2} | {}",
+                    match report.verdict {
+                        SprtVerdict::H1Accepted => "CONFIRM",
+                        SprtVerdict::H0Accepted => "DEMOTE (H0)",
+                        SprtVerdict::Inconclusive => "DEMOTE (inconclusive)",
+                    },
+                    report.wins,
+                    report.losses,
+                    report.matches,
+                    report.llr,
+                    if accepted { "adopting" } else { "discarding" },
+                );
+            }
+            if accepted {
+                eprintln!("iter {iter} | ACCEPT | params {proposal:?}");
             }
         } else {
             let score = objective(&proposal, width, depth, &train_seeds, format);
