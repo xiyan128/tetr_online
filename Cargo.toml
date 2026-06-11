@@ -77,9 +77,6 @@ bloom = ["bevy/bevy_post_process"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
 # never touches release builds. Usage: `cargo run --features dev`.
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
-# Enables the play-evaluation harness (`src/arena/`) and its tests. Off by default
-# so it never compiles into the shipped game. Usage: `cargo test --features arena`.
-arena = []
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = "5.0"
@@ -156,9 +153,3 @@ harness = false
 name = "ai"
 harness = false
 
-# Usage demo / smoke measurement for the play-evaluation harness. Gated on the
-# `arena` feature so `cargo test` skips it unless the harness is enabled.
-# Run: `cargo run --release --example arena_smoke --features arena`.
-[[example]]
-name = "arena_smoke"
-required-features = ["arena"]

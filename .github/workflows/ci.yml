@@ -3,7 +3,6 @@
 # The deploy workflow (web.yml) only proves the wasm bundles BUILD; nothing else
 # stops a regression from reaching master. This gate runs what a developer runs:
 # fmt --check, clippy -D warnings, and the workspace tests under both feature
-# combinations (default, and the `arena` play-evaluation harness).
 #
 # The toolchain comes from rust-toolchain.toml (actions-rust-lang reads it), so
 # CI compiles with the same pinned compiler as every local checkout — the same
@@ -41,5 +40,3 @@ jobs:
       - name: Tests (workspace)
         run: cargo test --workspace --locked
 
-      - name: Tests (arena harness)
-        run: cargo test --features arena --locked

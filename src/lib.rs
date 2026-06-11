@@ -27,10 +27,6 @@ pub use tetr_core::{engine, player};
 
 /// Game-side AI: the engine-agnostic `tetr-core::ai` plus the Bevy `sandbox`.
 pub mod ai;
-/// Play-evaluation harness (feature `arena`). Dev/research tooling — off by
-/// default so it never compiles into the shipped game.
-#[cfg(feature = "arena")]
-pub mod arena;
 mod assets;
 pub(crate) mod features;
 pub mod high_scores;
