@@ -24,6 +24,7 @@ use std::time::{Duration, Instant};
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
 use tetr_research::cli::{env_f64, env_usize};
+use tetr_research::seeds::regions;
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{beam_cc2_weights_bot, VersusFormat};
 
@@ -55,7 +56,7 @@ fn main() {
     let config = SprtConfig {
         p1: env_f64("P1", 0.55),
         block_seeds: env_usize("BLOCK_SEEDS", 8),
-        seed_base: env_usize("SEED_BASE", 16384),
+        seed_base: env_usize("SEED_BASE", regions::SPRT),
         max_matches: u32::MAX,
         deadline: Some(Instant::now() + Duration::from_secs(budget_secs)),
         verbose: true,

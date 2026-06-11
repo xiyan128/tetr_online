@@ -5,8 +5,35 @@
 //! alone. Disjoint index ranges give disjoint seed sets — the foundation of
 //! the train / validation / confirmation separation that keeps verdicts
 //! honest.
+//!
+//! # The region map
+//!
+//! The index space is partitioned by purpose ([`regions`]). The rule: **a
+//! number may only be reported on seeds that did not influence any decision
+//! that produced it.** Training selects, validation checks, confirmation
+//! proves — three different regions, never shared. A new experiment that
+//! needs fresh seeds claims a new region constant here rather than inventing
+//! an offset inline.
 
 use crate::cli::SplitMix64;
+
+/// The crate's seed-index partition. Regions are starting indices into the
+/// [`seed_set_from`] stream; each consumer documents its stride so regions
+/// can be audited for overlap at a glance.
+pub mod regions {
+    /// Training / screening seeds (the climb's fixed-seed mode, quick A/Bs).
+    pub const TRAIN: usize = 0;
+    /// Held-out validation — the honest verdict after an optimization run.
+    pub const VALIDATION: usize = 4096;
+    /// The climb's per-iteration rotating screen blocks
+    /// (stride: one block per iteration from here).
+    pub const ROTATION: usize = 8192;
+    /// The standalone SPRT racer (`versus_sprt`).
+    pub const SPRT: usize = 16384;
+    /// The climb's per-accept SPRT confirmations
+    /// (stride: 4096 per iteration from here).
+    pub const CONFIRM: usize = 32768;
+}
 
 /// A deterministic, well-distributed set of `count` seeds (SplitMix64 over indices).
 pub fn seed_set(count: usize) -> Vec<u64> {

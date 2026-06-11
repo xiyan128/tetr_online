@@ -53,7 +53,7 @@ impl Default for SprtConfig {
             alpha: 0.05,
             beta: 0.05,
             block_seeds: 8,
-            seed_base: 16384,
+            seed_base: crate::seeds::regions::SPRT,
             max_matches: 2000,
             deadline: None,
             verbose: false,

@@ -77,6 +77,7 @@ use std::time::Instant;
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
 use tetr_research::cli::{env_f64, env_usize, SplitMix64};
+use tetr_research::seeds::regions;
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{
     beam_cc2_weights_bot, evaluate_versus_format, seed_set, seed_set_from, VersusFormat,
@@ -129,7 +130,7 @@ fn objective(
 fn main() {
     let budget_secs = env_usize("TIME_BUDGET_SECS", 1800) as u64;
     let train_seeds = seed_set(env_usize("SEEDS", 24));
-    let val_seeds = seed_set_from(4096, env_usize("VAL_SEEDS", 32));
+    let val_seeds = seed_set_from(regions::VALIDATION, env_usize("VAL_SEEDS", 32));
     let depth = env_usize("BEAM_DEPTH", 2) as u8;
     let width = env_usize("BEAM_WIDTH", 16);
     let format = VersusFormat {
@@ -182,7 +183,7 @@ fn main() {
             // Fresh disjoint block this iteration; incumbent and proposal race
             // on it head-to-head (paired CRN within the iteration, no reuse
             // across iterations — seed overfitting is structurally impossible).
-            let block_seeds = seed_set_from(8192 + (iter as usize) * block, block);
+            let block_seeds = seed_set_from(regions::ROTATION + (iter as usize) * block, block);
             let incumbent_score = objective(&best_params, width, depth, &block_seeds, format);
             let proposal_score = objective(&proposal, width, depth, &block_seeds, format);
             accepted = proposal_score > incumbent_score + accept_margin;
@@ -219,7 +220,7 @@ fn main() {
                         // pick-the-lucky-region channel), disjoint from the
                         // train (0..), validation (4096..), rotation (8192..),
                         // and standalone-racer (16384..) regions.
-                        seed_base: 32768 + (iter as usize) * 4096,
+                        seed_base: regions::CONFIRM + (iter as usize) * 4096,
                         max_matches: confirm_matches,
                         // The race respects the climb's overall clock.
                         deadline: Some(start + std::time::Duration::from_secs(budget_secs)),
