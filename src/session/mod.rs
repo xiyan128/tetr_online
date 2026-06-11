@@ -60,12 +60,35 @@ pub enum Participant {
     },
 }
 
-/// Match configuration, written by the setup screen and read once when the
-/// match spawns. `seed` is a test/replay override; a live match draws fresh
-/// entropy per game (a rematch is a new deal, not a replay).
+/// What a session is FOR — the per-mode rules the seat machinery reads.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SessionMode {
+    /// A solo variant run on one seat (a human's game, or Watch-AI's bot):
+    /// variant rules (leveling gravity, goals, end conditions), the score HUD,
+    /// high-score capture for human runs.
+    Solo { variant: crate::variant::Variant },
+    /// The versus match on two seats: flat gravity, attack exchange, meters.
+    Versus,
+}
+
+impl SessionMode {
+    /// Seats this mode plays with (the prefix of [`SessionConfig::seats`]).
+    pub fn seat_count(self) -> usize {
+        match self {
+            SessionMode::Solo { .. } => 1,
+            SessionMode::Versus => 2,
+        }
+    }
+}
+
+/// Session configuration, written by the menus and read once when the session
+/// spawns. `seats[..mode.seat_count()]` are the live seats. `seed` is a
+/// test/replay override; a live session draws fresh entropy per game (a
+/// rematch/retry is a new deal, not a replay).
 #[derive(Resource, Clone, Copy, Debug)]
 pub struct SessionConfig {
     pub seats: [Participant; 2],
+    pub mode: SessionMode,
     pub seed: Option<u64>,
 }
 
@@ -74,6 +97,7 @@ impl Default for SessionConfig {
         Self {
             // You vs the Tier-2 beam — a mid-strength opener (registry index 1).
             seats: [Participant::Human, Participant::Bot { model: 1 }],
+            mode: SessionMode::Versus,
             seed: None,
         }
     }
@@ -126,32 +150,51 @@ pub struct HumanSeat {
 #[derive(Default)]
 pub struct SessionBots(pub Vec<(usize, crate::ai::AiController)>);
 
-/// How the match ended. Inserted exactly once, when a seat dies.
+/// How the session ended. Inserted exactly once.
 #[derive(Resource, Clone, Copy, Debug, PartialEq, Eq)]
-pub struct MatchOutcome {
-    /// The winning seat, or `None` for a simultaneous draw.
-    pub winner: Option<usize>,
+pub enum SessionOutcome {
+    /// Versus: the winning seat, or `None` for a simultaneous draw.
+    Versus { winner: Option<usize> },
+    /// Solo: the run ended — `completed` iff the variant's goal was met
+    /// (vs a top-out). The banner reads the final snapshot for the numbers.
+    Solo { completed: bool },
 }
 
-/// Wall-clock match length (advances only while `Running`); the result banner
-/// reports it.
+/// Wall-clock session length (advances only while `Running`); the result
+/// banner reports it, and solo variants read it for time-limit/ranking rules.
 #[derive(Resource, Default)]
 pub struct MatchClock(pub f32);
 
-/// The engine rules of a versus seat: flat level-1 gravity (no goal system —
-/// pressure comes from the opponent, not the clock), the player's preview and
-/// lock-down preferences applied symmetrically to both seats, and the standard
-/// garbage cap.
-fn versus_engine_config(settings: &crate::settings::GameSettings) -> EngineConfig {
-    EngineConfig {
-        board_width: 10,
-        visible_height: 20,
-        preview_count: settings.next_count,
-        lock_down_mode: settings.lock_down_mode,
-        lock_down_seconds: LOCK_DOWN_SECONDS,
-        starting_level: MIN_LEVEL,
-        goal_system: GoalSystem::None,
-        garbage_cap: EngineConfig::default().garbage_cap,
+/// The rank a finished solo run earned on the leaderboard (None = did not
+/// place, or a bot/unqualified run). Written when the session ends; the
+/// result banner reads it.
+#[derive(Resource, Clone, Copy)]
+pub struct SoloRecorded(pub Option<usize>);
+
+/// The engine rules for this session's seats, by mode. Versus: flat level-1
+/// gravity (no goal system — pressure comes from the opponent, not the clock)
+/// with the player's preview/lock-down preferences applied symmetrically.
+/// Solo: the variant's own rules through the same config seam single-player
+/// always used (leveling gravity, goal systems, variant overrides).
+fn session_engine_config(
+    mode: SessionMode,
+    level: &LevelConfig,
+    settings: &crate::settings::GameSettings,
+) -> EngineConfig {
+    match mode {
+        SessionMode::Solo { variant } => {
+            crate::level::engine_bridge::engine_config_for_game(level, settings, variant)
+        }
+        SessionMode::Versus => EngineConfig {
+            board_width: 10,
+            visible_height: 20,
+            preview_count: settings.next_count,
+            lock_down_mode: settings.lock_down_mode,
+            lock_down_seconds: LOCK_DOWN_SECONDS,
+            starting_level: MIN_LEVEL,
+            goal_system: GoalSystem::None,
+            garbage_cap: EngineConfig::default().garbage_cap,
+        },
     }
 }
 
@@ -167,6 +210,8 @@ impl Plugin for SessionPlugin {
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::ai::ModelRegistry>()
             .init_resource::<LevelConfig>()
+            .init_resource::<crate::variant::VariantProgress>()
+            .init_resource::<crate::high_scores::HighScores>()
             .add_systems(OnEnter(GameState::Session), session_setup)
             .add_systems(OnExit(GameState::Session), versus_teardown)
             .add_systems(
@@ -182,8 +227,11 @@ impl Plugin for SessionPlugin {
             )
             .add_systems(
                 Update,
-                advance_match_clock.run_if(in_state(SessionPhase::Running)),
+                (advance_match_clock, check_solo_end)
+                    .chain()
+                    .run_if(in_state(SessionPhase::Running)),
             )
+            .add_systems(OnEnter(SessionPhase::Over), record_solo_run)
             // A press latched in the same render frame as a pause (a frame
             // that ran zero slices) must not fire on the first slice after a
             // resume, minutes later.
@@ -201,7 +249,10 @@ impl Plugin for SessionPlugin {
 fn session_setup(world: &mut World) {
     let config = *world.resource::<SessionConfig>();
     let settings = world.resource::<crate::settings::GameSettings>().clone();
-    let engine_config = versus_engine_config(&settings);
+    let engine_config = {
+        let level = world.resource::<LevelConfig>();
+        session_engine_config(config.mode, level, &settings)
+    };
 
     // Fresh deal per match: app-clock entropy unless a test/replay pinned it.
     // (Headless tests freeze the clock, so they pin the seed explicitly.)
@@ -218,7 +269,12 @@ fn session_setup(world: &mut World) {
     let mut bots = SessionBots::default();
     let das = das_config_from_level(world.resource::<LevelConfig>());
 
-    for (index, participant) in config.seats.into_iter().enumerate() {
+    for (index, participant) in config
+        .seats
+        .into_iter()
+        .take(config.mode.seat_count())
+        .enumerate()
+    {
         // Resolve the participant's driver before spawning (bot construction
         // reads the registry resource, which can't overlap the spawn borrow).
         let mut human = None;
@@ -259,14 +315,21 @@ fn session_setup(world: &mut World) {
 
     world.insert_non_send_resource(bots);
     world.insert_resource(MatchClock::default());
-    world.remove_resource::<MatchOutcome>();
+    world.remove_resource::<SessionOutcome>();
+    world.remove_resource::<SoloRecorded>();
+    // Solo variants track goal progress against the session clock.
+    if let SessionMode::Solo { .. } = config.mode {
+        world
+            .resource_mut::<crate::variant::VariantProgress>()
+            .reset();
+    }
 }
 
 /// Drop the bots and the outcome when the session ends. Seat entities are
 /// `DespawnOnExit(GameState::Session)`-scoped, so Bevy tears those down.
 fn versus_teardown(world: &mut World) {
     world.remove_non_send_resource::<SessionBots>();
-    world.remove_resource::<MatchOutcome>();
+    world.remove_resource::<SessionOutcome>();
 }
 
 /// Clear every seat's per-frame event buffer before this frame's fixed slices
@@ -324,7 +387,8 @@ type SeatStepQuery<'w, 's> = Query<
 fn versus_step(
     mut seats: SeatStepQuery,
     bots: Option<NonSendMut<SessionBots>>,
-    outcome: Option<Res<MatchOutcome>>,
+    outcome: Option<Res<SessionOutcome>>,
+    config: Res<SessionConfig>,
     mut commands: Commands,
     mut next: ResMut<NextState<SessionPhase>>,
 ) {
@@ -411,15 +475,76 @@ fn versus_step(
         }
     }
     if dead[0] || dead[1] {
-        let winner = match (dead[0], dead[1]) {
-            (true, true) => None,
-            (true, false) => Some(1),
-            _ => Some(0),
+        let outcome = match config.mode {
+            SessionMode::Versus => {
+                let winner = match (dead[0], dead[1]) {
+                    (true, true) => None,
+                    (true, false) => Some(1),
+                    _ => Some(0),
+                };
+                info!("versus over: winner {winner:?}");
+                SessionOutcome::Versus { winner }
+            }
+            // Solo: a death is an incomplete run (the variant goal ends runs
+            // via `check_solo_end`, not here).
+            SessionMode::Solo { .. } => SessionOutcome::Solo { completed: false },
         };
-        info!("versus over: winner {winner:?}");
-        commands.insert_resource(MatchOutcome { winner });
+        commands.insert_resource(outcome);
         next.set(SessionPhase::Over);
     }
+}
+
+/// Solo only: end the run when the active variant's goal/time condition is
+/// met (Marathon level cap, Sprint line target, Ultra time limit). Death is
+/// the step's job; this is the *successful* ending.
+fn check_solo_end(
+    config: Res<SessionConfig>,
+    clock: Res<MatchClock>,
+    seats: Query<&SeatSnapshot, With<Seat>>,
+    outcome: Option<Res<SessionOutcome>>,
+    mut commands: Commands,
+    mut next: ResMut<NextState<SessionPhase>>,
+) {
+    let SessionMode::Solo { variant } = config.mode else {
+        return;
+    };
+    if outcome.is_some() {
+        return;
+    }
+    let Some(snapshot) = seats.iter().next() else {
+        return;
+    };
+    let def = variant.def();
+    if crate::variant::VariantProgress::end_condition_met(&def, &snapshot.0, clock.0) {
+        info!("solo run complete ({})", def.display_name);
+        commands.insert_resource(SessionOutcome::Solo { completed: true });
+        next.set(SessionPhase::Over);
+    }
+}
+
+/// Solo only: when the run ends, file a HUMAN run for the leaderboard (bot
+/// seats — Watch-AI — never rank against the player) and stash the rank for
+/// the result banner.
+fn record_solo_run(
+    config: Res<SessionConfig>,
+    clock: Res<MatchClock>,
+    seats: Query<(&SeatSnapshot, Option<&HumanSeat>), With<Seat>>,
+    storage: Option<Res<crate::storage::StorageResource>>,
+    mut scores: ResMut<crate::high_scores::HighScores>,
+    mut commands: Commands,
+) {
+    let SessionMode::Solo { variant } = config.mode else {
+        return;
+    };
+    let Some((snapshot, human)) = seats.iter().next() else {
+        return;
+    };
+    let rank = if human.is_some() {
+        crate::features::high_scores::record(&snapshot.0, clock.0, variant, &mut scores, &storage)
+    } else {
+        None
+    };
+    commands.insert_resource(SoloRecorded(rank));
 }
 
 /// Total net attack in a slice's events.
@@ -544,6 +669,7 @@ mod tests {
         SessionConfig {
             // Greedy DT-20 on both seats: fast and deterministic.
             seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+            mode: SessionMode::Versus,
             seed: Some(seed),
         }
     }
@@ -720,7 +846,7 @@ mod tests {
                 routed = true;
                 break;
             }
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
@@ -754,15 +880,19 @@ mod tests {
         }
         for _ in 0..600 {
             tick_fixed(&mut app, 1);
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
         let outcome = *app
             .world()
-            .get_resource::<MatchOutcome>()
+            .get_resource::<SessionOutcome>()
             .expect("48 queued lines must kill seat 1 well within 10 seconds");
-        assert_eq!(outcome.winner, Some(0), "the survivor takes the match");
+        assert_eq!(
+            outcome,
+            SessionOutcome::Versus { winner: Some(0) },
+            "the survivor takes the match"
+        );
         // The phase transition queued by `detect_match_end` applies on the
         // next state-transition pass — run one more frame before asserting.
         app.update();
@@ -895,16 +1025,16 @@ mod tests {
         }
         for _ in 0..60 {
             tick_fixed(&mut app, 10); // multi-slice frames, like a hitch
-            if app.world().get_resource::<MatchOutcome>().is_some() {
+            if app.world().get_resource::<SessionOutcome>().is_some() {
                 break;
             }
         }
         let outcome = *app
             .world()
-            .get_resource::<MatchOutcome>()
+            .get_resource::<SessionOutcome>()
             .expect("both seats buried: someone must die");
         assert!(
-            outcome.winner.is_some(),
+            matches!(outcome, SessionOutcome::Versus { winner: Some(_) }),
             "deaths slices apart in one frame must crown the survivor, not draw"
         );
     }

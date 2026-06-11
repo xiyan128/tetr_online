@@ -15,7 +15,9 @@ use crate::ui::focus::{
 use crate::ui::widgets::{label_text, menu_button, theme, title_text};
 use crate::GameState;
 
-use super::{MatchClock, MatchOutcome, Participant, Seat, SeatStats, SessionConfig, SessionPhase};
+use super::{
+    MatchClock, Participant, Seat, SeatStats, SessionConfig, SessionOutcome, SessionPhase,
+};
 
 /// Countdown pacing: three number beats, then a shorter "GO!".
 const NUMBER_BEAT_SECONDS: f32 = 0.7;
@@ -262,48 +264,81 @@ fn seat_label(config: &SessionConfig, registry: &crate::ai::ModelRegistry, seat:
 fn spawn_result_banner(
     mut commands: Commands,
     assets: Res<GameAssets>,
-    outcome: Option<Res<MatchOutcome>>,
+    outcome: Option<Res<SessionOutcome>>,
     config: Res<SessionConfig>,
     registry: Res<crate::ai::ModelRegistry>,
     clock: Res<MatchClock>,
     seats: Query<(&Seat, &SeatStats)>,
+    seats_snapshot: Query<&super::SeatSnapshot>,
+    recorded: Option<Res<super::SoloRecorded>>,
 ) {
     // The banner reads the world it was raised over; a missing outcome (manual
-    // state poke in a test) reads as a draw rather than a panic.
-    let winner = outcome.map(|o| o.winner).unwrap_or(None);
-    let title = match winner {
-        None => "DRAW".to_string(),
-        Some(seat) => match config.seats[seat] {
-            Participant::Human => "YOU WIN!".to_string(),
-            Participant::Bot { .. } => {
-                // A bot won. Against a human that reads as a loss; in
-                // bot-vs-bot, name the victor.
-                if config.seats.contains(&Participant::Human) {
-                    "YOU LOSE".to_string()
-                } else {
-                    format!("{} WINS", seat_label(&config, &registry, seat))
-                }
-            }
-        },
-    };
-
-    let mut stats = [SeatStats::default(); 2];
-    for (seat, stat) in &seats {
-        if seat.index < 2 {
-            stats[seat.index] = *stat;
-        }
-    }
+    // state poke in a test) reads as a versus draw rather than a panic.
+    let outcome = outcome
+        .map(|o| *o)
+        .unwrap_or(super::SessionOutcome::Versus { winner: None });
     let minutes = (clock.0 / 60.0) as u32;
     let seconds = clock.0 % 60.0;
-    let summary = format!(
-        "{}  ATK {}   ·   {}  ATK {}   ·   TIME {}:{:04.1}",
-        seat_label(&config, &registry, 0),
-        stats[0].attack_sent,
-        seat_label(&config, &registry, 1),
-        stats[1].attack_sent,
-        minutes,
-        seconds,
-    );
+
+    let (title, summary) = match outcome {
+        super::SessionOutcome::Versus { winner } => {
+            let title = match winner {
+                None => "DRAW".to_string(),
+                Some(seat) => match config.seats[seat] {
+                    Participant::Human => "YOU WIN!".to_string(),
+                    Participant::Bot { .. } => {
+                        // A bot won. Against a human that reads as a loss; in
+                        // bot-vs-bot, name the victor.
+                        if config.seats[..config.mode.seat_count()].contains(&Participant::Human) {
+                            "YOU LOSE".to_string()
+                        } else {
+                            format!("{} WINS", seat_label(&config, &registry, seat))
+                        }
+                    }
+                },
+            };
+            let mut stats = [SeatStats::default(); 2];
+            for (seat, stat) in &seats {
+                if seat.index < 2 {
+                    stats[seat.index] = *stat;
+                }
+            }
+            let summary = format!(
+                "{}  ATK {}   ·   {}  ATK {}   ·   TIME {}:{:04.1}",
+                seat_label(&config, &registry, 0),
+                stats[0].attack_sent,
+                seat_label(&config, &registry, 1),
+                stats[1].attack_sent,
+                minutes,
+                seconds,
+            );
+            (title, summary)
+        }
+        super::SessionOutcome::Solo { completed } => {
+            let title = if completed {
+                "COMPLETE!".to_string()
+            } else {
+                "GAME OVER".to_string()
+            };
+            // The final numbers come straight off the seat's last snapshot.
+            let snap = seats_snapshot.iter().next().map(|s| s.0.clone());
+            let summary = match snap {
+                Some(snap) => {
+                    let rank = recorded
+                        .as_ref()
+                        .and_then(|r| r.0)
+                        .map(|rank| format!("   ·   HIGH SCORE #{}", rank + 1))
+                        .unwrap_or_default();
+                    format!(
+                        "SCORE {}   ·   LINES {}   ·   LEVEL {}   ·   TIME {}:{:04.1}{}",
+                        snap.score, snap.lines, snap.level, minutes, seconds, rank
+                    )
+                }
+                None => format!("TIME {minutes}:{seconds:04.1}"),
+            };
+            (title, summary)
+        }
+    };
 
     let root = commands
         .spawn((
@@ -317,9 +352,13 @@ fn spawn_result_banner(
     let summary_id = commands
         .spawn(label_text(summary, assets.font.clone()))
         .id();
+    let rematch_label = match config.mode {
+        super::SessionMode::Solo { .. } => "Retry",
+        super::SessionMode::Versus => "Rematch",
+    };
     let rematch = commands
         .spawn((
-            menu_button(0, "Rematch", assets.font.clone()),
+            menu_button(0, rematch_label, assets.font.clone()),
             ResultAction::Rematch,
         ))
         .id();

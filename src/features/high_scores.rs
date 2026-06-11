@@ -74,6 +74,45 @@ impl Plugin for HighScoresFeaturePlugin {
 
 /// Build a [`HighScore`] from the final snapshot + run clock and try to file it
 /// for the active variant. Persists the whole board iff the run made the table.
+/// File a finished run for `variant`, returning its rank when it made the
+/// table (and persisting the board). The qualify rule: a time-ranked variant
+/// (Sprint) ranks by *lowest* time, so a top-out before the line target would
+/// post a sub-target time that beats every legitimate completion — dropped.
+/// Score-ranked variants (Marathon, Ultra) record every run; a partial run's
+/// lower score already sorts correctly. Persistence is skipped when no
+/// storage is wired (headless tests).
+pub(crate) fn record(
+    snapshot: &crate::engine::EngineSnapshot,
+    elapsed_seconds: f32,
+    variant: crate::variant::Variant,
+    scores: &mut HighScores,
+    storage: &Option<bevy::prelude::Res<StorageResource>>,
+) -> Option<usize> {
+    if !run_qualifies(&variant.def(), snapshot, elapsed_seconds) {
+        return None;
+    }
+
+    let candidate = HighScore {
+        score: snapshot.score,
+        time_seconds: elapsed_seconds,
+        lines: snapshot.lines,
+        level: snapshot.level,
+    };
+
+    let rank = scores.insert(variant, candidate)?;
+    info!(
+        "high score recorded for {}: rank {} (score {}, {})",
+        variant.display_name(),
+        rank + 1,
+        candidate.score,
+        format_time(candidate.time_seconds),
+    );
+    if let Some(storage) = storage {
+        storage.0.save(keys::HIGH_SCORES, &codec::serialize(scores));
+    }
+    Some(rank)
+}
+
 fn record_run(
     snapshot: Res<LatestSnapshot>,
     progress: Res<VariantProgress>,
@@ -83,43 +122,18 @@ fn record_run(
     sandbox: Option<Res<crate::ai::AiSandbox>>,
 ) {
     // A Watch-AI session ends on this same screen, but a bot's run is not a
-    // human achievement: it must never file into the leaderboard (the audit
-    // found bot runs silently ranking against the player).
+    // human achievement: it must never file into the leaderboard.
     if sandbox.is_some_and(|s| s.active()) {
         return;
     }
-
-    let snap = &snapshot.0;
-    let variant = active.0;
-
-    // Only file a run that actually qualifies for the board. A time-ranked
-    // variant (Sprint) ranks by *lowest* time, so a top-out before the line
-    // target would post a sub-target time that beats every legitimate
-    // completion — drop it. Score-ranked variants (Marathon, Ultra) record
-    // every run; a partial run's lower score already sorts correctly.
-    if !run_qualifies(&variant.def(), snap, progress.elapsed_seconds) {
-        return;
-    }
-
-    let candidate = HighScore {
-        score: snap.score,
-        time_seconds: progress.elapsed_seconds,
-        lines: snap.lines,
-        level: snap.level,
-    };
-
-    if let Some(rank) = scores.insert(variant, candidate) {
-        info!(
-            "high score recorded for {}: rank {} (score {}, {})",
-            variant.display_name(),
-            rank + 1,
-            candidate.score,
-            format_time(candidate.time_seconds),
-        );
-        storage
-            .0
-            .save(keys::HIGH_SCORES, &codec::serialize(&scores));
-    }
+    let storage_opt = Some(storage);
+    record(
+        &snapshot.0,
+        progress.elapsed_seconds,
+        active.0,
+        &mut scores,
+        &storage_opt,
+    );
 }
 
 /// Whether a finished run should be filed for `def`.

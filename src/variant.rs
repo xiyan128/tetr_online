@@ -168,6 +168,13 @@ impl VariantProgress {
 }
 
 /// Reset [`VariantProgress`] when a game starts. Registered on `OnEnter(Playing)`.
+impl VariantProgress {
+    /// Rewind for a fresh run (the session spawn path calls this directly).
+    pub fn reset(&mut self) {
+        *self = Self::default();
+    }
+}
+
 pub fn reset_variant_progress(mut progress: ResMut<VariantProgress>) {
     *progress = VariantProgress::default();
 }

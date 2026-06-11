@@ -19,7 +19,7 @@
 use bevy::prelude::*;
 
 mod help;
-mod high_scores;
+pub(crate) mod high_scores;
 pub(crate) mod hit_stop;
 mod info_panel;
 mod notifications;
