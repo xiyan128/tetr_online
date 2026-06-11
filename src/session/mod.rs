@@ -658,6 +658,174 @@ mod tests {
         app.insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO));
     }
 
+    fn solo_human(seed: u64) -> SessionConfig {
+        SessionConfig {
+            seats: [Participant::Human, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            seed: Some(seed),
+        }
+    }
+
+    /// THE schedule-determinism pin, re-homed from the deleted level driver:
+    /// N fixed slices through the real schedule must leave a keys-untouched
+    /// human seat's engine byte-identical to a directly-stepped reference
+    /// (neutral frames, same dt) — gravity and lock-down advance independent
+    /// of render framing.
+    #[test]
+    fn solo_schedule_matches_direct_engine_stepping() {
+        let slices = 10u32;
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, slices);
+
+        let level = LevelConfig::default();
+        let settings = crate::settings::GameSettings::default();
+        let config = session_engine_config(
+            SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            &level,
+            &settings,
+        );
+        let mut reference = Engine::new(config, 7);
+        for _ in 0..slices {
+            reference.step(crate::engine::InputFrame {
+                dt_seconds: SIM_DT_SECONDS,
+                ..Default::default()
+            });
+        }
+
+        let mut seats = app.world_mut().query::<&SeatSnapshot>();
+        let snapshot = seats.iter(app.world()).next().expect("one seat");
+        assert_eq!(
+            snapshot.0,
+            reference.snapshot(),
+            "schedule-driven solo play must match direct fixed stepping"
+        );
+    }
+
+    /// One press = one action even when several fixed slices run in a single
+    /// render frame — the edge-latch property, re-homed from the level driver.
+    #[test]
+    fn one_press_yields_one_action_across_slices() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 1); // spawn the first piece
+
+        app.world_mut()
+            .resource_mut::<ButtonInput<KeyCode>>()
+            .press(KeyCode::ShiftLeft); // the default Hold bind
+        tick_fixed(&mut app, 3); // three slices, one render frame each chunk
+
+        let mut seats = app.world_mut().query::<&SeatEngine>();
+        let engine = seats.iter(app.world()).next().expect("one seat");
+        assert!(
+            engine.0.snapshot().hold.is_some(),
+            "the held piece should occupy the hold slot"
+        );
+        // A second hold in the same lifetime is illegal; a duplicated edge
+        // would be invisible in `hold`. The latch discipline is pinned by the
+        // versus-side reset tests; here the observable is one successful hold.
+    }
+
+    /// Pause must freeze WITHOUT despawning: the seat entities and the
+    /// engine's exact state survive a pause/resume round-trip (the property
+    /// the old computed-states pause bug violated).
+    #[test]
+    fn pause_preserves_the_session() {
+        let mut app = headless_versus_app(solo_human(7));
+        tick_fixed(&mut app, 30);
+
+        let before: Vec<_> = {
+            let mut q = app.world_mut().query::<(&Seat, &SeatSnapshot)>();
+            q.iter(app.world())
+                .map(|(s, snap)| (s.index, snap.0.clone()))
+                .collect()
+        };
+
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Paused);
+        app.update();
+        tick_fixed(&mut app, 10); // time passes; nothing may step
+        app.world_mut()
+            .resource_mut::<NextState<SessionPhase>>()
+            .set(SessionPhase::Running);
+        app.update();
+
+        let after: Vec<_> = {
+            let mut q = app.world_mut().query::<(&Seat, &SeatSnapshot)>();
+            q.iter(app.world())
+                .map(|(s, snap)| (s.index, snap.0.clone()))
+                .collect()
+        };
+        assert_eq!(before, after, "pause must freeze, not rebuild or advance");
+    }
+
+    /// Watch-AI re-homed: a one-seat BOT session plays the game (the deleted
+    /// sandbox plugin's contract).
+    #[test]
+    fn a_solo_bot_seat_drives_the_engine() {
+        let mut app = headless_versus_app(SessionConfig {
+            seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+            mode: SessionMode::Solo {
+                variant: crate::variant::Variant::Marathon,
+            },
+            seed: Some(7),
+        });
+        let mut locked = false;
+        for _ in 0..240 {
+            tick_fixed(&mut app, 1);
+            let mut seats = app.world_mut().query::<&SeatSnapshot>();
+            if !seats
+                .iter(app.world())
+                .next()
+                .unwrap()
+                .0
+                .board_cells
+                .is_empty()
+            {
+                locked = true;
+                break;
+            }
+        }
+        assert!(locked, "the bot must lock a piece with no keyboard input");
+    }
+
+    /// The leaderboard rules, re-homed: a finished HUMAN solo run files (and
+    /// stashes its rank); a BOT solo run never does.
+    #[test]
+    fn solo_recording_files_humans_and_skips_bots() {
+        for (config, expect_recorded) in [
+            (solo_human(7), true),
+            (
+                SessionConfig {
+                    seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
+                    mode: SessionMode::Solo {
+                        variant: crate::variant::Variant::Marathon,
+                    },
+                    seed: Some(7),
+                },
+                false,
+            ),
+        ] {
+            let mut app = headless_versus_app(config);
+            tick_fixed(&mut app, 5);
+            app.world_mut()
+                .resource_mut::<NextState<SessionPhase>>()
+                .set(SessionPhase::Over);
+            app.update();
+
+            let scores = app.world().resource::<crate::high_scores::HighScores>();
+            let table = scores.table(crate::variant::Variant::Marathon);
+            assert_eq!(
+                !table.is_empty(),
+                expect_recorded,
+                "human files, bot does not (expect_recorded={expect_recorded})"
+            );
+        }
+    }
+
     fn bot_match(seed: u64) -> SessionConfig {
         SessionConfig {
             // Greedy DT-20 on both seats: fast and deterministic.
