@@ -69,6 +69,16 @@ fn left() -> InputFrame {
     }
 }
 
+/// The active piece's origin, read from a fresh snapshot. Movement is snapshot
+/// state, so "the grounded move succeeded" is observed as an origin shift.
+fn active_origin(engine: &Engine) -> (isize, isize) {
+    engine
+        .snapshot()
+        .active
+        .expect("an active piece is present")
+        .origin
+}
+
 fn wait(dt_seconds: f32) -> InputFrame {
     InputFrame {
         dt_seconds,
@@ -143,17 +153,17 @@ fn extended_grounded_move_resets_timer_under_budget() {
 
         // A successful grounded left move (still under the 15-action budget)
         // must reset the timer back to 0.5s.
-        let events = engine.step(left());
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, EngineEvent::Moved { .. })),
-            "action {action}: grounded left move should emit a Moved event"
-        );
+        let origin_before = active_origin(&engine);
+        engine.step(left());
         let after = engine
             .snapshot()
             .active
             .expect("active piece after grounded move");
+        assert_eq!(
+            after.origin,
+            (origin_before.0 - 1, origin_before.1),
+            "action {action}: the grounded left move must succeed (one cell left)"
+        );
         assert!(
             after.landed,
             "action {action}: piece must remain grounded on the flat floor"
@@ -185,12 +195,12 @@ fn extended_15_action_budget_does_not_reset_after_exhaustion() {
 
     // Spend all 15 grounded resets via successful left moves on the flat floor.
     for _ in 0..EXTENDED_LOCK_RESET_BUDGET {
-        let events = engine.step(left());
-        assert!(
-            events
-                .iter()
-                .any(|e| matches!(e, EngineEvent::Moved { .. })),
-            "each budgeted left move should succeed and emit Moved"
+        let origin_before = active_origin(&engine);
+        engine.step(left());
+        assert_eq!(
+            active_origin(&engine),
+            (origin_before.0 - 1, origin_before.1),
+            "each budgeted left move should succeed (one cell left)"
         );
         assert_eq!(
             engine
@@ -215,13 +225,13 @@ fn extended_15_action_budget_does_not_reset_after_exhaustion() {
         "timer should have drained to ~0.2, got {drained}"
     );
 
-    // The 16th grounded move: still a successful left move (Moved emitted), but
-    // the budget is exhausted, so it MUST NOT reset the timer back to 0.5s.
-    let events = engine.step(left());
-    assert!(
-        events
-            .iter()
-            .any(|e| matches!(e, EngineEvent::Moved { .. })),
+    // The 16th grounded move: still a successful left move (the origin shifts),
+    // but the budget is exhausted, so it MUST NOT reset the timer back to 0.5s.
+    let origin_before = active_origin(&engine);
+    engine.step(left());
+    assert_eq!(
+        active_origin(&engine),
+        (origin_before.0 - 1, origin_before.1),
         "the 16th left move still physically succeeds"
     );
     let after_16th = engine
@@ -243,15 +253,16 @@ fn extended_15_action_budget_does_not_reset_after_exhaustion() {
     assert!(
         matches!(
             events.as_slice(),
-            [
-                EngineEvent::Locked {
-                    lines_cleared: 0,
-                    ..
-                },
-                EngineEvent::Spawned { .. },
-            ]
+            [EngineEvent::Locked {
+                lines_cleared: 0,
+                ..
+            }]
         ),
-        "expired lock timer must lock then spawn, got {events:?}"
+        "expired lock timer must lock the piece, got {events:?}"
+    );
+    assert!(
+        engine.snapshot().active.is_some(),
+        "the locking step must leave the next piece active in the snapshot"
     );
 }
 
@@ -410,19 +421,20 @@ fn gravity_landing_then_timer_expiry_locks_and_spawns() {
     assert!(
         matches!(
             events.as_slice(),
-            [
-                EngineEvent::Locked {
-                    lines_cleared: 0,
-                    ..
-                },
-                EngineEvent::Spawned { .. },
-            ]
+            [EngineEvent::Locked {
+                lines_cleared: 0,
+                ..
+            }]
         ),
-        "timer expiry must produce [Locked, Spawned], got {events:?}"
+        "timer expiry must produce a lock, got {events:?}"
     );
     assert_eq!(
         engine.snapshot().board_cells.len(),
         4,
         "the locked piece's four minos are now on the board"
+    );
+    assert!(
+        engine.snapshot().active.is_some(),
+        "the locking step must leave the next piece active in the snapshot"
     );
 }

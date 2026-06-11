@@ -13,191 +13,16 @@ use crate::engine::active_piece::ActivePiece;
 use crate::engine::attack::attack_lines;
 use crate::engine::board::{Board, CellKind};
 use crate::engine::game_over::{is_block_out, is_lock_out};
-use crate::engine::garbage::{GarbageBatch, PendingGarbage};
+use crate::engine::garbage::PendingGarbage;
 use crate::engine::generator::PieceGenerator;
-use crate::engine::goals::GoalSystem;
-use crate::engine::gravity::{fall_speed_seconds, MIN_LEVEL};
+use crate::engine::gravity::fall_speed_seconds;
 use crate::engine::lock_clear::lock_and_clear;
-use crate::engine::lock_down::{apply_grounded_move_or_rotation, LockDownMode, LOCK_DOWN_SECONDS};
+use crate::engine::lock_down::apply_grounded_move_or_rotation;
 use crate::engine::pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 use crate::engine::scoring::{score_action, EngineScoreAction, ScoreAward, ScoreState};
 use crate::engine::t_spin::{classify_t_spin, is_t_slot, TSpinKind};
+use crate::engine::types::*;
 use crate::engine::RotationDirection;
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EngineConfig {
-    pub board_width: usize,
-    pub visible_height: usize,
-    pub buffer_height: usize,
-    pub preview_count: usize,
-    pub lock_down_mode: LockDownMode,
-    pub lock_down_seconds: f32,
-    pub starting_level: u8,
-    pub goal_system: GoalSystem,
-    /// Versus: the maximum pending-garbage lines that rise onto the board after
-    /// one clear-less lock (the "garbage cap"). Pending lines beyond the cap
-    /// stay queued for the next opportunity. `0` disables rising entirely —
-    /// pending garbage can then only ever be cancelled (a config edge, not the
-    /// "uncapped" convention some games use). Irrelevant outside versus — the
-    /// queue is only fed by [`Engine::queue_garbage`].
-    pub garbage_cap: u32,
-}
-
-impl Default for EngineConfig {
-    fn default() -> Self {
-        Self {
-            board_width: 10,
-            visible_height: 20,
-            buffer_height: 20,
-            preview_count: 5,
-            lock_down_mode: LockDownMode::Extended,
-            lock_down_seconds: LOCK_DOWN_SECONDS,
-            starting_level: MIN_LEVEL,
-            goal_system: GoalSystem::Fixed,
-            garbage_cap: 8,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct InputFrame {
-    pub dt_seconds: f32,
-    pub left: bool,
-    pub right: bool,
-    pub soft_drop: bool,
-    pub hard_drop: bool,
-    pub rotate_clockwise: bool,
-    pub rotate_counterclockwise: bool,
-    pub hold: bool,
-    pub pause: bool,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub enum EngineEvent {
-    Spawned {
-        piece_type: PieceType,
-    },
-    Moved {
-        piece_type: PieceType,
-        direction: MoveDirection,
-        origin: (isize, isize),
-    },
-    Rotated {
-        piece_type: PieceType,
-        rotation: PieceRotation,
-        origin: (isize, isize),
-        kick_number: u8,
-    },
-    HardDropped {
-        piece_type: PieceType,
-        cells_dropped: usize,
-    },
-    Locked {
-        piece_type: PieceType,
-        lines_cleared: usize,
-    },
-    ScoreAwarded {
-        action: EngineScoreAction,
-        score: usize,
-        total_score: usize,
-        back_to_back_bonus: bool,
-    },
-    Held {
-        held: PieceType,
-        active: PieceType,
-    },
-    /// Versus: this lock's attack survived cancellation — `lines` garbage lines
-    /// leave the board for the opponent (net of any pending garbage it offset;
-    /// a fully-cancelled attack emits nothing). The match driver routes this to
-    /// the opponent's [`Engine::queue_garbage`].
-    AttackSent {
-        lines: u32,
-    },
-    /// Versus: pending garbage rose onto the board after a clear-less lock
-    /// (`lines` rows, capped per lock by [`EngineConfig::garbage_cap`]).
-    GarbageInserted {
-        lines: u32,
-    },
-    GameOver {
-        reason: GameOverStatus,
-    },
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub enum GameOverStatus {
-    BlockOut,
-    LockOut,
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq)]
-pub struct SnapshotCell {
-    pub x: isize,
-    pub y: isize,
-    /// The colour identity of the cell. For a garbage cell this is a legacy
-    /// fill (`I`) kept so colour-by-piece consumers keep working; check
-    /// [`garbage`](Self::garbage) first — a versus renderer paints garbage
-    /// neutral, not cyan.
-    pub piece_type: PieceType,
-    /// True for a garbage-row cell ([`CellKind::Garbage`]); always `false` for
-    /// active-piece and ghost cells.
-    pub garbage: bool,
-}
-
-#[derive(Clone, Debug, PartialEq)]
-pub struct ActivePieceSnapshot {
-    pub piece_type: PieceType,
-    pub rotation: PieceRotation,
-    pub origin: (isize, isize),
-    pub cells: Vec<SnapshotCell>,
-    pub hold_used: bool,
-    pub landed: bool,
-    pub lock_timer_seconds: f32,
-    pub lock_timer_fraction: f32,
-}
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct EngineSnapshot {
-    pub config: EngineConfig,
-    pub board_cells: Vec<SnapshotCell>,
-    pub active: Option<ActivePieceSnapshot>,
-    pub ghost_cells: Vec<SnapshotCell>,
-    pub hold: Option<PieceType>,
-    pub next_queue: Vec<PieceType>,
-    pub score: usize,
-    pub lines: usize,
-    pub level: u8,
-    pub goal_remaining: usize,
-    pub back_to_back_active: bool,
-    /// Consecutive line-clearing placements so far (the combo counter; `0` when no
-    /// combo is active). Lets a search resume from the real in-game combo instead of
-    /// assuming `0`, so it can value continuing a chain.
-    pub combo: u32,
-    /// Pieces the generator's **current 7-bag** has not yet dealt — the exact set
-    /// the next piece *beyond the revealed queue* draws from (empty ⇒ a bag
-    /// boundary: the next deal opens a fresh bag of all seven). Exported because a
-    /// search speculating past the queue cannot reconstruct this from `next_queue`
-    /// alone: the queue window straddles bag boundaries, so any reconstruction is
-    /// wrong whenever the active piece is not the first piece of its bag.
-    pub bag_remainder: Vec<PieceType>,
-    /// Versus: the pending-garbage queue against this player, oldest batch
-    /// first (empty outside versus). Hole columns are already determined (drawn
-    /// at queue time from this engine's seeded stream), so a search can model
-    /// rising exactly; [`pending_garbage_total`](Self::pending_garbage_total)
-    /// is the incoming-meter sum a UI shows.
-    pub pending_garbage: Vec<GarbageBatch>,
-    pub game_over: Option<GameOverStatus>,
-}
-
-impl EngineSnapshot {
-    /// Total pending-garbage lines (the incoming meter). Saturating, like the
-    /// engine's own meter.
-    pub fn pending_garbage_total(&self) -> u32 {
-        self.pending_garbage
-            .iter()
-            .map(|b| b.lines)
-            .fold(0u32, u32::saturating_add)
-    }
-}
 
 pub struct Engine {
     config: EngineConfig,
@@ -215,11 +40,8 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(config: EngineConfig, seed: u64) -> Self {
-        let board = Board::with_top_margin(
-            config.board_width,
-            config.visible_height,
-            config.buffer_height,
-        );
+        let board =
+            Board::with_top_margin(config.board_width, config.visible_height, BUFFER_HEIGHT);
         let score_state = ScoreState::new(config.goal_system, config.starting_level);
         let mut engine = Self {
             config,
@@ -336,6 +158,12 @@ impl Engine {
     /// runs out-of-band of [`step`](Self::step) there is no event sink: the `bool`
     /// return (and the latched game-over in the snapshot) is the caller's signal,
     /// not an [`EngineEvent::GameOver`].
+    /// QUARANTINED legacy seam: inserts raw, bypassing the pending queue,
+    /// cancellation, the cap, and event emission that [`queue_garbage`]
+    /// (Self::queue_garbage) owns. Kept ONLY for the TBP referee and the
+    /// scripted-pressure scenarios (`tetr-research::versus_legacy`, whose
+    /// recorded CC2 baselines it underpins — deleting this means re-recording
+    /// them on the engine path first). Everything else uses `queue_garbage`.
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
         // A finished game accepts no more garbage: the board stays a faithful
         // record of how it ended, and the latched game-over reason is never
@@ -454,7 +282,6 @@ impl Engine {
         update_landing_state(&self.board, &self.config, &mut active, false, false);
         self.active = Some(active);
         self.gravity_accumulator_seconds = 0.0;
-        events.push(EngineEvent::Spawned { piece_type });
     }
 
     fn hold_active_piece(&mut self, events: &mut Vec<EngineEvent>) {
@@ -503,13 +330,6 @@ impl Engine {
         );
         if direction == MoveDirection::Down {
             self.gravity_accumulator_seconds = 0.0;
-        }
-        events.push(EngineEvent::Moved {
-            piece_type: active.piece_type(),
-            direction,
-            origin,
-        });
-        if direction == MoveDirection::Down {
             self.score(EngineScoreAction::SoftDrop, events);
         }
     }
@@ -708,7 +528,7 @@ impl Engine {
         if self.active.as_ref().is_some_and(ActivePiece::landed) {
             self.advance_lock_timer(dt_seconds, events);
         } else {
-            self.advance_gravity(dt_seconds, events);
+            self.advance_gravity(dt_seconds);
         }
     }
 
@@ -726,7 +546,7 @@ impl Engine {
         self.lock_active_piece(active, events);
     }
 
-    fn advance_gravity(&mut self, dt_seconds: f32, events: &mut Vec<EngineEvent>) {
+    fn advance_gravity(&mut self, dt_seconds: f32) {
         self.gravity_accumulator_seconds += dt_seconds;
         let fall_seconds = fall_speed_seconds(self.score_state.level());
 
@@ -748,11 +568,6 @@ impl Engine {
 
             active.move_to(origin, crate::engine::PieceAction::Fall);
             update_landing_state(&self.board, &self.config, active, false, false);
-            events.push(EngineEvent::Moved {
-                piece_type: active.piece_type(),
-                direction: MoveDirection::Down,
-                origin,
-            });
             if active.landed() {
                 self.gravity_accumulator_seconds = 0.0;
                 return;
@@ -870,9 +685,14 @@ fn push_score_award(events: &mut Vec<EngineEvent>, score_award: ScoreAward) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::lock_down::LOCK_DOWN_SECONDS;
 
     fn active_piece_type(engine: &Engine) -> PieceType {
         engine.snapshot().active.expect("active piece").piece_type
+    }
+
+    fn active_origin(engine: &Engine) -> (isize, isize) {
+        engine.snapshot().active.expect("active piece").origin
     }
 
     fn lock_piece(engine: &mut Engine, active: ActivePiece) -> Vec<EngineEvent> {
@@ -907,22 +727,17 @@ mod tests {
         let mut engine = Engine::new(config.clone(), 0);
         let first_piece_type = engine.snapshot().next_queue[0];
         let piece = Piece::from(first_piece_type);
-        let board = Board::with_top_margin(
-            config.board_width,
-            config.visible_height,
-            config.buffer_height,
-        );
+        let board =
+            Board::with_top_margin(config.board_width, config.visible_height, BUFFER_HEIGHT);
         let spawn_origin = piece.spawn_coords(config.board_width, config.visible_height);
         let expected_origin = piece
             .try_move(&board, spawn_origin, MoveDirection::Down)
             .unwrap_or(spawn_origin);
 
-        assert_eq!(
-            engine.step(InputFrame::default()),
-            vec![EngineEvent::Spawned {
-                piece_type: first_piece_type
-            }]
-        );
+        // The spawn is snapshot state, not an event: active goes None -> Some
+        // across a step that emits nothing else.
+        assert!(engine.snapshot().active.is_none());
+        assert!(engine.step(InputFrame::default()).is_empty());
 
         let snapshot = engine.snapshot();
         let active = snapshot.active.expect("spawned active piece");
@@ -969,15 +784,10 @@ mod tests {
                 hold: true,
                 ..InputFrame::default()
             }),
-            vec![
-                EngineEvent::Spawned {
-                    piece_type: second_piece_type,
-                },
-                EngineEvent::Held {
-                    held: first_piece_type,
-                    active: second_piece_type,
-                },
-            ]
+            vec![EngineEvent::Held {
+                held: first_piece_type,
+                active: second_piece_type,
+            }]
         );
 
         let snapshot = engine.snapshot();
@@ -1039,17 +849,14 @@ mod tests {
         let before = engine.snapshot().active.expect("active piece");
         let expected_origin = (before.origin.0 - 1, before.origin.1);
 
-        assert_eq!(
-            engine.step(InputFrame {
+        // Movement is snapshot state: the step emits nothing, and the origin
+        // shifts by exactly one cell.
+        assert!(engine
+            .step(InputFrame {
                 left: true,
                 ..InputFrame::default()
-            }),
-            vec![EngineEvent::Moved {
-                piece_type: before.piece_type,
-                direction: MoveDirection::Left,
-                origin: expected_origin,
-            }]
-        );
+            })
+            .is_empty());
 
         assert_eq!(
             engine.snapshot().active.expect("moved active piece").origin,
@@ -1098,20 +905,14 @@ mod tests {
                 soft_drop: true,
                 ..InputFrame::default()
             }),
-            vec![
-                EngineEvent::Moved {
-                    piece_type: before.piece_type,
-                    direction: MoveDirection::Down,
-                    origin: expected_origin,
-                },
-                EngineEvent::ScoreAwarded {
-                    action: EngineScoreAction::SoftDrop,
-                    score: 1,
-                    total_score: 1,
-                    back_to_back_bonus: false,
-                },
-            ]
+            vec![EngineEvent::ScoreAwarded {
+                action: EngineScoreAction::SoftDrop,
+                score: 1,
+                total_score: 1,
+                back_to_back_bonus: false,
+            }]
         );
+        assert_eq!(active_origin(&engine), expected_origin);
     }
 
     #[test]
@@ -1221,18 +1022,15 @@ mod tests {
                     piece_type: locked_piece_type,
                     lines_cleared: 0,
                 },
-                EngineEvent::Spawned {
-                    piece_type: spawned_piece_type,
-                },
             ] if *piece_type == first_piece_type
                 && *locked_piece_type == first_piece_type
-                && *spawned_piece_type == second_piece_type
                 && *cells_dropped > 0
                 && *cells == *cells_dropped
                 && *score == *cells_dropped * 2
                 && *total_score == *score
         ));
 
+        // The same step spawned the next piece: visible in the snapshot.
         let snapshot = engine.snapshot();
         assert_eq!(snapshot.board_cells.len(), 4);
         assert_eq!(
@@ -1259,16 +1057,17 @@ mod tests {
             before.origin
         );
 
-        assert_eq!(
-            engine.step(InputFrame {
+        // The second half-interval crosses the fall threshold: the piece falls
+        // exactly one row (gravity is snapshot state, the step emits nothing).
+        assert!(engine
+            .step(InputFrame {
                 dt_seconds: half_fall,
                 ..InputFrame::default()
-            }),
-            vec![EngineEvent::Moved {
-                piece_type: before.piece_type,
-                direction: MoveDirection::Down,
-                origin: (before.origin.0, before.origin.1 - 1),
-            }]
+            })
+            .is_empty());
+        assert_eq!(
+            active_origin(&engine),
+            (before.origin.0, before.origin.1 - 1)
         );
     }
 
@@ -1277,17 +1076,14 @@ mod tests {
         let mut engine = Engine::new(EngineConfig::default(), 0);
         engine.active = Some(ActivePiece::new(PieceType::T, (3, 0)));
 
-        assert_eq!(
-            engine.step(InputFrame {
+        // One full fall interval drops the T one row onto the floor.
+        assert!(engine
+            .step(InputFrame {
                 dt_seconds: fall_speed_seconds(engine.snapshot().level),
                 ..InputFrame::default()
-            }),
-            vec![EngineEvent::Moved {
-                piece_type: PieceType::T,
-                direction: MoveDirection::Down,
-                origin: (3, -1),
-            }]
-        );
+            })
+            .is_empty());
+        assert_eq!(active_origin(&engine), (3, -1));
 
         let active = engine.snapshot().active.expect("landed active piece");
         assert!(active.landed);
@@ -1301,15 +1097,14 @@ mod tests {
 
         assert!(matches!(
             events.as_slice(),
-            [
-                EngineEvent::Locked {
-                    piece_type: PieceType::T,
-                    lines_cleared: 0,
-                },
-                EngineEvent::Spawned { .. },
-            ]
+            [EngineEvent::Locked {
+                piece_type: PieceType::T,
+                lines_cleared: 0,
+            }]
         ));
         assert_eq!(engine.snapshot().board_cells.len(), 4);
+        // The locking step also spawned the next piece.
+        assert!(engine.snapshot().active.is_some());
     }
 
     #[test]
@@ -1325,15 +1120,15 @@ mod tests {
         engine.active = Some(active);
 
         for _ in 0..crate::engine::EXTENDED_LOCK_RESET_BUDGET {
-            assert_eq!(
-                engine
-                    .step(InputFrame {
-                        left: true,
-                        ..InputFrame::default()
-                    })
-                    .len(),
-                1
-            );
+            // Each grounded left move succeeds: origin.x shifts by exactly -1.
+            let x_before = active_origin(&engine).0;
+            assert!(engine
+                .step(InputFrame {
+                    left: true,
+                    ..InputFrame::default()
+                })
+                .is_empty());
+            assert_eq!(active_origin(&engine).0, x_before - 1);
             assert_eq!(
                 engine
                     .active
@@ -1358,15 +1153,16 @@ mod tests {
             crate::engine::EXTENDED_LOCK_RESET_BUDGET
         );
 
-        assert_eq!(
-            engine
-                .step(InputFrame {
-                    left: true,
-                    ..InputFrame::default()
-                })
-                .len(),
-            1
-        );
+        // The 16th grounded move still succeeds physically (origin.x shifts)
+        // but no longer resets the drained timer.
+        let x_before = active_origin(&engine).0;
+        assert!(engine
+            .step(InputFrame {
+                left: true,
+                ..InputFrame::default()
+            })
+            .is_empty());
+        assert_eq!(active_origin(&engine).0, x_before - 1);
         assert_eq!(
             engine
                 .active
@@ -1382,14 +1178,13 @@ mod tests {
         });
         assert!(matches!(
             events.as_slice(),
-            [
-                EngineEvent::Locked {
-                    piece_type: PieceType::T,
-                    lines_cleared: 0,
-                },
-                EngineEvent::Spawned { .. },
-            ]
+            [EngineEvent::Locked {
+                piece_type: PieceType::T,
+                lines_cleared: 0,
+            }]
         ));
+        // The expiring lock spawned the next piece in the same step.
+        assert!(engine.snapshot().active.is_some());
     }
 
     #[test]
@@ -1419,11 +1214,14 @@ mod tests {
                 // Clearing the 4-wide board empties it: a perfect clear, whose
                 // 10 attack lines leave uncancelled (nothing is pending).
                 EngineEvent::AttackSent { lines: 10 },
-                EngineEvent::Spawned { .. },
             ]
         ));
 
         let snapshot = engine.snapshot();
+        assert!(
+            snapshot.active.is_some(),
+            "the lock spawned the next piece in the same step"
+        );
         assert_eq!(snapshot.score, 100);
         assert_eq!(snapshot.lines, 1);
         assert_eq!(snapshot.goal_remaining, 9);
@@ -1475,9 +1273,9 @@ mod tests {
                 },
                 // Tetris (4) + perfect clear (10) on the emptied 4-wide board.
                 EngineEvent::AttackSent { lines: 14 },
-                EngineEvent::Spawned { .. },
             ]
         ));
+        assert!(engine.snapshot().active.is_some(), "lock spawns the next");
         assert!(engine.snapshot().back_to_back_active);
 
         fill_tetris_well(&mut engine);
@@ -1497,9 +1295,9 @@ mod tests {
                 },
                 // Tetris (4) + B2B (1) + combo index 1 (0) + perfect clear (10).
                 EngineEvent::AttackSent { lines: 15 },
-                EngineEvent::Spawned { .. },
             ]
         ));
+        assert!(engine.snapshot().active.is_some(), "lock spawns the next");
         assert_eq!(engine.snapshot().score, 2000);
     }
 
@@ -1536,9 +1334,9 @@ mod tests {
                     total_score: 400,
                     back_to_back_bonus: false,
                 },
-                EngineEvent::Spawned { .. },
             ]
         ));
+        assert!(engine.snapshot().active.is_some(), "lock spawns the next");
         assert_eq!(engine.snapshot().score, 400);
     }
 
@@ -1618,7 +1416,6 @@ mod tests {
             // is board-independent.
             let config = EngineConfig {
                 visible_height: 40,
-                buffer_height: 20,
                 ..EngineConfig::default()
             };
             let mut engine = Engine::new(config, seed);

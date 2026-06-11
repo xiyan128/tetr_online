@@ -121,12 +121,10 @@ fn engine_goal_remaining_decrements_on_line_clear() {
         assert_eq!(engine.snapshot().goal_remaining, 10);
 
         // First step with no flags only spawns the opening piece (plus its
-        // immediate one-row drop), so we learn its type before committing.
-        let spawn_events = engine.step(InputFrame::default());
-        let first_piece = spawn_events.iter().find_map(|event| match event {
-            EngineEvent::Spawned { piece_type } => Some(*piece_type),
-            _ => None,
-        });
+        // immediate one-row drop), so we learn its type — from the snapshot,
+        // where spawns are observed — before committing.
+        engine.step(InputFrame::default());
+        let first_piece = engine.snapshot().active.map(|active| active.piece_type);
         // A horizontal I is the only piece that fills all four columns of a
         // 4-wide row in one drop; skip any other opening piece.
         if first_piece != Some(PieceType::I) {

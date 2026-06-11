@@ -41,6 +41,12 @@ pub mod runner;
 pub mod search;
 pub mod state;
 
+/// Bound on drive-to-completion think loops (a misbehaving mind that never
+/// exhausts under an uncapped budget must not spin forever). One constant, two
+/// loops: the bare-Mind drain (`search::think_to_completion`) and the policy-
+/// verb drain (`SearchPolicy::decide`) — type-different loops, same contract.
+pub(crate) const MAX_THINK_CALLS: u32 = 100_000;
+
 pub use controller::{AiController, DEFAULT_AI_SEED};
 pub use eval::{
     Cc2Evaluator, Cc2Weights, EvalContext, Evaluator, LinearEvaluator, Reward, Value, Weights,
@@ -51,7 +57,7 @@ pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
 pub use runner::{DecisionRunner, SlicedRunner, SyncRunner};
 pub use search::{
-    think_to_completion, BeamPlanner, BestFirstPlanner, GreedyPlanner, Mind, PlacementPlan,
-    SearchBudget, ThinkProgress,
+    think_to_completion, BeamPlanner, BestFirstPlanner, Mind, PlacementPlan, SearchBudget,
+    ThinkProgress,
 };
 pub use state::{BagState, SearchState};

@@ -133,13 +133,12 @@ fn hold_frame() -> InputFrame {
     pulse(|f| f.hold = true)
 }
 
-/// Advance the shadow `piece` one lateral cell if the engine would allow it, so the
-/// running pose stays in sync for a later soft-drop expansion. A blocked shift is a
-/// no-op here just as it is in the engine (the emitted pulse is then a no-op too —
-/// movegen never produces such a path, but staying in lockstep is cheap insurance).
+/// Advance the shadow `piece` one lateral cell if the engine would allow it —
+/// **movegen's own `shift`**, so the renderer's pose tracking can never drift
+/// from what the search enumerated. A blocked shift is a no-op, like the engine.
 fn step_lateral(board: &Board, piece: &mut ActivePiece, dir: MoveDirection) {
-    if let Some(origin) = piece.piece().try_move(board, piece.origin(), dir) {
-        piece.move_to(origin, PieceAction::Move);
+    if let Some(moved) = crate::ai::movegen::shift(board, piece, dir) {
+        *piece = moved;
     }
 }
 
@@ -150,29 +149,17 @@ enum RotationDir {
     Ccw,
 }
 
-/// Advance the shadow `piece` by one SRS rotation (kicks delegated to the engine),
-/// matching movegen's `rotate` so the running pose tracks the path. A no-op kick
-/// (O piece / kick number 0) leaves the pose unchanged, like the engine.
+/// Advance the shadow `piece` by one SRS rotation — **movegen's own `rotate`**
+/// (kicks, no-op suppression and all), so the pose the renderer replays is by
+/// construction the pose the search enumerated. A no-op stays a no-op.
 fn rotate(piece: &mut ActivePiece, board: &Board, dir: RotationDir) {
-    use crate::engine::{PieceRotation, RotationDirection};
-    let (engine_dir, target) = match dir {
-        RotationDir::Cw => (
-            RotationDirection::Clockwise,
-            piece.rotation() + PieceRotation::R90,
-        ),
-        RotationDir::Ccw => (
-            RotationDirection::Counterclockwise,
-            piece.rotation() + PieceRotation::R270,
-        ),
+    use crate::engine::RotationDirection;
+    let engine_dir = match dir {
+        RotationDir::Cw => RotationDirection::Clockwise,
+        RotationDir::Ccw => RotationDirection::Counterclockwise,
     };
-    if let Some((rotation, origin, kick_number)) =
-        piece
-            .piece()
-            .try_rotate_with_kicks(board, piece.origin(), target)
-    {
-        if kick_number != 0 {
-            piece.rotate_to(rotation, origin, engine_dir, kick_number, false);
-        }
+    if let Some(rotated) = crate::ai::movegen::rotate(board, piece, engine_dir) {
+        *piece = rotated;
     }
 }
 
@@ -333,7 +320,7 @@ mod tests {
         let config = EngineConfig::default();
         let w = config.board_width;
         let h = config.visible_height;
-        let board = Board::with_top_margin(w, h, config.buffer_height);
+        let board = Board::with_top_margin(w, h, crate::engine::BUFFER_HEIGHT);
         let seed = 7;
 
         let spawned = Engine::new(config.clone(), seed)
@@ -412,7 +399,7 @@ mod tests {
         let config = EngineConfig::default();
         let w = config.board_width;
         let h = config.visible_height;
-        let buffer = config.buffer_height;
+        let buffer = crate::engine::BUFFER_HEIGHT;
         let seed = 7;
         let shelf_y = 4;
 

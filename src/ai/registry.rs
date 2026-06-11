@@ -16,7 +16,7 @@ use bevy::prelude::*;
 
 use crate::ai::{
     AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, Evaluator, Handicap, LinearEvaluator,
-    Mind, SearchBudget, SearchPolicy, SlicedRunner, DEFAULT_AI_SEED,
+    Mind, SearchBudget, DEFAULT_AI_SEED,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms
@@ -128,20 +128,17 @@ impl ModelRegistry {
     }
 }
 
-/// Wire a mind + evaluator into a fresh controller under the shared default
-/// handicap — the one construction every Tier-2 entry shares, so an entry differs
-/// only by the (mind, evaluator, budget) triple it names. Watch-AI is an
-/// interactive surface, so the policy runs in the cooperative [`SlicedRunner`]:
-/// the per-piece search spreads across frames (hidden inside the reaction delay)
-/// instead of stalling the frame that spawned the piece.
+/// Wire a mind + evaluator into a fresh controller — the core's
+/// [`AiController::interactive`] convention (default handicap + AI seed +
+/// cooperative venue), so an entry differs only by the (mind, evaluator,
+/// budget) triple it names and the game can never fork the operating
+/// conventions from the core's.
 fn search_model(
     mind: Box<dyn Mind>,
     eval: Box<dyn Evaluator>,
     budget: SearchBudget,
 ) -> AiController {
-    let h = Handicap::default();
-    let policy = SearchPolicy::new(mind, eval, budget, h.imperfection, DEFAULT_AI_SEED);
-    AiController::with_runner(Box::new(SlicedRunner::new(Box::new(policy))), h.reaction)
+    AiController::interactive(mind, eval, budget)
 }
 
 impl Default for ModelRegistry {

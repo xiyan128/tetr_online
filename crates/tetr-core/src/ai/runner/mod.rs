@@ -60,14 +60,6 @@ pub trait DecisionRunner: Send {
     /// second `poll` without an intervening `submit` returns `None`.
     fn poll(&mut self) -> Option<Decision>;
 
-    /// The best decision available **right now** (anytime), ending the in-flight
-    /// computation: a venue with partial thinking returns the policy's
-    /// best-so-far; [`SyncRunner`] has only complete decisions to give. `None`
-    /// when nothing was submitted (or the decision was already taken). The seam
-    /// for deadline pressure — unused by the shipped controller flow, which waits
-    /// for [`poll`](Self::poll) to honor the full budget contract.
-    fn take_now(&mut self) -> Option<Decision>;
-
     /// Abandon any in-flight or buffered decision (its observation is stale). After
     /// this, [`poll`](Self::poll) returns `None` until the next
     /// [`submit`](Self::submit). An off-thread runner drops its worker here.

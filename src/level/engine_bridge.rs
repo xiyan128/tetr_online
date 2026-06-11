@@ -134,7 +134,6 @@ pub fn engine_config_from_level(config: &LevelConfig) -> EngineConfig {
     EngineConfig {
         board_width: config.board_width,
         visible_height: config.board_height,
-        buffer_height: 20,
         preview_count: config.preview_count,
         lock_down_mode: config.lock_down_mode,
         lock_down_seconds: config.locking_duration.as_secs_f32(),

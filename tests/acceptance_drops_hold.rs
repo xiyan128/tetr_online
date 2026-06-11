@@ -13,7 +13,7 @@
 
 use tetr_online::engine::{
     fall_speed_seconds, soft_drop_speed_seconds, Engine, EngineConfig, EngineEvent,
-    EngineScoreAction, InputFrame, MoveDirection, PieceRotation,
+    EngineScoreAction, InputFrame, PieceRotation,
 };
 
 /// Fixed seed shared by every engine-driven scenario for determinism.
@@ -54,21 +54,25 @@ fn soft_drop_scores_one_per_descended_row() {
         ..InputFrame::default()
     });
 
+    // The descent itself is snapshot state (origin down exactly one row); the
+    // event stream carries only the 1-point soft-drop award.
     assert_eq!(
         events,
-        vec![
-            EngineEvent::Moved {
-                piece_type: before.piece_type,
-                direction: MoveDirection::Down,
-                origin: expected_origin,
-            },
-            EngineEvent::ScoreAwarded {
-                action: EngineScoreAction::SoftDrop,
-                score: 1,
-                total_score: 1,
-                back_to_back_bonus: false,
-            },
-        ],
+        vec![EngineEvent::ScoreAwarded {
+            action: EngineScoreAction::SoftDrop,
+            score: 1,
+            total_score: 1,
+            back_to_back_bonus: false,
+        }],
+    );
+    assert_eq!(
+        engine
+            .snapshot()
+            .active
+            .expect("active piece after soft drop")
+            .origin,
+        expected_origin,
+        "one soft-drop frame descends exactly one row",
     );
     assert_eq!(engine.snapshot().score, 1);
 }
@@ -117,9 +121,6 @@ fn hard_drop_lands_and_locks_immediately() {
                 piece_type,
                 lines_cleared: 0,
             },
-            EngineEvent::Spawned {
-                piece_type: next_type,
-            },
         ],
     );
 
@@ -127,6 +128,15 @@ fn hard_drop_lands_and_locks_immediately() {
         engine.snapshot().board_cells.len(),
         4,
         "exactly one tetromino (4 minos) should be locked to the board",
+    );
+    assert_eq!(
+        engine
+            .snapshot()
+            .active
+            .expect("the locking step spawns the next piece")
+            .piece_type,
+        next_type,
+        "the same step that locks must leave the next queued piece active",
     );
 }
 
@@ -188,17 +198,14 @@ fn hold_with_empty_hold_stores_active_and_spawns_next() {
         ..InputFrame::default()
     });
 
+    // The hold's event is the swap itself; the incoming spawn is snapshot
+    // state, pinned by the `active` assertion below.
     assert_eq!(
         events,
-        vec![
-            EngineEvent::Spawned {
-                piece_type: next_piece_type,
-            },
-            EngineEvent::Held {
-                held: first_piece_type,
-                active: next_piece_type,
-            },
-        ],
+        vec![EngineEvent::Held {
+            held: first_piece_type,
+            active: next_piece_type,
+        }],
     );
 
     let snapshot = engine.snapshot();
@@ -288,9 +295,7 @@ fn hold_swaps_with_existing_held_piece() {
         ..InputFrame::default()
     });
     assert!(
-        drop_events
-            .iter()
-            .any(|event| matches!(event, EngineEvent::Spawned { .. })),
+        engine.snapshot().active.is_some(),
         "locking the active piece must spawn the next piece, got {drop_events:?}",
     );
     assert!(
@@ -331,7 +336,8 @@ fn hold_swaps_with_existing_held_piece() {
         "the swapped-in piece must respawn North Facing (R0)",
     );
 
-    // The swap emits both a Spawned and a Held event for the incoming piece.
+    // The swap emits a Held event recording both sides of the exchange (the
+    // incoming piece's spawn is the snapshot state asserted above).
     assert!(
         swap_events.contains(&EngineEvent::Held {
             held: active_before_swap,

@@ -140,3 +140,7 @@ an offset inline. `seed_set(n)` = train; `seed_set_from(region, n)` = anywhere.
   to machine speed; crossed SPRT bounds are machine-independent.
 - Timing readouts (`ms/piece`, elapsed) are the only output lines that vary
   between runs — everything else is byte-reproducible.
+- Wall-clock figures in run records written before 2026-06-10 predate the
+  release-profile retune (`opt-level z → 3`, ~1.9× native throughput); match
+  results are unaffected (FP stays IEEE at every opt level — golden-gated),
+  but cross-era timing comparisons need re-baselining.

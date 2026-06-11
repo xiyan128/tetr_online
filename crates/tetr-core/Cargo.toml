@@ -1,8 +1,8 @@
 [package]
 name = "tetr-core"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 description = "Engine-agnostic Tetris rule core, player abstraction, and AI — no Bevy."
 publish = false
 
@@ -12,7 +12,6 @@ bench = false
 
 [dependencies]
 array2d = "0.3.2"
-itertools = "0.14.0"
 # Deterministic, seeded RNG only (`StdRng::seed_from_u64`): the engine's 7-bag and
 # the AI's imperfection sampling. No OS entropy is ever drawn, so this never needs a
 # `getrandom` backend on its own — but `rand`'s default features still pull
@@ -30,3 +29,6 @@ rustc-hash = "2"
 # per-candidate heap allocation — allocation was the top profile hotspot after FxHash.
 smallvec = "1"
 
+
+[lints]
+workspace = true

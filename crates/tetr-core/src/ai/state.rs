@@ -491,7 +491,7 @@ fn rebuild_board(snapshot: &EngineSnapshot) -> Board {
     let mut board = Board::with_top_margin(
         config.board_width,
         config.visible_height,
-        config.buffer_height,
+        crate::engine::BUFFER_HEIGHT,
     );
     for cell in &snapshot.board_cells {
         let kind = if cell.garbage {
@@ -759,7 +759,6 @@ mod tests {
                 let config = EngineConfig {
                     preview_count,
                     visible_height: 40,
-                    buffer_height: 20,
                     ..EngineConfig::default()
                 };
                 let mut engine = Engine::new(config, seed);
@@ -1144,13 +1143,13 @@ mod tests {
         // meter (cancellation included), and the B2B/combo chains. Any drift
         // between the two models shows up here as a board mismatch.
         use crate::ai::plan::placement_to_inputs;
-        use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
+        use crate::ai::search::{think_to_completion, BestFirstPlanner, SearchBudget};
         use crate::engine::{Engine, EngineConfig, InputFrame};
 
         let mut engine = Engine::new(EngineConfig::default(), 21);
         engine.step(InputFrame::default()); // spawn the first piece
         let eval = crate::ai::eval::LinearEvaluator::default();
-        let mut planner = GreedyPlanner::new();
+        let mut planner = BestFirstPlanner::new();
         let (mut rises, mut sends) = (0u32, 0u32);
 
         for piece_index in 0..50 {
@@ -1168,7 +1167,7 @@ mod tests {
             let state = SearchState::from_snapshot(&snapshot).expect("active piece");
 
             let Some(plan) =
-                think_to_completion(&mut planner, &state, &eval, SearchBudget::greedy())
+                think_to_completion(&mut planner, &state, &eval, SearchBudget::single_ply())
             else {
                 break; // no legal placement: the engine will top out shortly
             };

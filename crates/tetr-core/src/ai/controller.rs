@@ -206,6 +206,24 @@ impl AiController {
         )
     }
 
+    /// The interactive-catalog construction: a (mind, evaluator, budget) triple
+    /// under the **default** (beatable) handicap and AI seed, in the cooperative
+    /// venue. One home for the menu-bot convention — beside [`attack`](Self::attack),
+    /// the strongest model's same-venue home — so no game surface can fork the
+    /// operating conventions from the core's.
+    pub fn interactive(
+        mind: Box<dyn crate::ai::Mind>,
+        eval: Box<dyn crate::ai::Evaluator>,
+        budget: SearchBudget,
+    ) -> Self {
+        let handicap = Handicap::default();
+        let policy = SearchPolicy::new(mind, eval, budget, handicap.imperfection, DEFAULT_AI_SEED);
+        Self::with_runner(
+            Box::new(SlicedRunner::new(Box::new(policy))),
+            handicap.reaction,
+        )
+    }
+
     /// A controller around an explicit [`Policy`], wrapped in the **blocking**
     /// runner ([`SyncRunner`]): the whole decision computes inline at submit.
     /// This is the headless construction — benchmarks and research bots, where
@@ -408,7 +426,7 @@ mod tests {
         // simulated placement. (Plan-to-input pose fidelity is separately pinned by
         // `plan.rs`'s round-trip test; this proves the controller *sequences* it.)
         use crate::ai::eval::LinearEvaluator;
-        use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
+        use crate::ai::search::{think_to_completion, BestFirstPlanner, SearchBudget};
         use crate::ai::SearchState;
         use crate::engine::{lock_and_clear, Board, CellKind};
 
@@ -422,10 +440,10 @@ mod tests {
         // the controller's own policy).
         let state = SearchState::from_snapshot(&snapshot).unwrap();
         let plan = think_to_completion(
-            &mut GreedyPlanner::new(),
+            &mut BestFirstPlanner::new(),
             &state,
             &LinearEvaluator::default(),
-            SearchBudget::greedy(),
+            SearchBudget::single_ply(),
         )
         .expect("the first spawn has a legal placement");
         let mut intended = state.board.to_array2d();
@@ -440,7 +458,7 @@ mod tests {
                 let mut real = Board::with_top_margin(
                     config.board_width,
                     config.visible_height,
-                    config.buffer_height,
+                    crate::engine::BUFFER_HEIGHT,
                 );
                 for c in &after.board_cells {
                     real.set(c.x, c.y, CellKind::Some(c.piece_type));

@@ -1,8 +1,8 @@
 [package]
 name = "tetr_online"
-version = "0.1.0"
-edition = "2021"
-license = "MIT"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
 # Benchmark targets are declared explicitly under `[[bench]]` below (each uses the
 # criterion harness). Disable cargo's auto-discovery so the shared
 # `benches/common/` fixture module is never mistaken for its own bench target.
@@ -12,6 +12,22 @@ autobenches = false
 # `crates/tetr-core` (no Bevy); `crates/tetr-embed` adds the wasm embed component.
 [workspace]
 members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-research"]
+
+# One home for the shared package metadata; member crates inherit with
+# `version.workspace = true` etc. (Edition stays 2021 deliberately: the 2024
+# bump would force a workspace-wide rustfmt churn for zero capability.)
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+# Workspace-wide lint posture (crates opt in via [lints] workspace = true).
+[workspace.lints.rust]
+unused_must_use = "deny"
+[workspace.lints.clippy]
+dbg_macro = "deny"
+todo = "deny"
+
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -24,6 +40,9 @@ bench = false
 [[bin]]
 name = "tetr_online"
 bench = false
+
+[lints]
+workspace = true
 
 [dependencies]
 # Engine-agnostic core (engine + player + ai), extracted to its own crate —
@@ -77,9 +96,6 @@ bloom = ["bevy/bevy_post_process"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
 # never touches release builds. Usage: `cargo run --features dev`.
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
-# Enables the play-evaluation harness (`src/arena/`) and its tests. Off by default
-# so it never compiles into the shipped game. Usage: `cargo test --features arena`.
-arena = []
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = "5.0"
@@ -121,8 +137,13 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 
 [profile.release]
-# optimize for size
-opt-level = 'z'
+# Native SPEED. Every consumer of this profile is compute-bound: the research
+# crate's climbs/SPRTs ("always run --release") and the criterion benches. The
+# shipped web bundles use [profile.web] below, which owns the size budget —
+# the old `opt-level = 'z'` here predated that split and was costing every
+# research hour real throughput. Rust FP stays IEEE at every opt level, so
+# match determinism is unaffected (gated by the bin goldens).
+opt-level = 3
 lto = "thin"
 
 # Dedicated profile for the shipped web bundles. Kept separate from `release` so
@@ -156,9 +177,3 @@ harness = false
 name = "ai"
 harness = false
 
-# Usage demo / smoke measurement for the play-evaluation harness. Gated on the
-# `arena` feature so `cargo test` skips it unless the harness is enabled.
-# Run: `cargo run --release --example arena_smoke --features arena`.
-[[example]]
-name = "arena_smoke"
-required-features = ["arena"]

@@ -280,7 +280,7 @@ impl Mind for BestFirstPlanner {
 mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
-    use crate::ai::search::{think_to_completion, GreedyPlanner, SearchBudget};
+    use crate::ai::search::{think_to_completion, BeamPlanner, SearchBudget};
     use crate::engine::{Engine, EngineConfig, InputFrame};
 
     /// A real engine snapshot after the first spawn (hold + full queue present).
@@ -307,19 +307,21 @@ mod tests {
     }
 
     #[test]
-    fn best_first_depth1_equals_greedy() {
-        // At max_depth 1 every root is a leaf (no expansion), so the decision is the
-        // greedy single-ply argmax — identical to GreedyPlanner (the seam-faithful gate).
+    fn best_first_depth1_equals_beam_depth1() {
+        // At max_depth 1 every root is a leaf (no expansion), so the decision is
+        // the single-ply argmax. The cross-planner agreement gate: two
+        // independent implementations must pick the identical placement (this
+        // replaced the deleted GreedyPlanner as the second oracle).
         let state = engine_state(42);
         let eval = LinearEvaluator::default();
         let mut bf = BestFirstPlanner::new();
-        let mut greedy = GreedyPlanner::new();
+        let mut beam = BeamPlanner::new(16);
         let bp =
             think_to_completion(&mut bf, &state, &eval, SearchBudget::best_first(2000, 1)).unwrap();
-        let gp = think_to_completion(&mut greedy, &state, &eval, SearchBudget::greedy()).unwrap();
-        assert_eq!(bp.placement.origin(), gp.placement.origin());
-        assert_eq!(bp.placement.rotation(), gp.placement.rotation());
-        assert_eq!(bp.placement.path, gp.placement.path);
+        let bm = think_to_completion(&mut beam, &state, &eval, SearchBudget::beam(1)).unwrap();
+        assert_eq!(bp.placement.origin(), bm.placement.origin());
+        assert_eq!(bp.placement.rotation(), bm.placement.rotation());
+        assert_eq!(bp.placement.path, bm.placement.path);
     }
 
     #[test]
@@ -417,5 +419,81 @@ mod tests {
             0,
             "a different root state discards the stale run"
         );
+    }
+
+    /// Build a `SearchState` from a crafted board + active piece (no hold/queue).
+    fn state_with(board: crate::engine::Board, active: crate::engine::ActivePiece) -> SearchState {
+        SearchState::for_test(board, active, None, std::iter::empty())
+    }
+
+    /// One single-ply decision, unwrapped — the construction that replaced the
+    /// deleted GreedyPlanner (these two quality smokes are its surviving tests).
+    fn single_ply_plan(state: &SearchState) -> crate::ai::PlacementPlan {
+        think_to_completion(
+            &mut BestFirstPlanner::new(),
+            state,
+            &LinearEvaluator::default(),
+            SearchBudget::single_ply(),
+        )
+        .expect("the state has a legal placement")
+    }
+
+    #[test]
+    fn single_ply_completes_obvious_lines() {
+        // A 4-wide board with cols 0-2 filled four rows high and an empty 1-wide
+        // well at col 3: the vertical I into the well is an unambiguous Tetris.
+        let mut board = crate::engine::Board::new(4, 10);
+        for y in 0..4 {
+            for x in 0..3 {
+                board.set(
+                    x,
+                    y,
+                    crate::engine::CellKind::Some(crate::engine::PieceType::O),
+                );
+            }
+        }
+        let active = crate::ai::movegen::spawn_piece(crate::engine::PieceType::I, 4, 10);
+        let state = state_with(board, active);
+
+        let plan = single_ply_plan(&state);
+        let mut check = state.board;
+        let lock = check.lock_piece(&plan.placement.piece);
+        assert_eq!(
+            lock.cleared_rows.len(),
+            4,
+            "single-ply argmax must pick the well-filling I for a Tetris"
+        );
+    }
+
+    #[test]
+    fn single_ply_avoids_creating_a_hole() {
+        // Dropping the O flat (no hole) vs onto a one-cell pillar (covered hole):
+        // the evaluator penalises holes heavily, so the flat placement must win.
+        let mut board = crate::engine::Board::new(4, 10);
+        board.set(
+            3,
+            0,
+            crate::engine::CellKind::Some(crate::engine::PieceType::O),
+        );
+        let active = crate::ai::movegen::spawn_piece(crate::engine::PieceType::O, 4, 10);
+        let state = state_with(board, active);
+
+        let plan = single_ply_plan(&state);
+        let mut after = state.board;
+        after.lock_piece(&plan.placement.piece);
+        let after = after.to_array2d();
+        // A covered hole = an empty cell with a filled cell above it in-column.
+        let mut hole = false;
+        for x in 0..after.width() as isize {
+            let mut seen_filled = false;
+            for y in (0..after.height() as isize).rev() {
+                match after.get_cell_kind(x, y) {
+                    k if k.is_some() => seen_filled = true,
+                    crate::engine::CellKind::None if seen_filled => hole = true,
+                    _ => {}
+                }
+            }
+        }
+        assert!(!hole, "single-ply argmax must not create a covered hole");
     }
 }

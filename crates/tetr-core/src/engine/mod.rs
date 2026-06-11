@@ -25,12 +25,10 @@ mod lock_down;
 mod pieces;
 mod scoring;
 mod t_spin;
+mod types;
 
 pub use active_piece::{ActivePiece, PieceAction, RotationDirection};
-pub use api::{
-    ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
-    InputFrame, SnapshotCell,
-};
+pub use api::Engine;
 pub use attack::{attack_lines, COMBO_TABLE, PERFECT_CLEAR_ATTACK};
 pub use bit_board::{BitBoard, ColumnView, Occupancy};
 pub use board::{Board, CellKind};
@@ -49,3 +47,7 @@ pub use lock_down::{
 pub use pieces::{MoveDirection, Piece, PieceRotation, PieceType};
 pub use scoring::EngineScoreAction;
 pub use t_spin::{classify_t_spin, is_t_slot, t_spin_corners, TSpinCorners, TSpinKind};
+pub use types::{
+    ActivePieceSnapshot, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus, InputFrame,
+    SnapshotCell, BUFFER_HEIGHT,
+};

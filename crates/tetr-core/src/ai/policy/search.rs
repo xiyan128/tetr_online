@@ -24,7 +24,7 @@ use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy, PolicyProgress};
 use crate::ai::search::{
-    score_placement, GreedyPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
+    score_placement, BestFirstPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
 };
 
 /// How many of the top placements the imperfection softmax samples from. A small
@@ -69,13 +69,15 @@ impl SearchPolicy {
         }
     }
 
-    /// The shipped Tier-1 brain: a greedy planner over the default linear
-    /// evaluator, with the given `imperfection` and RNG `seed`.
+    /// The shipped Tier-1 brain: the single-ply argmax ("greedy") over the
+    /// default linear evaluator, with the given `imperfection` and RNG `seed`.
+    /// Constructed as best-first at depth 1 — the dedicated greedy planner was
+    /// deleted with its decisions gate-pinned identical to this.
     pub fn greedy(imperfection: f32, seed: u64) -> Self {
         Self::new(
-            Box::new(GreedyPlanner::new()),
+            Box::new(BestFirstPlanner::new()),
             Box::new(LinearEvaluator::default()),
-            SearchBudget::greedy(),
+            SearchBudget::single_ply(),
             imperfection,
             seed,
         )
@@ -126,12 +128,8 @@ impl Policy for SearchPolicy {
     /// `take`, fused — so the one-shot and incremental drivings can never
     /// disagree on a decision.
     fn decide(&mut self, obs: &Observation) -> Decision {
-        // Bounded like `think_to_completion`: a misbehaving mind (never exhausting
-        // under an uncapped budget) must not spin forever.
-        const MAX_THINK_CALLS: u32 = 100_000;
-
         self.reroot(obs);
-        for _ in 0..MAX_THINK_CALLS {
+        for _ in 0..crate::ai::MAX_THINK_CALLS {
             if self.think(u32::MAX) == PolicyProgress::Ready {
                 break;
             }

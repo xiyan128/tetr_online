@@ -1,9 +1,11 @@
 //! AI benchmarks.
 //!
 //! Covers the placement pipeline bottom-up: reachability `movegen` (the hot
-//! path), the board `evaluate`-or, the greedy `plan` that ties them together, and
-//! an end-to-end "bot plays N pieces" throughput driver for tuning weights and
-//! search depth. Run with `cargo bench --bench ai`.
+//! path), the board `evaluate`-or, the per-decision `plan` cost of the SHIPPED
+//! interactive bot (best-first at the attack operating point — re-targeted from
+//! the legacy greedy brain in the 2026-06-10 sweep; criterion history before
+//! that date measured greedy and is not comparable), and an end-to-end "bot
+//! plays N pieces" throughput driver. Run with `cargo bench --bench ai`.
 
 mod common;
 
@@ -16,7 +18,7 @@ use common::{
     Scenario,
 };
 use tetr_online::ai::{
-    movegen, think_to_completion, Cc2Evaluator, EvalContext, Evaluator, GreedyPlanner,
+    movegen, think_to_completion, BestFirstPlanner, Cc2Evaluator, EvalContext, Evaluator,
     LinearEvaluator, SearchBudget,
 };
 use tetr_online::engine::classify_t_spin;
@@ -155,21 +157,23 @@ fn bench_transition(c: &mut Criterion) {
     group.finish();
 }
 
-/// The full greedy pick: movegen + per-candidate evaluate + argmax. This is the
-/// per-piece cost the controller pays each time it replans. A fresh mind per
-/// iteration: the session caches a completed decision per root (re-rooting at the
-/// same state is a fingerprint no-op), and the quantity measured here is one
-/// *full* decision, not the cache hit.
+/// One full decision of the SHIPPED bot: best-first over the CC2 attack
+/// evaluator at the interactive operating point (node budget 192, depth 6 —
+/// `AiController::attack`'s constants). This is the per-piece cost the game's
+/// strongest opponent pays each time it replans. A fresh mind per iteration:
+/// the session caches a completed decision per root (re-rooting at the same
+/// state is a fingerprint no-op), and the quantity measured here is one *full*
+/// decision, not the cache hit.
 fn bench_plan(c: &mut Criterion) {
-    let eval = LinearEvaluator::default();
-    let budget = SearchBudget::greedy();
+    let eval = Cc2Evaluator::new(tetr_online::ai::Cc2Weights::attack_tuned());
+    let budget = SearchBudget::best_first(192, 6);
     let mut group = c.benchmark_group("ai/plan");
     for scenario in Scenario::ALL {
         let state = search_state(scenario);
         group.bench_function(BenchmarkId::from_parameter(scenario.name()), |b| {
             b.iter(|| {
                 black_box(think_to_completion(
-                    &mut GreedyPlanner::new(),
+                    &mut BestFirstPlanner::new(),
                     black_box(&state),
                     &eval,
                     budget,
