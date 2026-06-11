@@ -1,4 +1,4 @@
-# ADR: Versus mode in the game — seats, real-time exchange, and the two-board UI
+# ADR: Versus mode in the game (seats, real-time exchange, and the two-board UI)
 
 Date: 2026-06-10 · Status: accepted (implemented on `feat/versus-mode`)
 
@@ -7,8 +7,8 @@ Date: 2026-06-10 · Status: accepted (implemented on `feat/versus-mode`)
 The engine already owns every versus *rule* (`docs/adr-versus-rules.md`): the
 pending queue, cancellation, rising, hole streams, and the `AttackSent` /
 `GarbageInserted` events. The search models the full garbage transition. What
-does not exist is a **playable surface**: the game is single-board end to end —
-one `EngineState` resource, one camera centered on one playfield, reconcilers
+does not exist is a **playable surface**: the game is single-board end to end.
+One `EngineState` resource, one camera centered on one playfield, reconcilers
 that despawn render blocks by global marker, one keyboard latch, one score HUD.
 
 This ADR covers the game-side design: how two simultaneous engines live in the
@@ -33,16 +33,17 @@ systems. The duplication this buys is small (the reconcilers are ~40 lines
 each) and the risk it retires is large: the polished single-player path keeps
 its byte-identical pipeline and its deterministic-schedule tests.
 
-~~The recorded follow-up~~ (DONE, same day — the no-compat audit's seat
+~~The recorded follow-up~~ (DONE, same day, by the no-compat audit's seat
 re-home): single-player and Watch-AI are one-seat sessions on this
 architecture now (`SessionMode::Solo{variant}`); the global resources, the
 parallel pipeline, the sandbox plugin, and the ModelSelect/GameOver screens
 are deleted, and the five load-bearing properties re-pinned seat-native.
-With versus no longer a sibling but *the* pipeline, the module was renamed
-`src/versus/` → `src/session/` and the states to
-`SessionSetup`/`Session`/`SessionPhase`.
+With versus no longer a sibling but *the* pipeline, the module moved from
+`src/versus/` to `src/session/`, the states became
+`SessionSetup`/`Session`/`SessionPhase`, and the types below read
+`SessionConfig`/`SessionBots` in today's code.
 
-`VersusPhase::Over` stays **inside** `Versus` — the final boards remain on
+`VersusPhase::Over` stays **inside** `Versus`: the final boards remain on
 screen under the result banner (reading the losing stack is half the fun), and
 a rematch rebuilds the session in place instead of bouncing through a state
 transition that would despawn everything first.
@@ -66,27 +67,27 @@ Who controls a seat is configuration, not architecture:
 enum Participant {
     Human,                  // the local keyboard (one human seat in v1)
     Bot { model: usize },   // an index into the existing ModelRegistry
-    // future: RemoteHuman { .. } — frames arrive from a net channel
+    // future: RemoteHuman { .. } (frames arrive from a net channel)
 }
 ```
 
 `VersusConfig { seats: [Participant; 2], seed: Option<u64> }` is written by the
 setup screen and read once when the match spawns. Everything downstream
-(stepping, rendering, HUD labels) reads seat components, never the config — a
+(stepping, rendering, HUD labels) reads seat components, never the config; a
 future participant kind only has to produce an `InputFrame` per fixed slice.
 
 Bot controllers are `Send`-but-not-`Sync` (the established `AiPlayer`
 precedent), so they live in one non-send resource, `VersusBots`, keyed by seat
-index — not as components.
+index, not as components.
 
 **Both engines get the same piece seed.** Identical bags are the guideline
 fairness convention: the match measures placement skill, not draw luck. The
 hole streams stay decorrelated per receiver by the engine's own salt. The seed
 is fresh per match (entropy from app-clock nanos at spawn; a test override sits
-in `VersusConfig.seed`), and a rematch draws a new one — replaying the exact
+in `VersusConfig.seed`), and a rematch draws a new one. Replaying the exact
 same deal is a replay feature, not a rematch.
 
-## Decision 3: real-time exchange — step both, then route, symmetrically
+## Decision 3: real-time exchange (step both, then route, symmetrically)
 
 Each `FixedUpdate` slice (the same 60 Hz clock as single-player):
 
@@ -98,30 +99,30 @@ Each `FixedUpdate` slice (the same 60 Hz clock as single-player):
 3. **Publish snapshots** (so meters and boards show the routed garbage the
    same frame) and accumulate events for the reconcilers.
 4. **Check death**: a seat whose snapshot reports `game_over` loses; both in
-   the same slice is a draw. Attack is routed *before* death is read — the
+   the same slice is a draw. Attack is routed *before* death is read: the
    engine already guarantees a dying lock sends nothing, and the driver never
    second-guesses events (the `play_versus` ruling).
 
 Step-then-route means an attack lands one slice (16.7 ms) after the clear that
-sent it, identically in both directions — neither seat order nor system order
+sent it, identically in both directions; neither seat order nor system order
 can advantage a side. The engine ignores `queue_garbage` once dead, so routing
 into a just-dead seat is safely inert.
 
 **Known asymmetry, accepted and bounded:** the bot controller emits `dt = 0`
-maneuver frames (positioning advances no gravity — the established Watch-AI
+maneuver frames (positioning advances no gravity, the established Watch-AI
 convention that keeps plan execution exact). In a wall-clock match the bot's
-engine therefore experiences slightly stretched time (~15–20% during its short
+engine therefore experiences slightly stretched time (~15-20% during its short
 maneuver bursts). Versus pins **flat level-1 gravity** (Decision 4), where the
-dilation is imperceptible — and the alternative (stamping real `dt` onto
-maneuver frames) would desync rendered plans from the board, a correctness
+dilation is imperceptible. The alternative (stamping real `dt` onto
+maneuver frames) would desync rendered plans from the board: a correctness
 class of bugs, traded for fairness nobody can see. Revisit only if a
 high-gravity versus variant ships; the honest fix then is replanning under
 gravity, not dt-stamping.
 
 **The bot plays blind to the queue, deliberately.** The snapshot handed to a
 bot has `pending_garbage` cleared. This is not a shortcut: the experimental
-record (memory + `versus_climb` header) shows the garbage-aware search is
-*decisively worse* under pressure with today's no-garbage-world weights — the
+record (the `versus_climb` run records) shows the garbage-aware search is
+*decisively worse* under pressure with today's no-garbage-world weights. The
 model is right, the prices are wrong. Blind is currently both the stronger
 *and* the fairer opponent (it cannot exploit perfect hole information against
 a human, who only sees the meter). The engine still cancels and rises by rule
@@ -132,12 +133,12 @@ it ships.)
 
 ## Decision 4: versus rules of play
 
-- **Flat gravity**: `GoalSystem::None` (new engine variant — no goal, no
-  leveling), starting level 1. Guideline versus does not speed up; pressure
+- **Flat gravity**: `GoalSystem::None` (the engine variant with no goal and
+  no leveling), starting level 1. Guideline versus does not speed up; pressure
   comes from the opponent, not the clock.
 - **Garbage cap**: the engine default (8 per clear-less lock).
 - **No variant end conditions**: the match ends when a seat dies. No score, no
-  high-score entry — the outcome *is* the score.
+  high-score entry; the outcome *is* the score.
 - **Hold/preview/lock-down**: the player's existing `GameSettings` apply to
   both seats (symmetric rules; the bot uses the same preview depth it would in
   Watch-AI).
@@ -168,10 +169,10 @@ ATK 12┗━━━━━━━━━━┛         ATK 34┗━━━━━━�
   orientation v1 (mirroring is a per-root parameter later, not a layout
   rewrite).
 - **Camera**: one `Camera2d` with `ScalingMode::AutoMin` sized to the full
-  scene, so both boards always fit — native window resizes and the web canvas
+  scene, so both boards always fit; native window resizes and the web canvas
   get the same framing for free. Tagged `GameplayCamera` so the CRT/bloom
   passes apply unchanged.
-- **Garbage meter** — the signature versus readout: a thin vertical bar on
+- **Garbage meter**, the signature versus readout: a thin vertical bar on
   each board's inner edge, one red segment per pending line, stacked
   bottom-up with a 2-px notch between batches (you can read "a 4 and a 2 are
   coming" at a glance, like the guideline games). Reconciled from
@@ -189,12 +190,12 @@ ATK 12┗━━━━━━━━━━┛         ATK 34┗━━━━━━�
   later).
 - **Countdown**: 3 · 2 · 1 · GO! center-screen (0.8 s per beat); engines hold
   (no spawn) until GO, so both first pieces appear simultaneously.
-- **Result banner**: dim scrim over the *live final boards* — "YOU WIN / YOU
-  LOSE / <MODEL> WINS / DRAW", per-seat attack totals and match time, and
+- **Result banner**: a dim scrim over the *live final boards* with "YOU WIN /
+  YOU LOSE / <MODEL> WINS / DRAW", per-seat attack totals and match time, and
   `Enter` rematch / `Esc` menu. No high-score flow.
 - **Sound design**: move/rotate/drop SFX play for the **human seat only** (a
   bot's input stream is noise, and bot-vs-bot would be a drum roll); line
-  clears play for both seats; a garbage **rise** gets the lock-thunk cue — the
+  clears play for both seats; a garbage **rise** gets the lock-thunk cue. The
   thing you must hear is your own board getting heavier. Attack-sent shows a
   brief "+n" pop by the sender's board.
 
@@ -211,10 +212,10 @@ The existing `FocusList` menu idiom, four rows:
 ```
 
 `←`/`→` on a seat row cycles its participant (P1: You + every registry model;
-P2: registry models — exactly one human seat in v1 because there is one
+P2: registry models; exactly one human seat in v1 because there is one
 keyboard). Defaults: You vs Beam DT-20 (a mid-strength opener; the picker
 remembers the last choice for rematch parity). Choosing a model for P1 gives
-bot-vs-bot — the versus twin of Watch-AI.
+bot-vs-bot, the versus twin of Watch-AI.
 
 ## Consequences
 
@@ -225,7 +226,7 @@ bot-vs-bot — the versus twin of Watch-AI.
   the game's blinding is a one-line snapshot strip in its own bot driver
   (no game→research dependency).
 - Two engines step per slice: ~2× engine cost (µs-scale) and the bot search is
-  already sliced (`SlicedRunner`, 16-node quanta) — versus stays inside the
+  already sliced (`SlicedRunner`, 16-node quanta), so versus stays inside the
   frame budget the anytime-search ADR established. Bot-vs-bot runs two sliced
   searches per frame; the budget tests cover the sum.
 - The seat architecture is the declared landing zone for human-vs-human:
@@ -235,10 +236,10 @@ bot-vs-bot — the versus twin of Watch-AI.
 
 ## Deliberately deferred
 
-- **Messiness / hole-change models** — tuning, after re-priced weights.
-- **Aware bots in the registry** — blocked on re-pricing (the mispricing
+- **Messiness / hole-change models**: tuning, after re-priced weights.
+- **Aware bots in the registry**: blocked on re-pricing (the mispricing
   finding); the flag-and-signature plumbing ships now.
-- **Best-of-N match format** — the `SeatStats`/outcome plumbing supports it;
+- **Best-of-N match format**: the `SeatStats`/outcome plumbing supports it;
   v1 is single game + rematch.
 - **Mirrored seat-1 layout**, replays, spectator APM panels.
 - **TBP referee alignment** for external bots in-game.

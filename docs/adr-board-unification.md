@@ -1,4 +1,4 @@
-# ADR: one board — BitBoard occupancy + a colour plane
+# ADR: one board (BitBoard occupancy + a colour plane)
 
 Date: 2026-06-10 · Status: accepted (implemented on `refactor/board-unification`)
 
@@ -9,7 +9,7 @@ The engine carried two complete board implementations: `Board`
 beside its `CellKind`) and `BitBoard` (column bitmasks, the search's `Copy`
 fork currency). Line clearing, garbage insertion, full-row detection, and
 skyline queries were each implemented twice, kept aligned by five randomized
-differential tests — a standing two-copies-must-agree liability the audit
+differential tests: a standing two-copies-must-agree liability the audit
 flagged as the engine's biggest structural debt. Every consumer was already
 representation-split: collision/movegen go through the `Occupancy` trait,
 evaluators read column bits, and only the snapshot needs per-cell colour and
@@ -23,7 +23,7 @@ skyline) plus a flat **colour plane** (`Vec<CellKind>`, row-major over the
 backing grid) for per-cell identity. Mutations update both in lockstep;
 reads dispatch to whichever plane answers (occupancy questions to the bits,
 identity questions to the colours). The rule implementations that lived on
-the dense board are deleted — `Board::clear_lines` and
+the dense board are deleted. `Board::clear_lines` and
 `Board::insert_garbage_lines` now *drive the colour plane from the
 bitboard's own results* (its cleared-row list, its overflow verdict), so the
 rules cannot disagree with the search's view by construction.
@@ -43,17 +43,17 @@ in the workspace fits (max in use: 10 × 40).
   plane equals the bitboard, under randomized op sequences) guards the
   lockstep invariant.
 - Engine stepping reads occupancy through bits (collision, T-spin corners,
-  row counts) — faster, though the engine was never the hot path; the
+  row counts). That is faster, though the engine was never the hot path; the
   search's `BitBoard` usage is unchanged.
 - `Board` clones drop from ~9.6 KB memcpy to ~128 B bits + a 400 B colour
   vec (only the engine clones boards; the search forks bare `BitBoard`s).
-- The acceptance/guideline suites run unchanged — the `Board` API surface
+- The acceptance/guideline suites run unchanged: the `Board` API surface
   (`set`, `get_cell_kind`, `cells`, `column_bits`, `lock_and_clear`, …) is
   preserved over the new internals, and the bin goldens pin behaviour
   end-to-end.
 
 ## Rejected
 
-A pure-bitboard board with colour reconstructed at snapshot time — colours
+A pure-bitboard board with colour reconstructed at snapshot time. Colours
 are not derivable from occupancy; the snapshot's per-cell identity (piece
 colours, the garbage flag) is real state and needs a real plane.

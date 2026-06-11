@@ -6,8 +6,8 @@ Date: 2026-06-10 · Status: accepted (implemented on `feat/versus-core`)
 
 The decided roadmap (guideline versus, TETR.IO fidelity dropped) runs through
 "versus rules into core → win-rate climb + SPRT". Before this ADR every
-garbage-receiving mechanic — the pending queue, cancellation, insertion timing,
-hole choice — lived in the research harness (`tetr-research`), where the Bevy
+garbage-receiving mechanic (the pending queue, cancellation, insertion timing,
+hole choice) lived in the research harness (`tetr-research`), where the Bevy
 game, the embed, and a future netplay surface could not reuse them, and where
 the harness's simplification (dump *all* pending garbage immediately after
 every placement) quietly diverged from guideline play. The engine itself had
@@ -20,22 +20,22 @@ The **engine** owns the three rules of garbage exchange; drivers only route
 attack between engines.
 
 1. **Pending queue.** `Engine::queue_garbage(lines)` queues an opponent's
-   attack as pending — visible as `EngineSnapshot::pending_garbage`, not yet on
+   attack as pending: visible as `EngineSnapshot::pending_garbage`, not yet on
    the board. Each batch draws **one hole column** from the receiver's own
    seeded stream (`StdRng`, engine seed XOR a salt so it can never align with
    the piece bag): a `(seed, attack sequence)` reproduces a board exactly,
    with no shared match RNG.
 2. **Cancellation (offset).** At lock time the engine computes the clear's
-   attack from its own award — same action, same B2B flag, same pre-increment
-   combo index the research fold pinned (gated bit-for-bit by
-   `engine_attack_events_match_the_research_fold`) — cancels pending garbage
+   attack from its own award (same action, same B2B flag, same pre-increment
+   combo index the research fold pinned, gated bit-for-bit by
+   `engine_attack_events_match_the_research_fold`), cancels pending garbage
    line-for-line oldest-first, and emits `EngineEvent::AttackSent` with the
    **net** remainder only.
 3. **Rising.** Pending garbage enters after a lock that cleared **no** lines
-   (clearing defers entry — the window cancellation lives in), between lock and
-   spawn, capped per lock by `EngineConfig::garbage_cap` (default 8). A batch
-   split by the cap keeps its hole column. An overflowing rise is an ordinary
-   in-band `BlockOut`.
+   (a clear defers entry; that deferral is the cancellation window), between
+   lock and spawn, capped per lock by `EngineConfig::garbage_cap` (default 8).
+   A batch split by the cap keeps its hole column. An overflowing rise is an
+   ordinary in-band `BlockOut`.
 
 `AttackSent` fires in single-player too (nothing pending ⇒ net == gross): it is
 informational, and gating it on "versus armed" would be hidden statefulness.
@@ -44,7 +44,7 @@ informational, and gating it on "versus armed" would be hidden statefulness.
 
 - `play_versus` (the SPRT/win-rate instrument) is now a thin router; match
   dynamics changed deliberately (digging while comboing is possible; garbage
-  pressure is paced by the cap) — **prior win-rate numbers are superseded**.
+  pressure is paced by the cap). **Prior win-rate numbers are superseded.**
 - The behavior/marathon APP baselines are *unchanged*: their scenarios never
   queue garbage, and `fold_combo` (whose conventions the engine reproduces)
   remains their accounting.
@@ -57,13 +57,13 @@ informational, and gating it on "versus armed" would be hidden statefulness.
 ## Addendum (2026-06-10, later): the search sees and models the queue
 
 `EngineSnapshot::pending_garbage` is now the **batch list** (lines + hole
-column — holes are drawn at queue time from the receiver's own stream, so they
+column; holes are drawn at queue time from the receiver's own stream, so they
 are determined facts, not hidden randomness). `SearchState` mirrors the full
 garbage transition through the *same* shared rule functions the engine's lock
-path calls (`engine::garbage::{cancel, rise}` over one `BatchQueue` type), with
-the same attack inputs and the dying-lock rule — pinned by a 50-piece
-garbage-pressured duel in which the search's predicted future must equal the
-engine's real one every piece, plus deterministic cancellation/rising pins. No
+path calls (`engine::garbage::{cancel, rise}` over one `BatchQueue` type),
+with the same attack inputs and the dying-lock rule, pinned by a 50-piece
+garbage-pressured duel (the search's predicted future must equal the engine's
+real one every piece) plus deterministic cancellation/rising pins. No
 new eval weights: rising is modeled in the transition, so the existing
 height/hole features price the post-rise board directly. `BitBoard` gained the
 differential-tested mirror of `insert_garbage_lines`. The transposition key
@@ -74,8 +74,8 @@ instrument).
 
 ~~Known gap for a live versus surface~~ (closed with the versus-mode strike):
 the controller's staleness signature now includes the pending-garbage total,
-so an attack arriving *mid-think* re-plans immediately — re-paying the
-reaction delay, like a human noticing the meter jump (pinned by
+so an attack arriving *mid-think* re-plans immediately, re-paying the
+reaction delay like a human noticing the meter jump (pinned by
 `garbage_arriving_mid_think_restarts_the_reaction`). Benchmarks were never
 affected (attack routes between pieces there), and blinded bots see a
 constant `0`, so their behaviour is unchanged.

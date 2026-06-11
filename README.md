@@ -1,4 +1,4 @@
-# Tetr Online — a guideline Tetris in Rust + Bevy
+# Tetr Online: a guideline Tetris in Rust + Bevy
 
 <img width="1289" alt="Screenshot" src="https://user-images.githubusercontent.com/17198282/229279595-87174f68-c88e-41cd-81c2-47be0f383f72.png">
 
@@ -10,7 +10,7 @@ share one source of truth.
 
 Try the web demo: https://www.xiyan.dev/tetr_online/
 
-> **Status:** fully playable — Marathon / Sprint / Ultra single-player, a
+> **Status:** fully playable: Marathon / Sprint / Ultra single-player, a
 > built-in AI for every mode, and local **Versus** (human-vs-AI and AI-vs-AI,
 > two boards exchanging real garbage). Online multiplayer is the next milestone
 > (see [Roadmap](#roadmap)).
@@ -33,7 +33,7 @@ Try the web demo: https://www.xiyan.dev/tetr_online/
 
 - Three variants: **Marathon** (climb to the final level), **Sprint** (40 lines,
   fastest time), and **Ultra** (highest score in two minutes).
-- **Versus** — two boards, live garbage exchange under the guideline rules
+- **Versus**: two boards, live garbage exchange under the guideline rules
   (cancellation, capped rising, batch hole streams), with a pending-garbage
   meter per board, gray garbage rows, a 3-2-1-GO countdown, and rematch flow.
   Play against any model from the AI catalog, or seat two bots and watch them
@@ -49,14 +49,14 @@ Try the web demo: https://www.xiyan.dev/tetr_online/
   **Watch AI** menu entry runs it in any variant, with a model picker spanning
   the catalog: a one-piece greedy baseline, deterministic multi-ply beam
   searches (our linear evaluator and a verbatim port of Cold Clear 2's), and
-  the strongest model — best-first graph search with transposition over an
+  the strongest model, a best-first graph search with transposition over an
   attack-tuned evaluator.
 - Searches run as **anytime sessions** sliced cooperatively across frames, so
-  even the heaviest model never stalls a frame — the thinking hides inside the
+  even the heaviest model never stalls a frame; the thinking hides inside the
   bot's human-like reaction delay. An adjustable *handicap* (reaction delay
   plus an imperfection rate) keeps every model beatable rather than flawless,
-  and the architecture stays model-agnostic: a stronger search — or a neural
-  policy — drops in behind the same seams (see
+  and the architecture stays model-agnostic: a stronger search or a neural
+  policy drops in behind the same seams (see
   `docs/adr-ai-compute-architecture.md`).
 
 **Cross-platform:** runs natively on Windows, macOS, and Linux, and in the browser
@@ -66,7 +66,7 @@ via WebAssembly with both WebGPU and WebGL2 renderers.
 
 The codebase is split along one hard boundary:
 
-- **`crates/tetr-core`** is the rule core plus the bot — plain Rust with **no
+- **`crates/tetr-core`** is the rule core plus the bot: plain Rust with **no
   Bevy anywhere in its graph**. The engine is a pure, deterministic function of
   `(seed, input frames)`: no wall-clock, no thread-local RNG. That purity is
   what makes headless AI evaluation, replays, and future lockstep multiplayer
@@ -74,10 +74,10 @@ The codebase is split along one hard boundary:
   keyboard uses, so keyboard, AI, and a future network/replay source are
   interchangeable.
 - **The Bevy host** (`src/`) drives the engine through a small plain-data
-  contract — `InputFrame` in, `EngineSnapshot` and `EngineEvent` out — and owns
+  contract (`InputFrame` in, `EngineSnapshot` and `EngineEvent` out) and owns
   rendering, audio, input, menus, persistence, and the Watch-AI model registry.
   Every game runs on one pipeline: a *session* of seat entities, one per board,
-  each seat driven by a human or a bot through the same controller seam —
+  each seat driven by a human or a bot through the same controller seam;
   single-player is simply the one-seat case of versus
   (see `docs/adr-versus-mode-ui.md`).
 - **`crates/tetr-embed`** wraps the same core as a tiny headless wasm widget;
@@ -124,7 +124,7 @@ bun run build    # production build into dist/ (WebGPU + WebGL2 bundles)
 ```
 
 Bevy bakes the graphics backend in at compile time, so the production build
-compiles the binary twice — once per renderer — and serves the WebGPU bundle where
+compiles the binary twice, once per renderer, and serves the WebGPU bundle where
 it's supported, falling back to WebGL2 elsewhere.
 
 ## Development
@@ -138,24 +138,24 @@ cargo bench                      # criterion benchmarks (engine + AI)
 cargo run --release -p tetr-research --bin bench-marathon
 ```
 
-`crates/tetr-research` is the measurement side of the project — reproducible,
-variance-aware experiments for tuning and comparing bots: APP benchmark suites,
-bot-vs-bot versus races with SPRT stopping, and the Cold Clear 2 referee. See
-`docs/research-guide.md` for the full tour.
+`crates/tetr-research` is the measurement side of the project. It runs
+reproducible, variance-aware experiments for tuning and comparing bots: APP
+benchmark suites, bot-vs-bot versus races with SPRT stopping, and the Cold
+Clear 2 referee. See `docs/research-guide.md` for the full tour.
 
 ## Roadmap
 
-- [x] **Engine** — pure, deterministic, guideline-correct, with a full acceptance suite.
-- [x] **Single-player** — Marathon / Sprint / Ultra, menus, options, high scores, pause.
-- [x] **AI player** — a model-agnostic bot with a tunable handicap and a Watch-AI mode.
-- [x] **Versus** — human-vs-AI and AI-vs-AI on one machine, with guideline attack and
+- [x] **Engine**: pure, deterministic, guideline-correct, with a full acceptance suite.
+- [x] **Single-player**: Marathon / Sprint / Ultra, menus, options, high scores, pause.
+- [x] **AI player**: a model-agnostic bot with a tunable handicap and a Watch-AI mode.
+- [x] **Versus**: human-vs-AI and AI-vs-AI on one machine, with guideline attack and
   garbage (engine-owned rules, garbage-aware search seams). Local human-vs-human
   needs a second keymap on the same seat architecture.
-- [ ] **Online multiplayer** — deterministic lockstep over a relay server.
-- [ ] **Polish** — original assets, replays, spectating, larger formats.
+- [ ] **Online multiplayer**: deterministic lockstep over a relay server.
+- [ ] **Polish**: original assets, replays, spectating, larger formats.
 
-The end goal is any mix of human and AI players against any other mix, locally or
-online — on a single engine that stays deterministic the whole way.
+The end goal is any mix of human and AI players against any other mix, locally
+or online, on a single engine that stays deterministic the whole way.
 
 ## Acknowledgements
 
@@ -169,7 +169,7 @@ you're a rights holder with a concern, please open an issue.
 
 ## Contributing
 
-Contributions are welcome — open an issue or a pull request. The `tests/` acceptance
+Contributions are welcome: open an issue or a pull request. The `tests/` acceptance
 suite is the regression net, so please keep it green.
 
 ## License
