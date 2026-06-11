@@ -616,13 +616,41 @@ fn reconcile_preview_views(
 
 /// Keep each seat's cumulative-attack readout current.
 fn update_atk_texts(
-    seats: Query<(&Seat, &SeatStats), Changed<SeatStats>>,
+    config: Res<super::SessionConfig>,
+    clock: Res<super::MatchClock>,
+    seats: Query<(&Seat, &SeatStats, &SeatSnapshot)>,
     mut texts: Query<(&SeatAtkText, &mut Text2d)>,
 ) {
-    for (seat, stats) in &seats {
+    for (seat, stats, snapshot) in &seats {
         for (atk, mut text) in &mut texts {
-            if atk.seat == seat.index {
-                text.0 = format!("ATK {}", stats.attack_sent);
+            if atk.seat != seat.index {
+                continue;
+            }
+            let line = match config.mode {
+                // Versus: the pressure scoreboard.
+                super::SessionMode::Versus => format!("ATK {}", stats.attack_sent),
+                // Solo: the run line — score, lines, level, and the variant
+                // clock (Sprint counts up; Ultra counts down to its limit).
+                super::SessionMode::Solo { variant } => {
+                    let snap = &snapshot.0;
+                    let shown = match variant.def().end_condition {
+                        crate::variant::EndCondition::TimeLimit(limit) => {
+                            (limit - clock.0).max(0.0)
+                        }
+                        _ => clock.0,
+                    };
+                    format!(
+                        "SCORE {}   LINES {}   LVL {}   {}:{:04.1}",
+                        snap.score,
+                        snap.lines,
+                        snap.level,
+                        (shown / 60.0) as u32,
+                        shown % 60.0
+                    )
+                }
+            };
+            if text.0 != line {
+                text.0 = line;
             }
         }
     }

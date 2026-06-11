@@ -44,7 +44,11 @@ impl Plugin for VersusOverlayPlugin {
                 Update,
                 countdown_escape.run_if(in_state(SessionPhase::Countdown)),
             )
-            .add_systems(OnEnter(SessionPhase::Paused), spawn_pause_overlay)
+            .add_systems(
+                OnEnter(SessionPhase::Paused),
+                (spawn_pause_overlay, conceal_boards_on_solo_pause),
+            )
+            .add_systems(OnExit(SessionPhase::Paused), reveal_boards)
             .add_systems(
                 Update,
                 (focus_navigation::<PauseRoot>, pause_menu_activate)
@@ -175,6 +179,26 @@ fn pause_on_keybind(
     let pressed = keys.just_pressed(primary) || secondary.is_some_and(|key| keys.just_pressed(key));
     if pressed {
         next.set(SessionPhase::Paused);
+    }
+}
+
+/// Solo pause CONCEALS the field (the guideline-era anti-pause-to-think rule
+/// the old single-player pause enforced); a versus pause keeps both boards
+/// visible under the scrim — pausing a local match is mutual anyway.
+fn conceal_boards_on_solo_pause(
+    config: Res<super::SessionConfig>,
+    mut roots: Query<&mut Visibility, With<super::render::BoardRoot>>,
+) {
+    if matches!(config.mode, super::SessionMode::Solo { .. }) {
+        for mut visibility in &mut roots {
+            *visibility = Visibility::Hidden;
+        }
+    }
+}
+
+fn reveal_boards(mut roots: Query<&mut Visibility, With<super::render::BoardRoot>>) {
+    for mut visibility in &mut roots {
+        *visibility = Visibility::Inherited;
     }
 }
 
