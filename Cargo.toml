@@ -118,8 +118,13 @@ getrandom = { version = "0.4", features = ["wasm_js"] }
 console_error_panic_hook = "0.1"
 
 [profile.release]
-# optimize for size
-opt-level = 'z'
+# Native SPEED. Every consumer of this profile is compute-bound: the research
+# crate's climbs/SPRTs ("always run --release") and the criterion benches. The
+# shipped web bundles use [profile.web] below, which owns the size budget —
+# the old `opt-level = 'z'` here predated that split and was costing every
+# research hour real throughput. Rust FP stays IEEE at every opt level, so
+# match determinism is unaffected (gated by the bin goldens).
+opt-level = 3
 lto = "thin"
 
 # Dedicated profile for the shipped web bundles. Kept separate from `release` so
