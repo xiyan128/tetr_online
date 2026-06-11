@@ -14,7 +14,7 @@
 //!
 //! Different placement / hold orders reach the **same** position; that position has one
 //! future regardless of the path, so the paths are interchangeable — keep the
-//! highest-scoring. A per-root [`StateKey`] → best-score map drops the rest, so the
+//! highest-scoring. A per-root `StateKey` → best-score map drops the rest, so the
 //! budget is spent on *distinct* positions, not re-derivations. The key is **per-root**
 //! (it carries the ply-1 `root_index`): a state shared by two different first moves is
 //! explored under each, so each root's best line is credited correctly.
@@ -118,7 +118,7 @@ struct Run {
 ///
 /// Node-grain: [`Mind::think`] honors its quantum exactly, so the total
 /// node-expansion budget per decision is entirely the caller's meter (see
-/// [`SearchBudget::best_first`] and
+/// [`SearchBudget::best_first`](crate::ai::search::SearchBudget::best_first) and
 /// [`think_to_completion`](crate::ai::search::think_to_completion)) — the mind
 /// itself only carries the in-flight run.
 #[derive(Default)]
@@ -128,7 +128,7 @@ pub struct BestFirstPlanner {
 
 impl BestFirstPlanner {
     /// A fresh planner (no in-flight run). The node budget is supplied by the
-    /// caller's meter via [`SearchBudget::best_first`].
+    /// caller's meter via [`SearchBudget::best_first`](crate::ai::search::SearchBudget::best_first).
     pub fn new() -> Self {
         Self::default()
     }

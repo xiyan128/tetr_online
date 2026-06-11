@@ -169,8 +169,7 @@ impl Engine {
     /// return (and the latched game-over in the snapshot) is the caller's signal,
     /// not an [`EngineEvent::GameOver`].
     /// QUARANTINED legacy seam: inserts raw, bypassing the pending queue,
-    /// cancellation, the cap, and event emission that [`queue_garbage`]
-    /// (Self::queue_garbage) owns. Kept ONLY for the TBP referee and the
+    /// cancellation, the cap, and event emission that [`Self::queue_garbage`] owns. Kept ONLY for the TBP referee and the
     /// scripted-pressure scenarios (`tetr-research::versus_legacy`, whose
     /// recorded CC2 baselines it underpins — deleting this means re-recording
     /// them on the engine path first). Everything else uses `queue_garbage`.

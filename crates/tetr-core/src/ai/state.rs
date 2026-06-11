@@ -150,19 +150,19 @@ pub struct SearchState {
     pub b2b: bool,
     /// Length of the current combo chain: consecutive line-clearing placements so
     /// far (`0` after a clear-less lock or at the start). The index a search uses to
-    /// value combo attack for the *next* clear. Tracked along the path like [`b2b`];
+    /// value combo attack for the *next* clear. Tracked along the path like `b2b`;
     /// a search reads the pre-placement value to score a clear's combo bonus.
     pub combo: u32,
     /// The engine's game ended on this path — a dying lock (lock-out), an
     /// overflowing garbage rise, or a blocked spawn. The planners treat a dead
-    /// state as a terminal leaf scored at
-    /// [`DEATH_SCORE`](crate::ai::search::DEATH_SCORE) and never expand it:
+    /// state as a terminal leaf scored at the
+    /// search's `DEATH_SCORE` and never expand it:
     /// without this, a death's truncated board can evaluate BETTER than a
     /// cramped survival, and the search walks futures the engine forbids.
     pub dead: bool,
     /// The pending-garbage queue against this player (oldest batch first),
     /// mirrored from the snapshot so the search models cancellation and rising
-    /// exactly — see [`transition_garbage`](Self::transition_garbage). Inline
+    /// exactly — see `transition_garbage`. Inline
     /// storage: forking a child never allocates for the common 0-4 batches.
     pub pending: BatchQueue,
     /// The per-lock rising cap, captured from the snapshot config.
@@ -297,7 +297,7 @@ impl SearchState {
     /// This is the speculative-lookahead transition past the visible queue: it performs
     /// the same `used_hold` swap (including the empty-hold queue-funding rule) and the
     /// same pre-lock T-spin classify as [`commit_placement`] — they share
-    /// [`apply_placement`](Self::apply_placement) — then spawns the supplied speculative
+    /// `apply_placement` — then spawns the supplied speculative
     /// `next` rather than the (exhausted) queue front. In the beam's speculation the
     /// queue is already empty *and* movegen only offers `used_hold` when hold is
     /// occupied, so the empty-hold funding pop never fires; sharing the transition keeps

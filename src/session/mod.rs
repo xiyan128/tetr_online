@@ -1,8 +1,8 @@
 //! The session: every game is N seat entities on one pipeline.
 //!
 //! The design record is `docs/adr-versus-mode-ui.md`. The shape in one
-//! paragraph: a session is [`SessionMode::seat_count`] **seat entities**
-//! (engine + snapshot + events + stats each), a [`Participant`] per seat
+//! paragraph: a session is `SessionMode::seat_count` **seat entities**
+//! (engine + snapshot + events + stats each), a `Participant` per seat
 //! saying who drives it (the local keyboard or a
 //! [`ModelRegistry`](crate::ai::ModelRegistry) bot; a future remote human is
 //! one more arm), and one fixed-update step that advances every engine,
@@ -13,7 +13,7 @@
 //! the variant's rules folded in through the engine-config seam.
 //!
 //! The session lives in [`GameState::Session`] with its own
-//! [`SessionPhase`] lifecycle (countdown → running ⇄ paused → over).
+//! `SessionPhase` lifecycle (countdown → running ⇄ paused → over).
 
 use bevy::prelude::*;
 

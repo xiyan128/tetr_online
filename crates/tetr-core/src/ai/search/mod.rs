@@ -4,7 +4,7 @@
 //! and the [`Move`] path to execute it. The [`Mind`] trait is the **session**
 //! contract every search paradigm implements — the one-shot greedy argmax, the
 //! batch-shaped beam, and the transposition best-first today; an MCGS or
-//! neural-guided search later (research finding [6]: the strong reference bot,
+//! neural-guided search later (research finding \[6\]: the strong reference bot,
 //! Cold Clear, is a transposition-deduplicating DAG search) — so a stronger brain
 //! drops in with no rework of the evaluator, movegen, controller, or
 //! plan-to-input layers.
@@ -84,7 +84,7 @@ impl SearchBudget {
     }
 
     /// A budget for a multi-ply beam search up to `max_depth` plies. The beam is
-    /// bounded by its *width* (a [`BeamPlanner`](crate::ai::search::BeamPlanner)
+    /// bounded by its *width* (a [`BeamPlanner`]
     /// field) × depth and ignores `nodes`. `beam(1)` reproduces the greedy
     /// single-ply decision.
     pub fn beam(max_depth: u8) -> Self {

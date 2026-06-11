@@ -3,8 +3,8 @@
 //! A placement search needs the *set of final resting poses* the active piece can
 //! reach from spawn, plus the button sequence to reach each one. This module
 //! enumerates them with a breadth-first search over `(x, y, rotation)` states,
-//! mirroring Cold Clear's movegen (research finding [8]): a frontier + a
-//! [`FxHashSet`](rustc_hash::FxHashSet) visited-set, soft-drop *approximated* rather than enumerating every
+//! mirroring Cold Clear's movegen (research finding \[8\]): a frontier + a
+//! [`FxHashSet`] visited-set, soft-drop *approximated* rather than enumerating every
 //! gravity cell, and — crucially — **all SRS wall kicks delegated to the engine's
 //! own [`Piece::try_rotate_with_kicks`] / [`Piece::try_move`]**. The search never
 //! re-encodes a kick table, so it can never disagree with the real rules (and an
@@ -17,7 +17,7 @@
 //! Every reachable resting pose is emitted, including ones reached by rotating
 //! *into* a slot as the final action — that is what lets the evaluator see tucks
 //! and T-spins (the recorded [`ActivePiece`] keeps its `last_successful_action ==
-//! Rotate`, which is exactly what [`classify_t_spin`](crate::engine::classify_t_spin)
+//! Rotate`, which is exactly what [`classify_t_spin`]
 //! checks).
 //!
 //! # Soft-drop approximation
@@ -79,7 +79,7 @@ pub enum Move {
 ///
 /// Carries the landed [`ActivePiece`] (so the caller can lock it with
 /// the search's `BitBoard::lock_piece` and classify a T-spin with
-/// [`classify_t_spin`](crate::engine::classify_t_spin)) and the [`Move`] path that
+/// [`classify_t_spin`]) and the [`Move`] path that
 /// reaches it from spawn.
 #[derive(Clone, Debug)]
 pub struct Placement {

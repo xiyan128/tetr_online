@@ -9,7 +9,7 @@
 //! # Two weight groups, mirroring the `(Value, Reward)` seam
 //!
 //! [`Weights`] holds two conceptually distinct groups (Cold Clear's
-//! `transient`/`acc` split, finding [3]):
+//! `transient`/`acc` split, finding \[3\]):
 //!
 //! - **Board weights** — applied to the *static* board features to produce a
 //!   [`Value`](super::Value): the quality of a resting position independent of how
@@ -20,8 +20,8 @@
 //!
 //! # The DT-20 default is an *initialization*, not gospel
 //!
-//! [`Weights::DT20`] seeds the board weights with the Dellacherie–Thiery 9-feature
-//! CBMPI-optimized vector for the 10×20 board (finding [2]). **Caveat (research
+//! [`BoardWeights::DT20`] seeds the board group with the Dellacherie–Thiery 9-feature
+//! CBMPI-optimized vector for the 10×20 board (finding \[2\]). **Caveat (research
 //! §74.5):** DT-20 is a *learned, maximize-convention* policy — e.g. its `holes`
 //! weight is *positive* (`+2.03`) because higher score = better there. This crate
 //! evaluates with a *higher-Value-is-better* convention too, so the signs are kept
@@ -32,10 +32,9 @@
 //! The shipped default reward weights are a **survival** profile
 //! ([`RewardWeights::SURVIVAL`]) that pays the Tier-1 greedy planner to clear lines
 //! *now* — a 1-ply search has no lookahead to defer them. Cold Clear's master
-//! reward config ([`RewardWeights::COLD_CLEAR`], findings [4],[5]) — which
+//! reward config ([`RewardWeights::COLD_CLEAR`], findings \[4\],\[5\]) — which
 //! *penalizes* small clears to force downstacking and preserve the B2B chain — is
-//! kept as the [`Weights::DOWNSTACK`] profile for a future multi-ply Tier-2 beam,
-//! where deferring clears actually pays off. Pairing Cold Clear's downstacking
+//! kept for multi-ply searches, where deferring clears actually pays off. Pairing Cold Clear's downstacking
 //! rewards with a 1-ply greedy buries the bot (it never cashes the downstack in),
 //! so it is deliberately NOT the default.
 
@@ -75,9 +74,9 @@ pub struct BoardWeights {
 }
 
 impl BoardWeights {
-    /// Dellacherie–Thiery DT-20 board weights for the 10×20 board (finding [2]).
+    /// Dellacherie–Thiery DT-20 board weights for the 10×20 board (finding \[2\]).
     ///
-    /// Used as the [`Weights::DT20`] board group. See the module docs for the
+    /// Used as the [`Weights::SURVIVAL`] board group. See the module docs for the
     /// sign-convention caveat. (DT-20's 9th "diversity" feature is omitted here:
     /// the Dellacherie-6 + BCTS-2 set this crate ships does not yet extract it.)
     pub const DT20: Self = Self {
@@ -197,7 +196,7 @@ pub struct RewardWeights {
 }
 
 impl RewardWeights {
-    /// Cold Clear master reward weights (findings [4],[5]).
+    /// Cold Clear master reward weights (findings \[4\],\[5\]).
     pub const COLD_CLEAR: Self = Self {
         clear1: -143.0,
         clear2: -100.0,

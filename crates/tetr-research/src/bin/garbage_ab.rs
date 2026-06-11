@@ -2,7 +2,7 @@
 //!
 //! Side ARM-AWARE sees the pending-garbage queue (and its search models
 //! cancellation + rising exactly — the engine-mirrored transition); the other
-//! arm is the identical bot behind [`BlindToGarbage`], planning as if nothing
+//! arm is the identical bot behind `BlindToGarbage`, planning as if nothing
 //! were ever queued. Same weights, same search, same seeds, same piece
 //! sequences.
 //!

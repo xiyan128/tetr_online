@@ -37,8 +37,8 @@
 //! # Coordinate conventions
 //!
 //! [`Board`] has its origin at the **bottom-left** with `y` increasing upward;
-//! off-grid `x` reads as [`CellKind::Wall`] and off-grid `y` reads as empty
-//! ([`CellKind::None`]). So "above" means larger `y`, the floor is `y = -1`, and
+//! off-grid `x` reads as [`CellKind::Wall`](crate::engine::CellKind::Wall) and off-grid `y` reads as empty
+//! ([`CellKind::None`](crate::engine::CellKind::None)). So "above" means larger `y`, the floor is `y = -1`, and
 //! the side walls are `x = -1` / `x = width`. Feature scans run over rows
 //! `0..stack_height`, where `stack_height` is the tallest column — everything
 //! above that is empty and (for Dellacherie's definitions) contributes nothing, so
@@ -92,7 +92,7 @@ impl BoardFeatures {
     ///
     /// The per-move features — `landing_height` and `eroded_piece_cells` — read
     /// `lock` because they describe the placement, not the resting board; the rest
-    /// are pure functions of `board`. Pass a [`LockOutcome::default`]-style empty
+    /// are pure functions of `board`. Pass a `LockOutcome::default()`-style empty
     /// outcome to score a board with no associated move (those two features come
     /// out `0`).
     pub fn extract(board: &Board, lock: &LockOutcome) -> Self {

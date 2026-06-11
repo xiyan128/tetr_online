@@ -13,16 +13,17 @@
 //! 2. **Hold-aware transition (BEAM.md §3).** A node forks the [`SearchState`] and
 //!    advances through a [`Placement`] with [`SearchState::commit_placement`], the
 //!    Step-0 transition that models a hold swap and deals the bag exactly once.
-//! 3. **One batch per generation (BEAM.md §4/§7).** Every child of a generation is
-//!    scored in a single [`Evaluator::evaluate_batch`] call — the seam the neural
-//!    value net needs to fold a whole generation into one forward pass.
-//! 4. **Depth-1 == greedy (BEAM.md §8).** The first generation scores exactly as
-//!    [`score_placement`] does (clone, classify pre-lock, lock, `value + reward`),
-//!    so a `max_depth == 1` beam reproduces [`GreedyPlanner`]'s decision.
+//! 3. **One generation at a time (BEAM.md §4/§7).** Every child of a generation
+//!    is scored before any is expanded — the whole-generation grain a neural
+//!    value net needs to fold scoring into one forward pass.
+//! 4. **Depth-1 == greedy (BEAM.md §8).** The first generation scores each
+//!    placement as a one-ply search does (clone, classify pre-lock, lock,
+//!    `value + reward`), so a `max_depth == 1` beam reproduces the greedy
+//!    decision (pinned against `SearchBudget::single_ply` best-first).
 //!
 //! As a session the beam is **batch-grain**: [`Mind::think`] expands exactly one
-//! generation per call regardless of the quantum (a generation is one
-//! [`Evaluator::evaluate_batch`], indivisible by design — pin 3) and reports
+//! generation per call regardless of the quantum (a generation is scored
+//! whole, indivisible by design — pin 3) and reports
 //! [`ThinkProgress::Exhausted`] once it reaches the run's depth cap or the
 //! frontier empties. [`Mind::best`] is the backed-up ply-1 argmax at any point.
 
@@ -361,9 +362,9 @@ impl Mind for BeamPlanner {
         self.run = Some(self.seed(state, eval, max_depth));
     }
 
-    /// **Batch-grain**: one whole generation per call, regardless of `quantum` — a
-    /// generation is a single [`Evaluator::evaluate_batch`] and is indivisible by
-    /// design (BEAM.md §7, the seam a neural value net needs).
+    /// **Batch-grain**: one whole generation per call, regardless of `quantum` —
+    /// a generation is scored as one indivisible whole (BEAM.md §7, the grain a
+    /// neural value net needs).
     fn think(&mut self, _quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
         let (beam_width, speculate) = (self.beam_width, self.speculate);
         let Some(run) = self.run.as_mut() else {

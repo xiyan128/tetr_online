@@ -1,9 +1,9 @@
 //! Game-side AI module.
 //!
 //! The engine-agnostic AI (the bot, its search, evaluator, and the model-agnostic
-//! [`AiController`]) lives in the `tetr-core` crate; it is re-exported here so the
+//! `AiController`) lives in the `tetr-core` crate; it is re-exported here so the
 //! host addresses it as `crate::ai::…`. The Bevy-side piece is the model
-//! [`registry`]: the catalog of bots a session seat can run.
+//! `registry`: the catalog of bots a session seat can run.
 
 pub use tetr_core::ai::*;
 

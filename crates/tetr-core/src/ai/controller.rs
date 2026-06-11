@@ -6,7 +6,7 @@
 //!
 //! It is the *shell* around an AI brain, and it is deliberately **model-agnostic**:
 //! it knows nothing about search, evaluators, or weights — only a
-//! [`Policy`](crate::ai::Policy), driven through a [`DecisionRunner`]. The same
+//! [`Policy`], driven through a [`DecisionRunner`]. The same
 //! shell drives a greedy search, a future beam, or a neural policy unchanged. It
 //! owns the two concerns a brain has no opinion on:
 //!
@@ -34,7 +34,7 @@
 //!    did under the same piece), the current plan is stale: cancel the in-flight
 //!    decision, clear the queued frames, and start a fresh think. The one
 //!    *expected* change is exempt: a plan-initiated hold swap is pre-targeted
-//!    when the plan is applied (see [`PieceSignature`]), so the bot's own hold
+//!    when the plan is applied (see `PieceSignature`), so the bot's own hold
 //!    never discards its own maneuver.
 //! 2. **Pump.** Poll the runner every frame and buffer a finished [`Decision`].
 //!    A cooperative venue ([`SlicedRunner`]) does its per-frame quantum of search
@@ -95,7 +95,7 @@ const ATTACK_NODE_BUDGET: u32 = 192;
 const ATTACK_DEPTH: u8 = 6;
 
 /// An AI [`PlayerController`]: a model-agnostic shell that drives a
-/// [`Policy`](crate::ai::Policy) (via a [`DecisionRunner`]) and feeds its chosen
+/// [`Policy`] (via a [`DecisionRunner`]) and feeds its chosen
 /// placement to the engine one pulse per poll, with a reaction-delay handicap.
 pub struct AiController {
     /// Where the decision is computed (synchronous by default; an off-thread runner

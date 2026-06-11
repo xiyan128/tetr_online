@@ -64,7 +64,7 @@ pub struct BitBoard {
 }
 
 impl BitBoard {
-    /// An empty board of the given `width` (clamped to [`MAX_WIDTH`]), visible height,
+    /// An empty board of the given `width` (clamped to `MAX_WIDTH`), visible height,
     /// and total backing rows (clamped to 64, a `u64` column's capacity).
     pub fn empty(width: usize, visible_rows: usize, total_rows: usize) -> Self {
         Self {
@@ -77,7 +77,7 @@ impl BitBoard {
 
     /// Pack an engine [`Board`]'s occupancy into a `BitBoard` (colour discarded).
     ///
-    /// The mirror's envelope is [`MAX_WIDTH`] × 64 rows; a larger board would be
+    /// The mirror's envelope is `MAX_WIDTH` × 64 rows; a larger board would be
     /// silently truncated by the clamps below, so it is rejected in debug builds.
     pub fn from_board(board: &Board) -> Self {
         debug_assert!(

@@ -25,7 +25,7 @@
 //! but one `InputFrame { soft_drop: true, .. }` only descends a single cell. So a
 //! soft drop is expanded into as many soft-drop frames as it takes the piece to
 //! come to rest from its current pose — computed by walking a cloned [`ActivePiece`]
-//! with the engine's own [`Piece::try_move`], the same primitive movegen used. This
+//! with the engine's own `Piece::try_move`, the same primitive movegen uses. This
 //! keeps lateral *tucks under an overhang* (`SoftDrop` then `Left`/`Right`) faithful:
 //! the piece actually reaches the floor before the tuck shift.
 //!

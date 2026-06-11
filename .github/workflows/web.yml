@@ -49,8 +49,10 @@ jobs:
       - name: Install JS dependencies
         run: bun install --frozen-lockfile
 
+      # Pinned to a release tag: @main is a moving branch that runs code in
+      # this job, and the deploy should not change behavior under our feet.
       - name: Install cargo-binstall
-        uses: cargo-bins/cargo-binstall@main
+        uses: cargo-bins/cargo-binstall@v1.20.0
 
       # Pin wasm-bindgen-cli to the Cargo.lock-resolved version. A version skew
       # between the CLI and the `wasm-bindgen` crate yields a silently broken
@@ -75,6 +77,20 @@ jobs:
       - name: Build web bundles
         run: bun run build
 
+      # Wasm size is a budget this repo manages deliberately (the curated Bevy
+      # feature list exists for it); make every deploy's number visible.
+      - name: Bundle sizes (job summary)
+        run: |
+          {
+            echo "### Deployed bundle sizes"
+            echo ""
+            echo "| file | size |"
+            echo "|---|---|"
+            for f in dist/*.wasm dist/*.js; do
+              echo "| $(basename "$f") | $(du -h "$f" | cut -f1) |"
+            done
+          } >> "$GITHUB_STEP_SUMMARY"
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
@@ -86,3 +102,22 @@ jobs:
       - name: Deploy to GitHub Pages
         id: deployment
         uses: actions/deploy-pages@v4
+
+      # "Deploy succeeded" is not "site serves": fetch the page through the real
+      # URL (custom domain + CDN) and require the app shell plus a wasm bundle.
+      # Retries cover CDN propagation; failure here fails the run loudly.
+      - name: Verify the live site
+        run: |
+          url="${{ steps.deployment.outputs.page_url }}"
+          for i in $(seq 1 6); do
+            if page=$(curl -sf "$url?cb=$(date +%s)") \
+               && grep -q 'chunk-' <<< "$page" \
+               && curl -sfI "${url}tetr_online_webgl2_bg.wasm" >/dev/null; then
+              echo "live site verified at $url"
+              exit 0
+            fi
+            echo "not serving yet (attempt $i), retrying in 10s"
+            sleep 10
+          done
+          echo "::error::deployed but the live site never served the new build"
+          exit 1

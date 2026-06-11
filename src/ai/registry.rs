@@ -1,11 +1,11 @@
 //! The AI model registry: the catalog of "brains" a bot seat can run.
 //!
-//! Each [`ModelEntry`] names a bot and knows how to build a fresh [`AiController`]
+//! Each `ModelEntry` names a bot and knows how to build a fresh `AiController`
 //! for it. The shipped catalog spans the linear DT-20 evaluator and the ported
 //! Cold Clear 2 attack evaluator, on greedy / beam / best-first search.
 //! **Adding a model is one entry in [`ModelRegistry::default`].**
 //!
-//! The setup screens ([`crate::screens`]) render [`labels`](ModelRegistry::labels)
+//! The setup screens (`crate::screens`) render [`labels`](ModelRegistry::labels)
 //! and write the selection; the session's seat spawner builds a controller per
 //! bot seat when a session starts. Difficulty is the shared `beatable()` handicap
 //! for every entry: only the *model* (the planner + board evaluator) differs, so

@@ -20,9 +20,10 @@
 //! own off-thread `request` / `poll` / cancel model, so the remaining venues — a
 //! native thread that thinks continuously between polls, a Web Worker speaking
 //! the same protocol over `postMessage` — drop in as a controller-internal
-//! change that no caller sees. [`take_now`](DecisionRunner::take_now) is the
-//! anytime valve those venues share: the best decision available *right now*,
-//! for a deadline-pressed caller (lock-timer pressure, a versus pace cap).
+//! change that no caller sees. The policy's `take` verb is the anytime valve
+//! those venues share — the best decision available *right now*, for a
+//! deadline-pressed caller (lock-timer pressure, a versus pace cap); a
+//! deadline venue re-adds a runner-level verb for it trivially.
 //!
 //! # Determinism
 //!

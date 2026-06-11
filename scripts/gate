@@ -1,0 +1,45 @@
+#!/usr/bin/env bash
+# The quality gate: exactly what CI runs (.github/workflows/ci.yml), in the
+# same order, fail-fast. Run it before every push; a green gate here is a
+# green CI run there (the one thing it can't check is the Linux target).
+#
+# Usage:
+#   scripts/gate          the full gate (what a push must pass)
+#   scripts/gate quick    fmt + clippy only (the inner-loop check)
+#
+# Every step is a plain command with its real exit code — no pipes around
+# cargo, so a failure can never be masked by a downstream `tail`/`grep`.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+t0=$SECONDS
+step() { printf '\n\033[1m== %s\033[0m\n' "$1"; }
+
+step "fmt --check"
+cargo fmt --all -- --check
+
+step "clippy (workspace, all targets, -D warnings)"
+cargo clippy --workspace --all-targets --locked -- -D warnings
+
+if [ "${1:-}" = "quick" ]; then
+    printf '\n\033[1;32mQUICK GATE GREEN\033[0m (%ds)\n' "$((SECONDS - t0))"
+    exit 0
+fi
+
+step "tests (workspace)"
+cargo test --workspace --locked
+
+step "docs (broken links are errors)"
+RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
+
+step "check (dev feature)"
+cargo check --features dev --locked
+
+step "build (embed, wasm32)"
+cargo build -p tetr-embed --target wasm32-unknown-unknown --locked
+
+step "check (game, wasm32, webgl2 — the shipping target)"
+cargo check -p tetr_online --target wasm32-unknown-unknown \
+    --no-default-features --features webgl2 --locked
+
+printf '\n\033[1;32mFULL GATE GREEN\033[0m (%ds) — matches .github/workflows/ci.yml\n' "$((SECONDS - t0))"

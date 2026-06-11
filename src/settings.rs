@@ -13,7 +13,7 @@
 //!
 //! This type is defined ONCE here so the options feature mutates it and every
 //! reader (engine bridge, previewer, ghost system, SFX) shares one definition.
-//! It also owns its own persistence: [`encode_settings`]/[`decode_settings`]
+//! It also owns its own persistence: `encode_settings`/`decode_settings`
 //! round-trip it through RON via `serde` derives, so the storage format is a
 //! property of the settings type, not of the options UI. The options feature
 //! drives the read/write *systems* and renders the editor; the wire *format*
@@ -157,7 +157,7 @@ pub struct GameSettings {
     pub ghost_enabled: bool,
     /// Engine lock-down rule. `LockDownMode` lives in the engine-agnostic
     /// `engine/` crate, which depends on neither Bevy nor `serde`; it is skipped
-    /// for reflection and (de)serialized via the [`lock_down_serde`] token adapter
+    /// for reflection and (de)serialized via the `lock_down_serde` token adapter
     /// rather than coupling the engine to either framework.
     #[reflect(ignore)]
     #[serde(with = "lock_down_serde")]

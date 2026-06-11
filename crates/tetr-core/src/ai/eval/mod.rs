@@ -1,7 +1,7 @@
 //! The board evaluator: the Cold Clear `(Value, Reward)` seam.
 //!
 //! A placement search needs to score candidate placements. Following Cold Clear
-//! (research finding [3]), scoring splits into two distinct quantities:
+//! (research finding \[3\]), scoring splits into two distinct quantities:
 //!
 //! - [`Value`] — the *static* quality of the resulting board: holes, transitions,
 //!   wells, height. A property of a position, independent of how it was reached.

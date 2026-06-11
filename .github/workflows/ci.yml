@@ -1,8 +1,9 @@
-# The quality gate: formatting, lints, and the full test suite on every push.
+# The quality gate: formatting, lints, tests, docs, and every compile target
+# that ships, on every push. `scripts/gate` runs the same steps in the same
+# order locally — keep the two in lockstep when editing either.
 #
 # The deploy workflow (web.yml) only proves the wasm bundles BUILD; nothing else
-# stops a regression from reaching master. This gate runs what a developer runs:
-# fmt --check, clippy -D warnings, and the workspace tests under both feature
+# stops a regression from reaching master. This gate runs what a developer runs.
 #
 # The toolchain comes from rust-toolchain.toml (actions-rust-lang reads it), so
 # CI compiles with the same pinned compiler as every local checkout — the same
@@ -12,6 +13,12 @@ name: CI
 on:
   push:
   workflow_dispatch:
+
+# A newer push to the same ref supersedes the in-flight run; there is nothing
+# a stale CI result can tell us.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
   test:
@@ -40,6 +47,13 @@ jobs:
       - name: Tests (workspace)
         run: cargo test --workspace --locked
 
+      # Broken intra-doc links are how comments rot silently after a rename or
+      # a deletion; this turns them into failures.
+      - name: Docs (broken links are errors)
+        run: cargo doc --workspace --no-deps --locked
+        env:
+          RUSTDOCFLAGS: -D warnings
+
       # The dev-tooling feature (egui inspector) is the one combination no other
       # job compiles; a check keeps it from rotting silently.
       - name: Check (dev feature)
@@ -50,3 +64,11 @@ jobs:
       - name: Build (embed, wasm32)
         run: cargo build -p tetr-embed --target wasm32-unknown-unknown --locked
 
+      # The game's SHIPPING target. A target-gated compile error here (the
+      # winit-backend class of failure) would otherwise surface only in the
+      # deploy workflow, after merge. A check is enough — the deploy still owns
+      # the full bindgen/opt pipeline.
+      - name: Check (game, wasm32, webgl2)
+        run: >
+          cargo check -p tetr_online --target wasm32-unknown-unknown
+          --no-default-features --features webgl2 --locked

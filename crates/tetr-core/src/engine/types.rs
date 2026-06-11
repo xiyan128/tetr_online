@@ -27,7 +27,7 @@ pub struct EngineConfig {
     /// stay queued for the next opportunity. `0` disables rising entirely —
     /// pending garbage can then only ever be cancelled (a config edge, not the
     /// "uncapped" convention some games use). Irrelevant outside versus — the
-    /// queue is only fed by [`Engine::queue_garbage`].
+    /// queue is only fed by [`Engine::queue_garbage`](crate::engine::Engine::queue_garbage).
     pub garbage_cap: u32,
 }
 
@@ -59,7 +59,7 @@ pub struct InputFrame {
     pub pause: bool,
 }
 
-/// Game-facing happenings of one [`Engine::step`]. Deliberately NOT a movement
+/// Game-facing happenings of one [`Engine::step`](crate::engine::Engine::step). Deliberately NOT a movement
 /// trace: spawning and per-cell movement (lateral, soft-drop, gravity) are
 /// snapshot state — observe them by diffing [`EngineSnapshot::active`] across
 /// steps. Events exist for the discrete outcomes a consumer cannot recover
@@ -93,7 +93,7 @@ pub enum EngineEvent {
     /// Versus: this lock's attack survived cancellation — `lines` garbage lines
     /// leave the board for the opponent (net of any pending garbage it offset;
     /// a fully-cancelled attack emits nothing). The match driver routes this to
-    /// the opponent's [`Engine::queue_garbage`].
+    /// the opponent's [`Engine::queue_garbage`](crate::engine::Engine::queue_garbage).
     AttackSent {
         lines: u32,
     },
@@ -122,7 +122,7 @@ pub struct SnapshotCell {
     /// [`garbage`](Self::garbage) first — a versus renderer paints garbage
     /// neutral, not cyan.
     pub piece_type: PieceType,
-    /// True for a garbage-row cell ([`CellKind::Garbage`]); always `false` for
+    /// True for a garbage-row cell ([`CellKind::Garbage`](crate::engine::CellKind::Garbage)); always `false` for
     /// active-piece and ghost cells.
     pub garbage: bool,
 }

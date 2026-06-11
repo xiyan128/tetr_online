@@ -1,5 +1,8 @@
 # Tetr Online: a guideline Tetris in Rust + Bevy
 
+[![CI](https://github.com/xiyan128/tetr_online/actions/workflows/ci.yml/badge.svg)](https://github.com/xiyan128/tetr_online/actions/workflows/ci.yml)
+[![Deploy](https://github.com/xiyan128/tetr_online/actions/workflows/web.yml/badge.svg)](https://github.com/xiyan128/tetr_online/actions/workflows/web.yml)
+
 <img width="1289" alt="Screenshot" src="https://user-images.githubusercontent.com/17198282/229279595-87174f68-c88e-41cd-81c2-47be0f383f72.png">
 
 A guideline-compliant Tetris built in Rust on the [Bevy](https://bevyengine.org/)
@@ -130,6 +133,8 @@ it's supported, falling back to WebGL2 elsewhere.
 ## Development
 
 ```sh
+scripts/gate                     # everything CI runs, fail-fast — run before pushing
+scripts/gate quick               # the inner loop: fmt + clippy only
 cargo test                       # unit tests + the guideline acceptance suite
 cargo run --features dev         # in-game ECS inspector overlay (egui)
 cargo bench                      # criterion benchmarks (engine + AI)
@@ -137,6 +142,11 @@ cargo bench                      # criterion benchmarks (engine + AI)
 # AI research harness (deterministic, never ships with the game):
 cargo run --release -p tetr-research --bin bench-marathon
 ```
+
+`scripts/gate` mirrors `.github/workflows/ci.yml` step for step (format, clippy
+with warnings denied, the workspace tests, rustdoc with broken links as errors,
+and a compile check of every shipping target, wasm included). A green gate
+locally is a green CI run, short of Linux-only surprises.
 
 `crates/tetr-research` is the measurement side of the project. It runs
 reproducible, variance-aware experiments for tuning and comparing bots: APP

@@ -193,7 +193,7 @@ impl Game {
     }
 
     /// Advance real time by `dt_seconds`, running the engine on a fixed 60 Hz
-    /// accumulator. Returns the event tags (see [`event_tag`]) emitted this tick so
+    /// accumulator. Returns the event tags (see `event_tag`) emitted this tick so
     /// the renderer can fire line-clear / game-over effects.
     pub fn tick(&mut self, dt_seconds: f32) -> Vec<u8> {
         let mut tags = Vec::new();
