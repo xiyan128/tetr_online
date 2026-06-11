@@ -109,13 +109,17 @@ jobs:
       # "Deploy succeeded" is not "site serves": fetch the page through the real
       # URL (custom domain + CDN) and require the app shell plus a wasm bundle.
       # Retries cover CDN propagation; failure here fails the run loudly.
+      # -L matters: page_url is the github.io address, which 301s to the
+      # custom domain; without following redirects the body is empty and the
+      # check can never pass.
       - name: Verify the live site
         run: |
           url="${{ steps.deployment.outputs.page_url }}"
+          echo "verifying $url"
           for i in $(seq 1 6); do
-            if page=$(curl -sf "$url?cb=$(date +%s)") \
+            if page=$(curl -sfL "$url?cb=$(date +%s)") \
                && grep -q 'chunk-' <<< "$page" \
-               && curl -sfI "${url}tetr_online_webgl2_bg.wasm" >/dev/null; then
+               && curl -sfLI "${url}tetr_online_webgl2_bg.wasm" >/dev/null; then
               echo "live site verified at $url"
               exit 0
             fi

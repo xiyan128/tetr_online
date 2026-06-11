@@ -230,7 +230,7 @@ fn spawn_variant_column(
 }
 
 /// A column heading (variant name), slightly larger / brighter than rows.
-fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle {
+fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle + use<> {
     (
         Text::new(text),
         TextFont {

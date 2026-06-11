@@ -155,7 +155,7 @@ fn block_sprite(
     y: isize,
     color: Color,
     z: f32,
-) -> impl Bundle {
+) -> impl Bundle + use<> {
     let mut sprite = Sprite::from_image(assets.block_texture.clone());
     sprite.custom_size = Some(Vec2::splat(block_size));
     sprite.color = color;
