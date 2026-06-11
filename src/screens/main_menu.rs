@@ -90,6 +90,8 @@ fn activate(
     actions: Query<(&Focusable, &MainMenuAction)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut sandbox: ResMut<AiSandbox>,
+    mut session: ResMut<crate::session::SessionConfig>,
+    mut setup_kind: ResMut<crate::screens::session_setup::SetupKind>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     // Select via keyboard (Enter/Space on the focused row) or a mouse click on a
@@ -111,14 +113,19 @@ fn activate(
         match action {
             MainMenuAction::Play => {
                 *sandbox = AiSandbox(false);
+                session.seats[0] = crate::session::Participant::Human;
                 next.set(GameState::ModeSelect);
             }
             // Versus has its own setup screen and never reads the sandbox flag.
-            MainMenuAction::Versus => next.set(GameState::SessionSetup),
+            MainMenuAction::Versus => {
+                *setup_kind = crate::screens::session_setup::SetupKind::Versus;
+                next.set(GameState::SessionSetup);
+            }
             MainMenuAction::WatchAi => {
                 *sandbox = AiSandbox(true);
-                // Watch-AI picks a model first, then the mode.
-                next.set(GameState::ModelSelect);
+                *setup_kind = crate::screens::session_setup::SetupKind::WatchAi;
+                // Watch-AI picks its bot in the seat picker, then the mode.
+                next.set(GameState::SessionSetup);
             }
             MainMenuAction::Options => next.set(GameState::Options),
             MainMenuAction::Help => next.set(GameState::Help),

@@ -65,6 +65,7 @@ fn activate(
     list: Single<&FocusList, With<ModeSelectRoot>>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
     mut active: ResMut<ActiveVariant>,
+    mut session: ResMut<crate::session::SessionConfig>,
     mut next: ResMut<NextState<GameState>>,
 ) {
     // Keyboard (Enter/Space) or a mouse click both select the focused variant.
@@ -74,7 +75,10 @@ fn activate(
         Some(NavAction::Select(index)) => {
             if let Some(&variant) = Variant::ALL.get(index) {
                 *active = ActiveVariant(variant);
-                next.set(GameState::Playing);
+                // The seats were chosen by the entry point (Play = you;
+                // Watch AI = the picked bot); this screen sets the rules.
+                session.mode = crate::session::SessionMode::Solo { variant };
+                next.set(GameState::Session);
             }
         }
         Some(NavAction::Back) => next.set(GameState::MainMenu),
