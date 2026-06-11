@@ -4,12 +4,12 @@
 //! while a session runs and turns them into transient *world-space* flourishes
 //! over that seat's playfield:
 //!
-//! * **Line-clear flash**: a white sheet over the field that pulses and fades on
+//! * **Line-clear flash**: a cream sheet over the field that pulses and fades on
 //!   every line clear.
 //! * **Hard-drop trail**: fading vertical streaks down the columns a hard-dropped
 //!   piece swept through.
 //!
-//! The textual callouts ("SINGLE" / "TETRIS" / "T-SPIN" / "COMBO x2" / …) are
+//! The textual callouts ("SINGLE" / "TETRIS" / "T-SPIN DOUBLE" / …) are
 //! deliberately *not* here. They live in the session's callout feed
 //! ([`crate::session::feel`]), the single home for that text; this module is
 //! purely the visual flourish around it.
@@ -27,7 +27,7 @@ use crate::GameState;
 use crate::engine::{EngineEvent, SnapshotCell};
 use crate::level::common::to_translation;
 
-/// Lifetime of the white line-clear flash sheet.
+/// Lifetime of the line-clear flash sheet.
 const FLASH_TTL_SECONDS: f32 = 0.25;
 /// Peak alpha of the line-clear flash. Deliberately gentle — a soft pulse, not a
 /// full-board white-out.
@@ -42,7 +42,7 @@ const TRAIL_PEAK_ALPHA: f32 = 0.4;
 // Components
 // ---------------------------------------------------------------------------
 
-/// The world-space white sheet shown on a line clear.
+/// The world-space cream sheet shown on a line clear.
 #[derive(Component, Reflect)]
 #[reflect(Component)]
 struct LineClearFlash {
@@ -135,8 +135,9 @@ fn spawn_event_effects(
 // Line-clear flash (world space)
 // ---------------------------------------------------------------------------
 
-/// Spawn a white sheet covering the visible playfield. Sits just in front of the
-/// minos so the clear reads as a soft pulse.
+/// Spawn a cream sheet covering the visible playfield (`theme::TEXT` — pure
+/// white is banned). Sits just in front of the minos so the clear reads as a
+/// soft pulse.
 fn spawn_line_clear_flash(commands: &mut Commands, origin: Vec3) {
     use crate::session::render::SessionLayout;
     let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32;
@@ -144,7 +145,7 @@ fn spawn_line_clear_flash(commands: &mut Commands, origin: Vec3) {
     commands.spawn((
         LineClearFlash { elapsed: 0.0 },
         Sprite::from_color(
-            Color::WHITE.with_alpha(FLASH_PEAK_ALPHA),
+            crate::ui::widgets::theme::TEXT.with_alpha(FLASH_PEAK_ALPHA),
             Vec2::new(width, height),
         ),
         // Anchored bottom-left at the SEAT's board origin.

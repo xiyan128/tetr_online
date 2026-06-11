@@ -1,7 +1,7 @@
 //! Session rendering: a board group per seat, everything parented to it.
 //!
 //! Each seat gets a **board root** entity at its world-space origin; the
-//! background grid, the mino layers (locked / falling / ghost), the hold and
+//! field chrome (gridlines + frame), the mino layers (locked / falling / ghost), the hold and
 //! preview columns, the garbage meter, and the seat texts are all children of
 //! (or anchored to) that root — position is one transform, despawn is one
 //! subtree, and a future mirrored layout is a per-root parameter. One camera
@@ -96,9 +96,20 @@ pub enum VsLayer {
 #[derive(Component, Clone, Copy)]
 pub struct LayerSeat(pub usize);
 
+/// World-space width of the garbage meter (track and fill), in pixels.
+const METER_WIDTH: f32 = 8.0;
+
 /// The garbage meter root for a seat; children are the batch segments.
 #[derive(Component)]
 pub struct SeatMeter {
+    pub seat: usize,
+}
+
+/// One edge of a seat's field frame. The danger pass warms these toward
+/// `ATTACK` as the stack nears the top — the frame carries the state so the
+/// field background never has to change during play.
+#[derive(Component)]
+pub struct BoardFrame {
     pub seat: usize,
 }
 
@@ -140,27 +151,29 @@ impl Plugin for SessionRenderPlugin {
                     reconcile_preview_views,
                     update_atk_texts,
                     update_seat_timer_bars,
+                    tint_danger_frames,
                 )
                     .run_if(in_state(GameState::Session)),
             );
     }
 }
 
-/// One mino-sized sprite at board-relative cell `(x, y)` — the block
-/// primitive. Colour is a parameter rather than derived from `PieceType`,
-/// because garbage cells have no piece type.
-fn block_sprite(
-    assets: &GameAssets,
-    block_size: f32,
-    x: isize,
-    y: isize,
-    color: Color,
-    z: f32,
-) -> impl Bundle + use<> {
-    let mut sprite = Sprite::from_image(assets.block_texture.clone());
-    sprite.custom_size = Some(Vec2::splat(block_size));
-    sprite.color = color;
-    let mut transform = Transform::from_translation(to_translation(x, y, block_size));
+/// Fraction of a cell left as the articulation gap — 2 px at the 32 px desktop
+/// cell, scaling with the hold/preview avatars. Minos are flat fills separated
+/// by this gap; the gap (showing the `GRID`-lined ground) is the articulation,
+/// no bevels and no per-cell texture.
+const CELL_GAP_FRACTION: f32 = 2.0 / 32.0;
+
+/// One mino chiclet at board-relative cell `(x, y)` — the block primitive: a
+/// flat color fill inset by half the articulation gap on every side. Colour is
+/// a parameter rather than derived from `PieceType`, because garbage cells
+/// have no piece type.
+fn block_sprite(block_size: f32, x: isize, y: isize, color: Color, z: f32) -> impl Bundle + use<> {
+    let gap = block_size * CELL_GAP_FRACTION;
+    let sprite = Sprite::from_color(color, Vec2::splat(block_size - gap));
+    let mut transform = Transform::from_translation(
+        to_translation(x, y, block_size) + Vec3::new(gap / 2.0, gap / 2.0, 0.0),
+    );
     transform.translation.z = z;
     (sprite, transform, Anchor::BOTTOM_LEFT)
 }
@@ -195,22 +208,56 @@ fn setup_scene(
             ))
             .id();
 
-        // Background grid (decorative, drawn once).
-        let mut grid = Vec::new();
-        for x in 0..SessionLayout::BOARD_W as isize {
-            for y in 0..SessionLayout::BOARD_H as isize {
-                let mut sprite = Sprite::from_color(Color::srgb(0.1, 0.1, 0.1), Vec2::splat(block));
-                sprite.custom_size = Some(Vec2::splat(block));
-                let mut transform = Transform::from_translation(to_translation(x, y, block));
-                transform.translation.z = -1.0;
-                grid.push(
-                    commands
-                        .spawn((sprite, transform, Anchor::BOTTOM_LEFT))
-                        .id(),
-                );
-            }
+        // Field chrome, drawn once: gridlines in `GRID` (the 2 px articulation
+        // the chiclets sit between) and a 1 px `FRAME` border just outside the
+        // field. The field ground itself is the clear color — per Kissaten the
+        // field background never changes, the frame carries the state.
+        let board_w = SessionLayout::BOARD_W as f32 * block;
+        let board_h = SessionLayout::BOARD_H as f32 * block;
+        let mut chrome = Vec::new();
+        for x in 1..SessionLayout::BOARD_W {
+            chrome.push(
+                commands
+                    .spawn((
+                        Sprite::from_color(theme::GRID, Vec2::new(2.0, board_h)),
+                        Transform::from_translation(Vec3::new(x as f32 * block - 1.0, 0.0, -1.0)),
+                        Anchor::BOTTOM_LEFT,
+                    ))
+                    .id(),
+            );
         }
-        commands.entity(root).add_children(&grid);
+        for y in 1..SessionLayout::BOARD_H {
+            chrome.push(
+                commands
+                    .spawn((
+                        Sprite::from_color(theme::GRID, Vec2::new(board_w, 2.0)),
+                        Transform::from_translation(Vec3::new(0.0, y as f32 * block - 1.0, -1.0)),
+                        Anchor::BOTTOM_LEFT,
+                    ))
+                    .id(),
+            );
+        }
+        // The frame's four edges carry `BoardFrame` so the danger pass can
+        // warm them toward `ATTACK` as the stack climbs.
+        let frame_edges = [
+            (Vec2::new(-1.0, -1.0), Vec2::new(board_w + 2.0, 1.0)),
+            (Vec2::new(-1.0, board_h), Vec2::new(board_w + 2.0, 1.0)),
+            (Vec2::new(-1.0, 0.0), Vec2::new(1.0, board_h)),
+            (Vec2::new(board_w, 0.0), Vec2::new(1.0, board_h)),
+        ];
+        for (pos, size) in frame_edges {
+            chrome.push(
+                commands
+                    .spawn((
+                        BoardFrame { seat },
+                        Sprite::from_color(theme::FRAME, size),
+                        Transform::from_translation(pos.extend(-0.9)),
+                        Anchor::BOTTOM_LEFT,
+                    ))
+                    .id(),
+            );
+        }
+        commands.entity(root).add_children(&chrome);
 
         // Mino layers: children rebuilt by the reconcilers.
         for layer in [VsLayer::Static, VsLayer::Falling, VsLayer::Ghost] {
@@ -226,13 +273,22 @@ fn setup_scene(
         }
 
         // Garbage meter on the board's INNER edge (facing the opponent):
-        // seat 0's on its right, seat 1's on its left. Segments stack upward
-        // from the board floor, one per pending batch.
+        // seat 0's on its right, seat 1's on its left. A full-height track in
+        // `GRID` reads as a quiet groove at rest; the fill segments (children
+        // of the meter root, one per pending batch) arrive in `ATTACK` and
+        // stack upward from the board floor.
         let meter_x = if seat == 0 {
-            SessionLayout::BOARD_W as f32 * block + 0.35 * block
+            SessionLayout::BOARD_W as f32 * block + 0.25 * block
         } else {
-            -0.7 * block
+            -0.5 * block
         };
+        let track = commands
+            .spawn((
+                Sprite::from_color(theme::GRID, Vec2::new(METER_WIDTH, board_h)),
+                Transform::from_translation(Vec3::new(meter_x, 0.0, 0.4)),
+                Anchor::BOTTOM_LEFT,
+            ))
+            .id();
         let meter = commands
             .spawn((
                 SeatMeter { seat },
@@ -240,16 +296,17 @@ fn setup_scene(
                 Visibility::default(),
             ))
             .id();
-        commands.entity(root).add_child(meter);
+        commands.entity(root).add_children(&[track, meter]);
 
-        // Lock-down progress bar, under the field (grows left→right toward lock).
+        // Lock-down progress bar, under the field (grows left→right toward
+        // lock). Quiet chrome: `FRAME`, like every other resting border.
         let bar_height = SessionLayout::BLOCK * 0.2;
         let bar = commands
             .spawn((
                 SeatTimerBar { seat },
                 Sprite {
                     custom_size: Some(Vec2::new(0.0, bar_height)),
-                    color: Color::srgb(0.5, 0.5, 0.5),
+                    color: theme::FRAME,
                     ..Default::default()
                 },
                 Anchor::BOTTOM_LEFT,
@@ -371,7 +428,6 @@ fn layer_for(
 /// cached cells, exactly like the single-player reconciler).
 fn reconcile_locked_boards(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
     mut cache: Local<[Option<Vec<SnapshotCell>>; 2]>,
@@ -391,7 +447,6 @@ fn reconcile_locked_boards(
             .map(|cell| {
                 commands
                     .spawn(block_sprite(
-                        &assets,
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
@@ -409,7 +464,6 @@ fn reconcile_locked_boards(
 /// Rebuild each seat's falling piece every frame (4 sprites; always in sync).
 fn reconcile_active_pieces(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
 ) {
@@ -427,7 +481,6 @@ fn reconcile_active_pieces(
             .map(|cell| {
                 commands
                     .spawn(block_sprite(
-                        &assets,
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
@@ -441,10 +494,41 @@ fn reconcile_active_pieces(
     }
 }
 
+/// The ghost is an outline, never a fill (`theme::TEXT` at 35%): four hairline
+/// edges per cell, stroke as thick as the articulation gap. Readable at a
+/// glance and never mistakable for a placed mino.
+fn ghost_cell_outline(commands: &mut Commands, block: f32, x: isize, y: isize) -> [Entity; 4] {
+    let gap = block * CELL_GAP_FRACTION;
+    let side = block - gap; // the chiclet footprint the outline traces
+    let stroke = 2.0 * gap;
+    let base = to_translation(x, y, block) + Vec3::new(gap / 2.0, gap / 2.0, -0.1);
+    let color = theme::TEXT.with_alpha(0.35);
+    let edges = [
+        (Vec2::new(0.0, 0.0), Vec2::new(side, stroke)),
+        (Vec2::new(0.0, side - stroke), Vec2::new(side, stroke)),
+        (
+            Vec2::new(0.0, stroke),
+            Vec2::new(stroke, side - 2.0 * stroke),
+        ),
+        (
+            Vec2::new(side - stroke, stroke),
+            Vec2::new(stroke, side - 2.0 * stroke),
+        ),
+    ];
+    edges.map(|(offset, size)| {
+        commands
+            .spawn((
+                Sprite::from_color(color, size),
+                Transform::from_translation(base + offset.extend(0.0)),
+                Anchor::BOTTOM_LEFT,
+            ))
+            .id()
+    })
+}
+
 /// Rebuild each seat's ghost every frame (hidden when grounded or disabled).
 fn reconcile_ghost_pieces(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     settings: Res<crate::settings::GameSettings>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
@@ -469,17 +553,8 @@ fn reconcile_ghost_pieces(
             .0
             .ghost_cells
             .iter()
-            .map(|cell| {
-                commands
-                    .spawn(block_sprite(
-                        &assets,
-                        SessionLayout::BLOCK,
-                        cell.x,
-                        cell.y,
-                        Color::srgb(0.5, 0.5, 0.5).with_alpha(0.5),
-                        -0.1,
-                    ))
-                    .id()
+            .flat_map(|cell| {
+                ghost_cell_outline(&mut commands, SessionLayout::BLOCK, cell.x, cell.y)
             })
             .collect();
         commands.entity(layer).add_children(&ids);
@@ -519,8 +594,8 @@ fn reconcile_garbage_meters(
         for (lines, _) in &batches {
             let height = *lines as f32 * SessionLayout::BLOCK - NOTCH;
             let sprite = Sprite::from_color(
-                Color::srgb_u8(214, 48, 49),
-                Vec2::new(0.35 * SessionLayout::BLOCK, height.max(NOTCH)),
+                crate::ui::widgets::theme::ATTACK,
+                Vec2::new(METER_WIDTH, height.max(NOTCH)),
             );
             ids.push(
                 commands
@@ -543,7 +618,6 @@ fn reconcile_garbage_meters(
 /// avatar's world height so callers can stack entries.
 fn spawn_avatar(
     commands: &mut Commands,
-    assets: &GameAssets,
     parent: Entity,
     piece_type: PieceType,
     y_top: f32,
@@ -571,7 +645,6 @@ fn spawn_avatar(
         .map(|&(x, y)| {
             commands
                 .spawn(block_sprite(
-                    assets,
                     block,
                     x,
                     y,
@@ -589,7 +662,6 @@ fn spawn_avatar(
 /// Rebuild a seat's hold avatar when the held piece changes.
 fn reconcile_hold_views(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     views: Query<(Entity, &SeatHoldView)>,
     mut cache: Local<[Option<Option<PieceType>>; 2]>,
@@ -605,7 +677,7 @@ fn reconcile_hold_views(
         };
         commands.entity(view).despawn_related::<Children>();
         if let Some(piece_type) = hold {
-            spawn_avatar(&mut commands, &assets, view, piece_type, 0.0, true);
+            spawn_avatar(&mut commands, view, piece_type, 0.0, true);
         }
         cache[index] = Some(hold);
     }
@@ -614,7 +686,6 @@ fn reconcile_hold_views(
 /// Rebuild a seat's next-queue column when the visible queue changes.
 fn reconcile_preview_views(
     mut commands: Commands,
-    assets: Res<GameAssets>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     mut views: Query<(Entity, &mut SeatPreviewView)>,
 ) {
@@ -630,7 +701,7 @@ fn reconcile_preview_views(
         let gap = 0.5 * SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
         let mut y_top = 0.0;
         for &piece_type in queue {
-            let height = spawn_avatar(&mut commands, &assets, view, piece_type, y_top, false);
+            let height = spawn_avatar(&mut commands, view, piece_type, y_top, false);
             y_top -= height + gap;
         }
         state.cache = Some(queue.clone());
@@ -659,6 +730,34 @@ fn update_seat_timer_bars(
             let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32 * progress;
             if let Some(size) = sprite.custom_size {
                 sprite.custom_size = Some(Vec2::new(width, size.y));
+            }
+        }
+    }
+}
+
+/// Danger state: warm a seat's field frame toward `ATTACK` as its stack
+/// climbs the top four visible rows. The signal lives entirely in the frame —
+/// the field background never changes during play, under any circumstance.
+fn tint_danger_frames(
+    seats: Query<(&Seat, &SeatSnapshot)>,
+    mut frames: Query<(&BoardFrame, &mut Sprite)>,
+) {
+    use bevy::color::Mix;
+    for (seat, snapshot) in &seats {
+        let peak = snapshot
+            .0
+            .board_cells
+            .iter()
+            .map(|cell| cell.y)
+            .max()
+            .unwrap_or(-1);
+        // Ramp over rows 16..=19 (buffer-zone cells above row 19 clamp to 1).
+        let danger = ((peak as f32 - 15.0) / 4.0).clamp(0.0, 1.0);
+        let color =
+            crate::ui::widgets::theme::FRAME.mix(&crate::ui::widgets::theme::ATTACK, 0.55 * danger);
+        for (frame, mut sprite) in &mut frames {
+            if frame.seat == seat.index && sprite.color != color {
+                sprite.color = color;
             }
         }
     }

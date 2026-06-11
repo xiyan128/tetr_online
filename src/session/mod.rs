@@ -604,7 +604,6 @@ mod tests {
 
     fn test_assets() -> GameAssets {
         GameAssets {
-            block_texture: default(),
             hard_drop_sound: default(),
             placed_sound: default(),
             line_clear_1: default(),
