@@ -26,7 +26,10 @@ impl Plugin for OptionsScreenPlugin {
 pub struct OptionsRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::Options)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::Options),
+    ));
     commands.spawn((
         OptionsRoot,
         screen_root(),

@@ -75,6 +75,7 @@ enum OptionRow {
     NextCount,
     HoldEnabled,
     GhostEnabled,
+    Background,
     LockDownMode,
     MusicVolume,
     SfxVolume,
@@ -83,10 +84,11 @@ enum OptionRow {
 
 impl OptionRow {
     /// Fixed (non-rebind) rows, in display order.
-    const FIXED: [OptionRow; 6] = [
+    const FIXED: [OptionRow; 7] = [
         OptionRow::NextCount,
         OptionRow::HoldEnabled,
         OptionRow::GhostEnabled,
+        OptionRow::Background,
         OptionRow::LockDownMode,
         OptionRow::MusicVolume,
         OptionRow::SfxVolume,
@@ -105,6 +107,7 @@ impl OptionRow {
             OptionRow::NextCount => "Next Count".into(),
             OptionRow::HoldEnabled => "Hold".into(),
             OptionRow::GhostEnabled => "Ghost Piece".into(),
+            OptionRow::Background => "Background".into(),
             OptionRow::LockDownMode => "Lock-Down".into(),
             OptionRow::MusicVolume => "Music Volume".into(),
             OptionRow::SfxVolume => "SFX Volume".into(),
@@ -123,6 +126,7 @@ impl OptionRow {
             OptionRow::NextCount => settings.next_count.to_string(),
             OptionRow::HoldEnabled => on_off(settings.hold_enabled),
             OptionRow::GhostEnabled => on_off(settings.ghost_enabled),
+            OptionRow::Background => on_off(settings.background_enabled),
             OptionRow::LockDownMode => lock_down_label(settings.lock_down_mode).into(),
             OptionRow::MusicVolume => volume_label(settings.music_volume),
             OptionRow::SfxVolume => volume_label(settings.sfx_volume),
@@ -326,6 +330,12 @@ fn edit_options(
         OptionRow::GhostEnabled => {
             if left || right || activate {
                 settings.ghost_enabled = !settings.ghost_enabled;
+                changed = true;
+            }
+        }
+        OptionRow::Background => {
+            if left || right || activate {
+                settings.background_enabled = !settings.background_enabled;
                 changed = true;
             }
         }

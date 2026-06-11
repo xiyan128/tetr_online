@@ -208,13 +208,23 @@ fn setup_scene(
             ))
             .id();
 
-        // Field chrome, drawn once: gridlines in `GRID` (the 2 px articulation
-        // the chiclets sit between) and a 1 px `FRAME` border just outside the
-        // field. The field ground itself is the clear color — per Kissaten the
-        // field background never changes, the frame carries the state.
+        // Field chrome, drawn once: an opaque `BG` backplate (the board
+        // interior is exactly the ground — it blocks the ambient background
+        // layer and anchors "the field never changes"), gridlines in `GRID`
+        // (the 2 px articulation the chiclets sit between), and a 1 px
+        // `FRAME` border just outside the field.
         let board_w = SessionLayout::BOARD_W as f32 * block;
         let board_h = SessionLayout::BOARD_H as f32 * block;
         let mut chrome = Vec::new();
+        chrome.push(
+            commands
+                .spawn((
+                    Sprite::from_color(theme::BG, Vec2::new(board_w, board_h)),
+                    Transform::from_translation(Vec3::new(0.0, 0.0, -2.0)),
+                    Anchor::BOTTOM_LEFT,
+                ))
+                .id(),
+        );
         for x in 1..SessionLayout::BOARD_W {
             chrome.push(
                 commands
@@ -431,9 +441,14 @@ fn setup_scene(
     }
 
     // One camera, every board always in frame. `GameplayCamera` opts into the
-    // optional effects stack and is the entity the shake mover offsets.
+    // optional effects stack and is the entity the shake mover offsets. It
+    // composites over the ambient background pass instead of clearing it.
     commands.spawn((
         Camera2d,
+        Camera {
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
         GameplayCamera,
         Projection::Orthographic(OrthographicProjection {
             scaling_mode: {
@@ -773,6 +788,18 @@ fn update_seat_timer_bars(
     }
 }
 
+/// Highest occupied row of a snapshot's stack, or `-1` for an empty board.
+/// Shared by the danger-frame pass here and the ambient background's calm
+/// state (`features::ambient_wave`).
+pub(crate) fn stack_peak_row(snapshot: &crate::engine::EngineSnapshot) -> isize {
+    snapshot
+        .board_cells
+        .iter()
+        .map(|cell| cell.y)
+        .max()
+        .unwrap_or(-1)
+}
+
 /// Danger state: warm a seat's field frame toward `ATTACK` as its stack
 /// climbs the top four visible rows. The signal lives entirely in the frame —
 /// the field background never changes during play, under any circumstance.
@@ -782,13 +809,7 @@ fn tint_danger_frames(
 ) {
     use bevy::color::Mix;
     for (seat, snapshot) in &seats {
-        let peak = snapshot
-            .0
-            .board_cells
-            .iter()
-            .map(|cell| cell.y)
-            .max()
-            .unwrap_or(-1);
+        let peak = stack_peak_row(&snapshot.0);
         // Ramp over rows 16..=19 (buffer-zone cells above row 19 clamp to 1).
         let danger = ((peak as f32 - 15.0) / 4.0).clamp(0.0, 1.0);
         let color =

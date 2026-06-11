@@ -88,7 +88,10 @@ fn setup(
     registry: Res<ModelRegistry>,
     mut config: ResMut<SessionConfig>,
 ) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::SessionSetup)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::SessionSetup),
+    ));
     let (title, seat_rows) = match *kind {
         SetupKind::Versus => ("VERSUS", 2),
         SetupKind::WatchAi => ("WATCH AI", 1),

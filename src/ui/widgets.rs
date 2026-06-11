@@ -51,6 +51,20 @@ pub mod theme {
     pub const MICRO_FONT_SIZE: f32 = 12.0;
 }
 
+/// The camera every menu screen spawns: it composites over the ambient
+/// background pass (`features::ambient_wave`) instead of clearing it, so the
+/// Kissaten ground stays alive behind the chrome. Pair with a
+/// [`DespawnOnExit`] for the screen's state on the caller side.
+pub fn menu_camera() -> impl Bundle {
+    (
+        Camera2d,
+        Camera {
+            clear_color: bevy::camera::ClearColorConfig::None,
+            ..default()
+        },
+    )
+}
+
 /// A full-window, centered vertical column to parent a screen's content into.
 /// Pair with a [`DespawnOnExit`] for the screen's state on the caller side.
 pub fn screen_root() -> impl Bundle {

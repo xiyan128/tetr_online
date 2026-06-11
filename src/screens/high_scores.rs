@@ -27,7 +27,10 @@ impl Plugin for HighScoresScreenPlugin {
 pub struct HighScoresRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::HighScores)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::HighScores),
+    ));
     commands.spawn((
         HighScoresRoot,
         screen_root(),

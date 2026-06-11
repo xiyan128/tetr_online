@@ -6,6 +6,7 @@
 //!
 //! | feature        | file                          | plugin                     | fills |
 //! |----------------|-------------------------------|----------------------------|-------|
+//! | ambient_wave   | `features/ambient_wave.rs`    | `AmbientWavePlugin`        | the Kissaten pixel-grain background layer |
 //! | options        | `features/options.rs`         | `OptionsPlugin`            | Options-screen widgets that mutate `GameSettings` |
 //! | help           | `features/help.rs`            | `HelpPlugin`               | Help-screen controls/about content |
 //! | notifications  | `features/notifications.rs`   | `NotificationsPlugin`      | line-clear flash + hard-drop trail effects |
@@ -16,6 +17,7 @@
 
 use bevy::prelude::*;
 
+mod ambient_wave;
 mod help;
 pub(crate) mod high_scores;
 pub(crate) mod hit_stop;
@@ -30,6 +32,7 @@ pub struct FeaturesPlugin;
 impl Plugin for FeaturesPlugin {
     fn build(&self, app: &mut App) {
         app.add_plugins((
+            ambient_wave::AmbientWavePlugin,
             options::OptionsPlugin,
             help::HelpPlugin,
             notifications::NotificationsPlugin,

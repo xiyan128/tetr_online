@@ -55,7 +55,10 @@ const ITEMS: [(MainMenuAction, &str); 6] = [
 ];
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::MainMenu)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::MainMenu),
+    ));
     let root = commands
         .spawn((
             MainMenuRoot,

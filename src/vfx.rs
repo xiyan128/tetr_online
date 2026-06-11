@@ -20,6 +20,9 @@ pub(crate) struct VfxToggles {
     pub shake: bool,
     pub hit_stop: bool,
     pub bloom: bool,
+    /// The ambient pixel-wave background (`features::ambient_wave`). ANDed
+    /// with the player-facing `GameSettings::background_enabled`.
+    pub ambient: bool,
 }
 
 impl Default for VfxToggles {
@@ -28,6 +31,7 @@ impl Default for VfxToggles {
             shake: true,
             hit_stop: true,
             bloom: true,
+            ambient: true,
         }
     }
 }
@@ -58,6 +62,7 @@ pub(crate) fn vfx_debug_panel(
             ui.label("Toggle each effect live:");
             ui.checkbox(&mut toggles.shake, "Screen shake");
             ui.checkbox(&mut toggles.hit_stop, "Hit-stop (Tetris / T-spin)");
+            ui.checkbox(&mut toggles.ambient, "Ambient background");
             #[cfg(feature = "bloom")]
             ui.checkbox(&mut toggles.bloom, "Neon bloom");
             #[cfg(not(feature = "bloom"))]

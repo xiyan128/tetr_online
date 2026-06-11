@@ -23,7 +23,10 @@ impl Plugin for HelpScreenPlugin {
 pub struct HelpRoot;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::Help)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::Help),
+    ));
     commands.spawn((
         HelpRoot,
         screen_root(),

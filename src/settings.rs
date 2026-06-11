@@ -6,7 +6,8 @@
 //! * `next_count` — how many previews to show (1..=6); feeds both
 //!   [`EngineConfig::preview_count`](crate::engine::EngineConfig) (so the engine
 //!   keeps the queue filled) and the on-screen previewer.
-//! * `hold_enabled` / `ghost_enabled` — feature toggles read by gameplay/render.
+//! * `hold_enabled` / `ghost_enabled` / `background_enabled` — feature toggles
+//!   read by gameplay/render (the last one by the ambient background layer).
 //! * `lock_down_mode` — the engine [`LockDownMode`] used when building the engine.
 //! * `music_volume` / `sfx_volume` — 0.0..=1.0, read by the SFX/music features.
 //! * `keybinds` — the action→key map the keyboard controller reads.
@@ -155,6 +156,10 @@ pub struct GameSettings {
     pub hold_enabled: bool,
     /// Whether the ghost piece is rendered.
     pub ghost_enabled: bool,
+    /// Whether the ambient pixel-wave background is rendered. Purely
+    /// cosmetic; the tournament-clean and reduced-motion modes disable it
+    /// through this same switch.
+    pub background_enabled: bool,
     /// Engine lock-down rule. `LockDownMode` lives in the engine-agnostic
     /// `engine/` crate, which depends on neither Bevy nor `serde`; it is skipped
     /// for reflection and (de)serialized via the `lock_down_serde` token adapter
@@ -176,6 +181,7 @@ impl Default for GameSettings {
             next_count: MAX_NEXT_COUNT,
             hold_enabled: true,
             ghost_enabled: true,
+            background_enabled: true,
             lock_down_mode: LockDownMode::default(),
             music_volume: 0.5,
             sfx_volume: 0.5,

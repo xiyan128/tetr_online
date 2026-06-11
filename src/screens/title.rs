@@ -21,7 +21,10 @@ impl Plugin for TitleScreenPlugin {
 struct TitleUi;
 
 fn setup(mut commands: Commands, assets: Res<GameAssets>) {
-    commands.spawn((Camera2d, DespawnOnExit(GameState::Title)));
+    commands.spawn((
+        crate::ui::widgets::menu_camera(),
+        DespawnOnExit(GameState::Title),
+    ));
     commands.spawn((
         TitleUi,
         screen_root(),
