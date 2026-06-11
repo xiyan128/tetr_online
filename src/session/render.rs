@@ -139,6 +139,7 @@ impl Plugin for VersusRenderPlugin {
                     reconcile_hold_views,
                     reconcile_preview_views,
                     update_atk_texts,
+                    update_seat_timer_bars,
                 )
                     .run_if(in_state(GameState::Session)),
             );
@@ -240,6 +241,22 @@ fn setup_scene(
             ))
             .id();
         commands.entity(root).add_child(meter);
+
+        // Lock-down progress bar, under the field (grows left→right toward lock).
+        let bar_height = SessionLayout::BLOCK * 0.2;
+        let bar = commands
+            .spawn((
+                SeatTimerBar { seat },
+                Sprite {
+                    custom_size: Some(Vec2::new(0.0, bar_height)),
+                    color: Color::srgb(0.5, 0.5, 0.5),
+                    ..Default::default()
+                },
+                Anchor::BOTTOM_LEFT,
+                Transform::from_translation(Vec3::new(0.0, -bar_height, 1.0)),
+            ))
+            .id();
+        commands.entity(root).add_child(bar);
 
         // Hold column (top-left of the board) and preview column (top-right) —
         // the single-player arrangement, duplicated per seat.
@@ -615,6 +632,38 @@ fn reconcile_preview_views(
 }
 
 /// Keep each seat's cumulative-attack readout current.
+
+/// The lock-down progress bar under a seat's playfield: width tracks progress
+/// (`1.0 - lock_timer_fraction` — the engine reports the fraction REMAINING),
+/// visible only while the seat's active piece is grounded.
+#[derive(Component)]
+pub struct SeatTimerBar {
+    pub seat: usize,
+}
+
+fn update_seat_timer_bars(
+    seats: Query<(&Seat, &SeatSnapshot)>,
+    mut bars: Query<(&SeatTimerBar, &mut Sprite)>,
+) {
+    for (seat, snapshot) in &seats {
+        for (bar, mut sprite) in &mut bars {
+            if bar.seat != seat.index {
+                continue;
+            }
+            let remaining = snapshot
+                .0
+                .active
+                .as_ref()
+                .map_or(1.0, |active| active.lock_timer_fraction);
+            let progress = 1.0 - remaining;
+            let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32 * progress;
+            if let Some(size) = sprite.custom_size {
+                sprite.custom_size = Some(Vec2::new(width, size.y));
+            }
+        }
+    }
+}
+
 fn update_atk_texts(
     config: Res<super::SessionConfig>,
     clock: Res<super::MatchClock>,

@@ -39,7 +39,8 @@ impl Plugin for VersusFeelPlugin {
             .add_systems(OnEnter(GameState::Session), reset_versus_shake)
             .add_systems(
                 Update,
-                (emit_seat_audio, spawn_attack_pops).run_if(in_state(SessionPhase::Running)),
+                (emit_seat_audio, spawn_attack_pops, spawn_seat_callouts)
+                    .run_if(in_state(SessionPhase::Running)),
             )
             // Same kill-switch as the single-player trauma feed (the dev VFX
             // panel); the apply below keeps running and bleeds to rest.
@@ -50,7 +51,7 @@ impl Plugin for VersusFeelPlugin {
             )
             .add_systems(
                 Update,
-                animate_attack_pops.run_if(in_state(GameState::Session)),
+                (animate_attack_pops, animate_seat_callouts).run_if(in_state(GameState::Session)),
             )
             // Move the camera in PostUpdate before transforms propagate, like
             // the single-player mover — but resting at the two-board center.
@@ -94,6 +95,101 @@ fn emit_seat_audio(mut commands: Commands, seats: Query<(&SeatEvents, Option<&Hu
                 }
                 _ => {}
             }
+        }
+    }
+}
+
+/// A clear callout ("TETRIS", "T-SPIN", "COMBO x3", with B2B prefix) floating
+/// above a seat's board — the guideline §19.2 wording, seat-native.
+#[derive(Component)]
+struct SeatCallout {
+    age: f32,
+}
+
+const CALLOUT_TTL: f32 = 1.1;
+
+fn callout_label(action: &crate::engine::EngineScoreAction, b2b: bool) -> Option<String> {
+    use crate::engine::{EngineScoreAction as A, TSpinKind};
+    let core = match action {
+        A::Single => "SINGLE".to_string(),
+        A::Double => "DOUBLE".to_string(),
+        A::Triple => "TRIPLE".to_string(),
+        A::Tetris => "TETRIS".to_string(),
+        A::TSpin { kind, lines } => {
+            let spin = match kind {
+                TSpinKind::Mini => "T-SPIN MINI",
+                TSpinKind::Full => "T-SPIN",
+            };
+            match lines {
+                0 => spin.to_string(),
+                1 => format!("{spin} SINGLE"),
+                2 => format!("{spin} DOUBLE"),
+                _ => format!("{spin} TRIPLE"),
+            }
+        }
+        _ => return None,
+    };
+    Some(if b2b {
+        format!("BACK-TO-BACK {core}")
+    } else {
+        core
+    })
+}
+
+/// Spawn a callout per scoring clear on any seat (both modes — reading the
+/// opponent's Tetris matters in versus too).
+fn spawn_seat_callouts(
+    mut commands: Commands,
+    assets: Res<crate::assets::GameAssets>,
+    seats: Query<(&Seat, &SeatEvents)>,
+) {
+    use crate::engine::EngineEvent;
+    for (seat, events) in &seats {
+        for event in &events.0 {
+            let EngineEvent::ScoreAwarded {
+                action,
+                back_to_back_bonus,
+                ..
+            } = event
+            else {
+                continue;
+            };
+            let Some(label) = callout_label(action, *back_to_back_bonus) else {
+                continue;
+            };
+            let origin = SessionLayout::board_origin(seat.index);
+            let center_x = SessionLayout::BOARD_W as f32 * SessionLayout::BLOCK / 2.0;
+            let top_y = (SessionLayout::BOARD_H as f32 - 2.5) * SessionLayout::BLOCK;
+            commands.spawn((
+                SeatCallout { age: 0.0 },
+                Text2d::new(label),
+                TextFont {
+                    font: assets.font.clone(),
+                    font_size: 28.0,
+                    ..Default::default()
+                },
+                TextColor(Color::WHITE),
+                Transform::from_translation(origin + Vec3::new(center_x, top_y, 2.0)),
+                DespawnOnExit(GameState::Session),
+            ));
+        }
+    }
+}
+
+/// Callouts drift up and fade out.
+fn animate_seat_callouts(
+    mut commands: Commands,
+    time: Res<Time>,
+    mut callouts: Query<(Entity, &mut SeatCallout, &mut Transform, &mut TextColor)>,
+) {
+    let dt = time.delta_secs();
+    for (entity, mut callout, mut transform, mut color) in &mut callouts {
+        callout.age += dt;
+        transform.translation.y += 18.0 * dt;
+        let life = (callout.age / CALLOUT_TTL).clamp(0.0, 1.0);
+        color.0 = color.0.with_alpha(1.0 - life);
+        if callout.age >= CALLOUT_TTL {
+            commands.entity(entity).despawn();
         }
     }
 }
