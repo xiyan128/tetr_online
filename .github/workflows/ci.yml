@@ -45,3 +45,8 @@ jobs:
       - name: Check (dev feature)
         run: cargo check --features dev --locked
 
+      # The embed's entire reason to exist is its wasm32 cdylib (hand-shipped to
+      # the live blog embed), yet nothing compiled that target before this step.
+      - name: Build (embed, wasm32)
+        run: cargo build -p tetr-embed --target wasm32-unknown-unknown --locked
+
