@@ -190,12 +190,13 @@ fn feed_versus_trauma(seats: Query<&SeatEvents>, mut shake: ResMut<ScreenShake>)
 fn apply_versus_shake(
     time: Res<Time>,
     mut shake: ResMut<ScreenShake>,
+    config: Res<super::SessionConfig>,
     mut cameras: Query<&mut Transform, With<GameplayCamera>>,
 ) {
     let (translation, rotation) = shake.pose_and_decay(
         time.elapsed_secs(),
         time.delta_secs(),
-        SessionLayout::scene_center(),
+        SessionLayout::scene_center(config.mode.seat_count()),
     );
     for mut transform in &mut cameras {
         transform.translation = translation;

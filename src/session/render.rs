@@ -48,16 +48,25 @@ impl SessionLayout {
         Vec3::new(seat as f32 * stride, 0.0, 0.0)
     }
 
-    /// Center of the whole scene (the camera's rest position).
-    pub fn scene_center() -> Vec3 {
-        let right = Self::board_origin(1).x + Self::BOARD_W as f32 * Self::BLOCK;
+    /// Center of the whole scene (the camera's rest position), for however
+    /// many seats this session plays with.
+    pub fn scene_center(seat_count: usize) -> Vec3 {
+        let right =
+            Self::board_origin(seat_count.saturating_sub(1)).x + Self::BOARD_W as f32 * Self::BLOCK;
         Vec3::new(right / 2.0, Self::BOARD_H as f32 * Self::BLOCK / 2.0, 1.0)
     }
 
-    /// Minimum world-space rectangle the camera must keep visible: both
-    /// boards, the outer hold/preview columns, the texts above and below.
-    pub const SCENE_MIN_WIDTH: f32 = 40.0 * Self::BLOCK;
-    pub const SCENE_MIN_HEIGHT: f32 = 25.0 * Self::BLOCK;
+    /// Minimum world-space rectangle the camera must keep visible: every
+    /// board, the outer hold/preview columns, the texts above and below.
+    pub fn scene_min(seat_count: usize) -> (f32, f32) {
+        let width_cells = match seat_count {
+            // hold column + board + preview column + breathing room.
+            0 | 1 => 20.0,
+            // two board groups + the gutter between them.
+            _ => 40.0,
+        };
+        (width_cells * Self::BLOCK, 25.0 * Self::BLOCK)
+    }
 }
 
 /// Neutral gray for garbage cells — full alpha (the half-alpha gray is the
@@ -174,7 +183,7 @@ fn setup_scene(
 ) {
     let block = SessionLayout::BLOCK;
 
-    for seat in 0..2 {
+    for seat in 0..config.mode.seat_count() {
         let origin = SessionLayout::board_origin(seat);
         let root = commands
             .spawn((
@@ -309,13 +318,16 @@ fn setup_scene(
         Camera2d,
         GameplayCamera,
         Projection::Orthographic(OrthographicProjection {
-            scaling_mode: ScalingMode::AutoMin {
-                min_width: SessionLayout::SCENE_MIN_WIDTH,
-                min_height: SessionLayout::SCENE_MIN_HEIGHT,
+            scaling_mode: {
+                let (min_width, min_height) = SessionLayout::scene_min(config.mode.seat_count());
+                ScalingMode::AutoMin {
+                    min_width,
+                    min_height,
+                }
             },
             ..OrthographicProjection::default_2d()
         }),
-        Transform::from_translation(SessionLayout::scene_center()),
+        Transform::from_translation(SessionLayout::scene_center(config.mode.seat_count())),
         DespawnOnExit(GameState::Session),
     ));
 }
