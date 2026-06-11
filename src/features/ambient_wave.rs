@@ -69,11 +69,20 @@ const TAU_LEVEL: f32 = 1.5;
 const TAU_CALM: f32 = 0.8;
 const TAU_AMBER: f32 = 2.5;
 
-/// Wave shape: two diagonal octaves, both cycles ≥ 8 s.
+/// Wave shape. BOTH octaves travel along the same diagonal (cross-angled
+/// octaves interfere into blobs, not waves); their different wavelengths and
+/// speeds roll a slow beat envelope through the bands. A third, gentle
+/// modulation runs ALONG the crests so bands undulate in strength without
+/// losing their direction. All cycles ≥ 8 s.
 const CYCLE_PRIMARY_SECONDS: f32 = 11.0;
 const CYCLE_SECONDARY_SECONDS: f32 = 17.0;
-const WAVELENGTH_PRIMARY_TEXELS: f32 = 140.0;
-const WAVELENGTH_SECONDARY_TEXELS: f32 = 61.0;
+const CYCLE_BREADTH_SECONDS: f32 = 29.0;
+const WAVELENGTH_PRIMARY_TEXELS: f32 = 110.0;
+const WAVELENGTH_SECONDARY_TEXELS: f32 = 47.0;
+const WAVELENGTH_BREADTH_TEXELS: f32 = 260.0;
+/// Crest sharpening: raising the band profile to this power empties the
+/// troughs so crests read as distinct travelling bands, not an even wash.
+const CREST_GAMMA: f32 = 1.6;
 
 /// Grain ink: a dark warm neutral two steps under `bg` (#211E1B). Defined
 /// here, not in `theme` — it is this layer's only private color.
@@ -298,23 +307,32 @@ fn approach(current: f32, target: f32, dt: f32, tau: f32) -> f32 {
     current + (target - current) * (1.0 - (-dt / tau.max(f32::EPSILON)).exp())
 }
 
-/// The wave intensity field at a lattice site, in 0..=1: two slow diagonal
-/// octaves summed, scaled by the surface level.
+/// The wave intensity field at a lattice site, in 0..=1.
+///
+/// `x + y` is the distance along the propagation diagonal: both octaves ride
+/// it (same direction, different wavelength and speed, so a beat envelope
+/// travels through the bands), and the profile is sharpened by
+/// [`CREST_GAMMA`] so the space between crests goes genuinely sparse.
+/// `x - y` runs along a crest; the breadth term modulates band strength
+/// there by a gentle 15% so the wavefronts breathe without dissolving into
+/// clumps.
 fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
     use std::f32::consts::TAU;
     let (x, y) = (
         site_x as f32 * SITE_STRIDE as f32,
         site_y as f32 * SITE_STRIDE as f32,
     );
+    let along = x + y;
     let primary = 0.5
-        + 0.5 * (TAU * ((x + y) / WAVELENGTH_PRIMARY_TEXELS - phase / CYCLE_PRIMARY_SECONDS)).sin();
+        + 0.5 * (TAU * (along / WAVELENGTH_PRIMARY_TEXELS - phase / CYCLE_PRIMARY_SECONDS)).sin();
     let secondary = 0.5
         + 0.5
-            * (TAU
-                * ((0.8 * x - 0.45 * y) / WAVELENGTH_SECONDARY_TEXELS
-                    + phase / CYCLE_SECONDARY_SECONDS))
-                .sin();
-    (level * (0.62 * primary + 0.38 * secondary)).clamp(0.0, 1.0)
+            * (TAU * (along / WAVELENGTH_SECONDARY_TEXELS - phase / CYCLE_SECONDARY_SECONDS)).sin();
+    let band = (0.65 * primary + 0.35 * secondary).powf(CREST_GAMMA);
+    let breadth = 0.85
+        + 0.15
+            * (TAU * ((x - y) / WAVELENGTH_BREADTH_TEXELS + phase / CYCLE_BREADTH_SECONDS)).sin();
+    (level * band * breadth).clamp(0.0, 1.0)
 }
 
 /// Ordered-dither threshold for a lattice site, in (0, 1).
@@ -471,6 +489,28 @@ mod tests {
             tinted
                 .chunks_exact(4)
                 .all(|t| t == [0, 0, 0, 0] || t[..3] == GRAIN_INK || t[..3] == expected),
+        );
+    }
+
+    #[test]
+    fn the_field_is_a_directional_wave_not_blobs() {
+        // Spread sampled ACROSS the bands (along the x+y propagation
+        // diagonal) must dwarf the spread ALONG a single crest (x - y
+        // varying, x + y fixed) — that anisotropy is what makes the layer
+        // read as travelling waves instead of clumps.
+        let spread = |samples: &[f32]| {
+            samples.iter().fold(f32::MIN, |a, &b| a.max(b))
+                - samples.iter().fold(f32::MAX, |a, &b| a.min(b))
+        };
+        let across: Vec<f32> = (0..60).map(|i| wave_intensity(i, i, 3.7, 1.0)).collect();
+        let along: Vec<f32> = (0..60)
+            .map(|i| wave_intensity(i, 60 - i, 3.7, 1.0))
+            .collect();
+        assert!(
+            spread(&across) > 3.0 * spread(&along),
+            "across-band spread {} must dwarf along-crest spread {}",
+            spread(&across),
+            spread(&along)
         );
     }
 
