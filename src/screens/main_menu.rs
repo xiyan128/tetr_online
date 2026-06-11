@@ -7,7 +7,6 @@
 
 use bevy::prelude::*;
 
-use crate::ai::AiSandbox;
 use crate::assets::GameAssets;
 use crate::ui::focus::{
     clicked_focusable, focus_navigation, read_nav_action, FocusList, Focusable, NavAction,
@@ -90,7 +89,6 @@ fn activate(
     list: Single<&FocusList, With<MainMenuRoot>>,
     actions: Query<(&Focusable, &MainMenuAction)>,
     clicks: Query<(&Focusable, &Interaction), Changed<Interaction>>,
-    mut sandbox: ResMut<AiSandbox>,
     mut session: ResMut<crate::session::SessionConfig>,
     mut setup_kind: ResMut<crate::screens::session_setup::SetupKind>,
     mut next: ResMut<NextState<GameState>>,
@@ -113,17 +111,14 @@ fn activate(
         }
         match action {
             MainMenuAction::Play => {
-                *sandbox = AiSandbox(false);
                 session.seats[0] = crate::session::Participant::Human;
                 next.set(GameState::ModeSelect);
             }
-            // Versus has its own setup screen and never reads the sandbox flag.
             MainMenuAction::Versus => {
                 *setup_kind = crate::screens::session_setup::SetupKind::Versus;
                 next.set(GameState::SessionSetup);
             }
             MainMenuAction::WatchAi => {
-                *sandbox = AiSandbox(true);
                 *setup_kind = crate::screens::session_setup::SetupKind::WatchAi;
                 // Watch-AI picks its bot in the seat picker, then the mode.
                 next.set(GameState::SessionSetup);

@@ -15,7 +15,6 @@ mod help;
 mod high_scores;
 mod main_menu;
 mod mode_select;
-mod model_select;
 mod options;
 mod session_setup;
 mod title;
@@ -41,7 +40,6 @@ impl Plugin for ScreensPlugin {
                 title::TitleScreenPlugin,
                 main_menu::MainMenuPlugin,
                 mode_select::ModeSelectPlugin,
-                model_select::ModelSelectPlugin,
                 session_setup::VersusSetupPlugin,
                 options::OptionsScreenPlugin,
                 help::HelpScreenPlugin,

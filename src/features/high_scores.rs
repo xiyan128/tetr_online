@@ -38,11 +38,10 @@ use bevy::prelude::*;
 use crate::assets::GameAssets;
 use crate::engine::EngineSnapshot;
 use crate::high_scores::{HighScore, HighScores};
-use crate::level::engine_bridge::LatestSnapshot;
 use crate::screens::HighScoresRoot;
 use crate::storage::{keys, StorageResource};
 use crate::ui::widgets::label_text;
-use crate::variant::{ActiveVariant, ScoreKind, Variant, VariantDef, VariantProgress};
+use crate::variant::{ScoreKind, Variant, VariantDef};
 use crate::GameState;
 
 /// Records qualifying runs into [`HighScores`], persists the table, loads it on
@@ -56,8 +55,6 @@ impl Plugin for HighScoresFeaturePlugin {
             // runs after `GamePlugin`'s `init_resource::<HighScores>`, so the
             // resource exists; we fill it from storage if a blob is present.
             .add_systems(Startup, load_high_scores)
-            // On game over, file the just-finished run and persist on a change.
-            .add_systems(OnEnter(GameState::GameOver), record_run)
             // Populate the high-scores screen once its root entity is spawned.
             // Keyed off `Added<HighScoresRoot>` (set by the screen shell on
             // `OnEnter(HighScores)`) so we never depend on `OnEnter` system order.
@@ -113,40 +110,17 @@ pub(crate) fn record(
     Some(rank)
 }
 
-fn record_run(
-    snapshot: Res<LatestSnapshot>,
-    progress: Res<VariantProgress>,
-    active: Res<ActiveVariant>,
-    storage: Res<StorageResource>,
-    mut scores: ResMut<HighScores>,
-    sandbox: Option<Res<crate::ai::AiSandbox>>,
-) {
-    // A Watch-AI session ends on this same screen, but a bot's run is not a
-    // human achievement: it must never file into the leaderboard.
-    if sandbox.is_some_and(|s| s.active()) {
-        return;
-    }
-    let storage_opt = Some(storage);
-    record(
-        &snapshot.0,
-        progress.elapsed_seconds,
-        active.0,
-        &mut scores,
-        &storage_opt,
-    );
-}
-
 /// Whether a finished run should be filed for `def`.
 ///
 /// Time-ranked variants (Sprint) only produce a meaningful ranking time when the
 /// goal was actually reached — `end_condition_met` is the same predicate
-/// [`check_variant_end_conditions`](crate::variant::check_variant_end_conditions)
-/// uses to detect a legitimate finish. A top-out short of the target is *not*
-/// recorded. Score-ranked variants (Marathon, Ultra) always qualify: a partial
-/// run posts a legitimate, lower score that sorts correctly on its own.
+/// the session's solo end check uses to detect a legitimate finish. A top-out
+/// short of the target is *not* recorded. Score-ranked variants (Marathon,
+/// Ultra) always qualify: a partial run posts a legitimate, lower score that
+/// sorts correctly on its own.
 fn run_qualifies(def: &VariantDef, snapshot: &EngineSnapshot, elapsed_seconds: f32) -> bool {
     if def.score_kind == ScoreKind::Time {
-        return VariantProgress::end_condition_met(def, snapshot, elapsed_seconds);
+        return crate::variant::end_condition_met(def, snapshot, elapsed_seconds);
     }
     true
 }
@@ -470,32 +444,6 @@ S 1500 30.0 40 6
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn a_bot_run_never_files_into_the_leaderboard() {
-        // Watch-AI ends on the same GameOver screen as a human run; the
-        // sandbox guard must drop it before any qualify/insert logic runs.
-        use crate::storage::StorageResource;
-        use crate::variant::{ActiveVariant, VariantProgress};
-        use bevy::ecs::system::RunSystemOnce;
-        let mut world = bevy::prelude::World::new();
-        let mut engine = crate::engine::Engine::new(crate::engine::EngineConfig::default(), 1);
-        engine.step(crate::engine::InputFrame::default());
-        world.insert_resource(crate::level::LatestSnapshot(engine.snapshot()));
-        world.insert_resource(VariantProgress::default());
-        world.insert_resource(ActiveVariant(Variant::Marathon));
-        world.insert_resource(StorageResource(crate::storage::default_storage()));
-        world.insert_resource(HighScores::default());
-        world.insert_resource(crate::ai::AiSandbox(true));
-
-        world.run_system_once(record_run).unwrap();
-
-        let scores = world.resource::<HighScores>();
-        assert!(
-            scores.table(Variant::Marathon).is_empty(),
-            "an armed sandbox run must not insert a high score"
-        );
-    }
 
     use crate::engine::{Engine, EngineConfig};
 

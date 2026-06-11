@@ -210,7 +210,6 @@ impl Plugin for SessionPlugin {
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::ai::ModelRegistry>()
             .init_resource::<LevelConfig>()
-            .init_resource::<crate::variant::VariantProgress>()
             .init_resource::<crate::high_scores::HighScores>()
             .add_systems(OnEnter(GameState::Session), session_setup)
             .add_systems(OnExit(GameState::Session), versus_teardown)
@@ -317,12 +316,6 @@ fn session_setup(world: &mut World) {
     world.insert_resource(MatchClock::default());
     world.remove_resource::<SessionOutcome>();
     world.remove_resource::<SoloRecorded>();
-    // Solo variants track goal progress against the session clock.
-    if let SessionMode::Solo { .. } = config.mode {
-        world
-            .resource_mut::<crate::variant::VariantProgress>()
-            .reset();
-    }
 }
 
 /// Drop the bots and the outcome when the session ends. Seat entities are
@@ -515,7 +508,7 @@ fn check_solo_end(
         return;
     };
     let def = variant.def();
-    if crate::variant::VariantProgress::end_condition_met(&def, &snapshot.0, clock.0) {
+    if crate::variant::end_condition_met(&def, &snapshot.0, clock.0) {
         info!("solo run complete ({})", def.display_name);
         commands.insert_resource(SessionOutcome::Solo { completed: true });
         next.set(SessionPhase::Over);

@@ -62,7 +62,7 @@ impl Plugin for SfxPlugin {
                 update_music_volume.run_if(resource_changed::<GameSettings>),
             )
             // Background music spans the whole play session.
-            .add_systems(OnEnter(GameState::Playing), start_music);
+            .add_systems(OnEnter(GameState::Session), start_music);
     }
 }
 
@@ -122,6 +122,6 @@ fn start_music(mut commands: Commands, music_asset: Res<MusicAsset>, mut warned:
         // `apply_volume_to_new_sinks` once the sink is inserted.
         PlaybackSettings::LOOP,
         MusicTrack,
-        DespawnOnExit(GameState::Playing),
+        DespawnOnExit(GameState::Session),
     ));
 }

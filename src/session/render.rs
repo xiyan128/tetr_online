@@ -631,8 +631,7 @@ fn reconcile_preview_views(
     }
 }
 
-/// Keep each seat's cumulative-attack readout current.
-
+/// Keep each seat's under-board readout current.
 /// The lock-down progress bar under a seat's playfield: width tracks progress
 /// (`1.0 - lock_timer_fraction` — the engine reports the fraction REMAINING),
 /// visible only while the seat's active piece is grounded.
