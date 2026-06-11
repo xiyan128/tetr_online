@@ -763,7 +763,7 @@ mod timer_bar_tests {
 
     #[test]
     fn no_active_piece_shows_no_lock_progress() {
-        let mut engine = Engine::new(EngineConfig::default(), 7);
+        let engine = Engine::new(EngineConfig::default(), 7);
         let snapshot = engine.snapshot(); // pre-spawn: no active piece
         assert!(snapshot.active.is_none());
         assert_eq!(lock_bar_progress(&snapshot), 0.0);
