@@ -69,6 +69,13 @@ fn left() -> InputFrame {
     }
 }
 
+fn right() -> InputFrame {
+    InputFrame {
+        right: true,
+        ..InputFrame::default()
+    }
+}
+
 /// The active piece's origin, read from a fresh snapshot. Movement is snapshot
 /// state, so "the grounded move succeeded" is observed as an origin shift.
 fn active_origin(engine: &Engine) -> (isize, isize) {
@@ -117,15 +124,13 @@ fn extended_landing_starts_half_second_timer() {
 // -------------------------------------------------------------------------
 
 /// §25.6 Extended: "Successful grounded movement/rotation resets timer while
-/// under 15-action limit." Uses a wide board so the landed piece has room for
-/// 15 grounded left steps, each of which must restore the timer to 0.5s.
+/// under 15-action limit." The budget counts grounded moves in any direction,
+/// so an alternating left/right walk exercises all 15 on the standard board
+/// (the old fixture used a 40-wide board purely for one-directional travel,
+/// beyond the unified board's 16-column envelope).
 #[test]
 fn extended_grounded_move_resets_timer_under_budget() {
-    let config = EngineConfig {
-        board_width: 40,
-        ..EngineConfig::default()
-    };
-    let mut engine = Engine::new(config, SEED);
+    let mut engine = Engine::new(EngineConfig::default(), SEED);
     spawn_and_land_via_gravity(&mut engine);
 
     // Sanity: fresh landing leaves the timer at 0.5s and no grounded actions spent.
@@ -151,18 +156,25 @@ fn extended_grounded_move_resets_timer_under_budget() {
             "action {action}: timer should drain to ~0.3 before the move, got {drained}"
         );
 
-        // A successful grounded left move (still under the 15-action budget)
-        // must reset the timer back to 0.5s.
+        // A successful grounded move (still under the 15-action budget)
+        // must reset the timer back to 0.5s. Alternate directions so the
+        // walk stays on the board.
         let origin_before = active_origin(&engine);
-        engine.step(left());
+        let dx = if action % 2 == 1 {
+            engine.step(left());
+            -1
+        } else {
+            engine.step(right());
+            1
+        };
         let after = engine
             .snapshot()
             .active
             .expect("active piece after grounded move");
         assert_eq!(
             after.origin,
-            (origin_before.0 - 1, origin_before.1),
-            "action {action}: the grounded left move must succeed (one cell left)"
+            (origin_before.0 + dx, origin_before.1),
+            "action {action}: the grounded move must succeed (one cell)"
         );
         assert!(
             after.landed,
@@ -186,21 +198,24 @@ fn extended_grounded_move_resets_timer_under_budget() {
 /// unit test, but reaches the landed state through the public step API.
 #[test]
 fn extended_15_action_budget_does_not_reset_after_exhaustion() {
-    let config = EngineConfig {
-        board_width: 40,
-        ..EngineConfig::default()
-    };
-    let mut engine = Engine::new(config, SEED);
+    let mut engine = Engine::new(EngineConfig::default(), SEED);
     spawn_and_land_via_gravity(&mut engine);
 
-    // Spend all 15 grounded resets via successful left moves on the flat floor.
-    for _ in 0..EXTENDED_LOCK_RESET_BUDGET {
+    // Spend all 15 grounded resets via successful moves on the flat floor,
+    // alternating directions so the walk fits the standard board.
+    for i in 0..EXTENDED_LOCK_RESET_BUDGET {
         let origin_before = active_origin(&engine);
-        engine.step(left());
+        let dx = if i % 2 == 0 {
+            engine.step(left());
+            -1
+        } else {
+            engine.step(right());
+            1
+        };
         assert_eq!(
             active_origin(&engine),
-            (origin_before.0 - 1, origin_before.1),
-            "each budgeted left move should succeed (one cell left)"
+            (origin_before.0 + dx, origin_before.1),
+            "each budgeted move should succeed (one cell)"
         );
         assert_eq!(
             engine
@@ -225,14 +240,14 @@ fn extended_15_action_budget_does_not_reset_after_exhaustion() {
         "timer should have drained to ~0.2, got {drained}"
     );
 
-    // The 16th grounded move: still a successful left move (the origin shifts),
+    // The 16th grounded move: still a successful move (the origin shifts),
     // but the budget is exhausted, so it MUST NOT reset the timer back to 0.5s.
     let origin_before = active_origin(&engine);
     engine.step(left());
     assert_eq!(
         active_origin(&engine),
         (origin_before.0 - 1, origin_before.1),
-        "the 16th left move still physically succeeds"
+        "the 16th move still physically succeeds"
     );
     let after_16th = engine
         .snapshot()

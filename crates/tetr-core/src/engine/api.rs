@@ -40,6 +40,16 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(config: EngineConfig, seed: u64) -> Self {
+        // Fail at the API boundary, not deep inside the board: the playfield
+        // envelope is the bitboard's (16 columns x 64 backing rows).
+        assert!(
+            config.board_width <= crate::engine::bit_board::MAX_WIDTH
+                && config.visible_height + BUFFER_HEIGHT <= 64,
+            "EngineConfig exceeds the board envelope (16x64): width {}, height {}+{}",
+            config.board_width,
+            config.visible_height,
+            BUFFER_HEIGHT
+        );
         let board =
             Board::with_top_margin(config.board_width, config.visible_height, BUFFER_HEIGHT);
         let score_state = ScoreState::new(config.goal_system, config.starting_level);
@@ -579,16 +589,16 @@ impl Engine {
         self.board
             .cells()
             .into_iter()
-            .filter_map(|cell| match cell.cell_kind() {
+            .filter_map(|(x, y, kind)| match kind {
                 CellKind::Some(piece_type) => Some(SnapshotCell {
-                    x: cell.coords().0,
-                    y: cell.coords().1,
+                    x,
+                    y,
                     piece_type,
                     garbage: false,
                 }),
                 CellKind::Garbage => Some(SnapshotCell {
-                    x: cell.coords().0,
-                    y: cell.coords().1,
+                    x,
+                    y,
                     piece_type: PieceType::I, // legacy fill colour; see SnapshotCell::piece_type
                     garbage: true,
                 }),
@@ -1109,26 +1119,29 @@ mod tests {
 
     #[test]
     fn extended_lock_down_budget_stops_resetting_after_fifteen_grounded_moves() {
-        let config = EngineConfig {
-            board_width: 40,
-            ..EngineConfig::default()
-        };
-        let mut engine = Engine::new(config, 0);
-        let mut active = ActivePiece::new(PieceType::T, (20, -1));
+        // The budget counts grounded moves regardless of direction, so an
+        // alternating left/right walk exercises all 15 within the standard
+        // board (the old fixture used a 40-wide board purely for travel room;
+        // the unified board's envelope is 16 columns).
+        let mut engine = Engine::new(EngineConfig::default(), 0);
+        let mut active = ActivePiece::new(PieceType::T, (4, -1));
         active.mark_landed();
         active.reset_lock_timer(LOCK_DOWN_SECONDS);
         engine.active = Some(active);
 
-        for _ in 0..crate::engine::EXTENDED_LOCK_RESET_BUDGET {
-            // Each grounded left move succeeds: origin.x shifts by exactly -1.
+        for i in 0..crate::engine::EXTENDED_LOCK_RESET_BUDGET {
+            // Each grounded move succeeds: origin.x shifts by exactly one cell.
+            let go_left = i % 2 == 0;
             let x_before = active_origin(&engine).0;
             assert!(engine
                 .step(InputFrame {
-                    left: true,
+                    left: go_left,
+                    right: !go_left,
                     ..InputFrame::default()
                 })
                 .is_empty());
-            assert_eq!(active_origin(&engine).0, x_before - 1);
+            let expected = if go_left { x_before - 1 } else { x_before + 1 };
+            assert_eq!(active_origin(&engine).0, expected);
             assert_eq!(
                 engine
                     .active
