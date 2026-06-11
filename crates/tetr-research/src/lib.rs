@@ -72,4 +72,7 @@ pub use versus::{
     decide_versus, evaluate_versus, evaluate_versus_format, play_versus, play_versus_format,
     BlindToGarbage, VersusFormat, VersusOutcome, VersusResult, VersusStats,
 };
-pub use versus_legacy::{versus_hole, GarbageQueue, VersusEngine, VERSUS_HOLE_SALT};
+// `versus_legacy` is deliberately NOT re-exported flat: its scheduler diverges
+// from the engine rules on purpose (TBP-referee comparability), and sitting
+// beside `play_versus` in the vocabulary invited misuse. Import it by module
+// path; the path is the warning label.

@@ -197,3 +197,29 @@ pub fn evaluate_capped(
         outcomes,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bots::BotSpec;
+
+    /// The parallel suite must be bit-identical to sequential play of the
+    /// same seeds (order-stable collection over pure-per-seed games) — the
+    /// versus gate's marathon counterpart.
+    #[test]
+    fn parallel_evaluation_matches_sequential() {
+        let make = BotSpec::greedy().factory();
+        let seeds = crate::seeds::seed_set(6);
+        let parallel = evaluate_capped(&make, &seeds, 50_000, 25);
+        let sequential: Vec<MarathonOutcome> = seeds
+            .iter()
+            .map(|&s| play_marathon_capped(&make, s, 50_000, 25))
+            .collect();
+        for (p, s) in parallel.outcomes.iter().zip(&sequential) {
+            assert_eq!(
+                (p.seed, p.score, p.lines, p.pieces, p.frames, p.topped_out),
+                (s.seed, s.score, s.lines, s.pieces, s.frames, s.topped_out),
+            );
+        }
+    }
+}

@@ -22,7 +22,9 @@ use std::time::Instant;
 
 use tetr_core::player::PlayerController;
 
-use crate::{evaluate_versus_format, seed_set_from, VersusFormat};
+use rayon::prelude::*;
+
+use crate::{play_versus_format, seed_set_from, VersusFormat, VersusOutcome};
 
 /// Test design: hypotheses, error rates, block shape, and budgets.
 #[derive(Clone, Copy, Debug)]
@@ -33,14 +35,22 @@ pub struct SprtConfig {
     pub alpha: f64,
     /// Type-II error bound (accepting H0 when H1 is true).
     pub beta: f64,
-    /// Seeds per block; each block plays `2 × block_seeds` matches (arm swap).
+    /// Seeds per block; each block plays `2 × block_seeds` matches (arm swap)
+    /// as ONE fused parallel batch, so the block size is also the parallelism
+    /// width — the default (24 ⇒ 48 matches) saturates a desktop pool. Bigger
+    /// blocks overshoot a crossed bound by more matches; smaller ones starve
+    /// the pool. (The original run record used the pre-parallel default, 8.)
     pub block_seeds: usize,
     /// First seed of the race's region. Callers own disjointness (the climb
     /// derives a fresh region per confirmation; the bin uses 16384+).
     pub seed_base: usize,
     /// Hard cap on matches played; hitting it reports `Inconclusive`.
     pub max_matches: u32,
-    /// Optional wall-clock bound; crossing it reports `Inconclusive`.
+    /// Optional wall-clock bound; crossing it reports `Inconclusive`. NOTE:
+    /// a deadline couples the *stopping point* (not any match result) to
+    /// machine speed and core count — two hosts can land different
+    /// `Inconclusive` cuts of the same deterministic evidence stream. Bounds
+    /// crossed before the deadline are machine-independent verdicts.
     pub deadline: Option<Instant>,
     /// Per-block progress lines on stderr.
     pub verbose: bool,
@@ -52,7 +62,7 @@ impl Default for SprtConfig {
             p1: 0.55,
             alpha: 0.05,
             beta: 0.05,
-            block_seeds: 8,
+            block_seeds: 24,
             seed_base: crate::seeds::regions::SPRT,
             max_matches: 2000,
             deadline: None,
@@ -182,17 +192,42 @@ pub fn sprt_race(
         );
         block += 1;
 
-        // Arm-swapped: the candidate plays each seed from both chairs.
-        let fwd = evaluate_versus_format(cand, incumbent, &seeds, format);
-        let rev = evaluate_versus_format(incumbent, cand, &seeds, format);
-        for o in &fwd.outcomes {
-            state.record(o.a_topped, o.b_topped);
-            margin_sum += f64::from(o.attack_a) - f64::from(o.attack_b);
-            matches += 1;
-        }
-        for o in &rev.outcomes {
-            state.record(o.b_topped, o.a_topped);
-            margin_sum += f64::from(o.attack_b) - f64::from(o.attack_a);
+        // Arm-swapped, one FUSED parallel batch: both orientations of every
+        // seed go wide together (2 × block_seeds matches, one barrier per
+        // block — two half-width halves with a join between them starved the
+        // pool, the review's finding). The LLR after a full block is a sum,
+        // so intra-block ordering cannot change any verdict.
+        let jobs: Vec<(bool, u64)> = seeds
+            .iter()
+            .flat_map(|&s| [(false, s), (true, s)])
+            .collect();
+        let outcomes: Vec<(bool, VersusOutcome)> = jobs
+            .par_iter()
+            .map(|&(swapped, seed)| {
+                let o = if swapped {
+                    play_versus_format(incumbent, cand, seed, format)
+                } else {
+                    play_versus_format(cand, incumbent, seed, format)
+                };
+                (swapped, o)
+            })
+            .collect();
+        for (swapped, o) in &outcomes {
+            let (cand_topped, opp_topped, margin) = if *swapped {
+                (
+                    o.b_topped,
+                    o.a_topped,
+                    f64::from(o.attack_b) - f64::from(o.attack_a),
+                )
+            } else {
+                (
+                    o.a_topped,
+                    o.b_topped,
+                    f64::from(o.attack_a) - f64::from(o.attack_b),
+                )
+            };
+            state.record(cand_topped, opp_topped);
+            margin_sum += margin;
             matches += 1;
         }
 

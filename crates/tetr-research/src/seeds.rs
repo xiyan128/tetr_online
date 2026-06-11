@@ -17,6 +17,13 @@
 
 use crate::cli::SplitMix64;
 
+// The region map needs a 64-bit index space (CONFIRM = 1<<50); fail loudly
+// with a reason on any 32-bit target instead of overflowing usize.
+const _: () = assert!(
+    usize::BITS >= 64,
+    "tetr-research's seed regions need 64-bit usize"
+);
+
 /// The crate's seed-index partition. Regions are starting indices into the
 /// [`seed_set_from`] stream; each consumer documents its stride so regions
 /// can be audited for overlap at a glance.
@@ -26,9 +33,11 @@ use crate::cli::SplitMix64;
 /// power-of-two starts with explicit headroom, because writing the old map
 /// down exposed a latent collision: rotation at `8192 + iter × 24` walked
 /// into the SPRT region after ~340 iterations — never hit in the recorded
-/// runs (≤127 iters), but one overnight climb away. Headroom now:
-/// rotation reaches CONFIRM after ~44 billion iterations at default block
-/// size; confirmations never collide below ~10^14 iterations.
+/// runs (≤127 iters), but one overnight climb away. Headroom now: rotation
+/// reaches CONFIRM after (2^50 − 2^20)/24 ≈ 4.7×10^13 iterations at the
+/// default block size, and confirmations exhaust the u64 index space only
+/// after (2^64 − 2^50)/4096 ≈ 4.5×10^15 — both unreachable (the climb's
+/// iteration counter is u32, capping any walk at ~4.3×10^9).
 pub mod regions {
     /// Training / screening seeds (the climb's fixed-seed mode, quick A/Bs).
     pub const TRAIN: usize = 0;

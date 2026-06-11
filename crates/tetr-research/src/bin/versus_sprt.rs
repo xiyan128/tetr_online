@@ -16,8 +16,13 @@
 //!
 //! Env: TIME_BUDGET_SECS (3600), BLOCK_SEEDS (8 ⇒ 16 matches/block), P1
 //!      (0.55), RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH
-//!      (16), SEED_BASE (16384 — disjoint from the climb's train/validation/
-//!      confirmer regions at 0.., 4096.., and 32768+).
+//!      (16), SEED_BASE (regions::SPRT = 16384 — see `seeds::regions` for the
+//!      full partition; disjoint from the climb's regions by construction).
+//!
+//! NOTE: the RUN RECORD above was produced with the then-default
+//! BLOCK_SEEDS=8 (pre-parallelism). The default is now 24 (pool-saturating);
+//! the verdict stands, and re-deriving the exact LLR trajectory needs
+//! BLOCK_SEEDS=8.
 
 use std::time::{Duration, Instant};
 

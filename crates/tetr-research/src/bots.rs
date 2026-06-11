@@ -37,6 +37,10 @@ pub enum SearchSpec {
     /// the historical baseline exactly, not to compose.
     Greedy,
     /// Deterministic beam search: fixed `width` per generation, `depth` plies.
+    /// Two recorded invariants every beam baseline rests on: `depth == 1`
+    /// reproduces the greedy decision exactly (the seam-faithful gate), and
+    /// bag speculation past the visible queue is ON (the `BeamPlanner`
+    /// default) — every recorded beam number includes it.
     Beam { width: usize, depth: u8 },
     /// Best-first graph search with transposition: `budget` node expansions
     /// per decision, lookahead capped at `depth` plies.
@@ -44,7 +48,7 @@ pub enum SearchSpec {
 }
 
 /// The board evaluator and its weights.
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub enum EvalSpec {
     /// The linear DT-20 / SURVIVAL evaluator.
     Linear(Weights),
@@ -122,7 +126,17 @@ impl BotSpec {
     /// Build a fresh controller for this spec (the policy RNG seeded by `seed`).
     pub fn controller(&self, seed: u64) -> Box<dyn PlayerController> {
         let inner: Box<dyn PlayerController> = match self.search {
-            SearchSpec::Greedy => Box::new(AiController::new(Handicap::perfect(), seed)),
+            SearchSpec::Greedy => {
+                // Greedy is the shipped baseline construction and cannot take a
+                // custom evaluator; a spec that pairs it with one is a wrong-arm
+                // experiment that would silently record lying run headers — fail
+                // loudly instead (the review's footgun finding).
+                assert!(
+                    self.eval == EvalSpec::Linear(Weights::default()),
+                    "SearchSpec::Greedy ignores custom evaluators — compose beam()/best_first() instead"
+                );
+                Box::new(AiController::new(Handicap::perfect(), seed))
+            }
             SearchSpec::Beam { width, depth } => {
                 full_strength(Box::new(BeamPlanner::new(width)), self.eval.build(), {
                     SearchBudget::beam(depth)

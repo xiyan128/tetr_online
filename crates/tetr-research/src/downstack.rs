@@ -141,3 +141,28 @@ pub fn evaluate_downstack(
         outcomes,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::bots::BotSpec;
+
+    /// The parallel suite must be bit-identical to sequential play of the
+    /// same seeds — the versus gate's downstack counterpart.
+    #[test]
+    fn parallel_evaluation_matches_sequential() {
+        let make = BotSpec::greedy().factory();
+        let seeds = crate::seeds::seed_set(6);
+        let parallel = evaluate_downstack(&make, &seeds, 4, 25);
+        let sequential: Vec<DownstackOutcome> = seeds
+            .iter()
+            .map(|&s| play_downstack(&make, s, 4, 25))
+            .collect();
+        for (p, s) in parallel.outcomes.iter().zip(&sequential) {
+            assert_eq!(
+                (p.seed, p.pieces, p.cleared, p.topped_out, p.attack),
+                (s.seed, s.pieces, s.cleared, s.topped_out, s.attack),
+            );
+        }
+    }
+}

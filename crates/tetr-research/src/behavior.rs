@@ -7,7 +7,7 @@
 //! function of the bot factory + seed (same engine seed ⇒ same pieces; seeded garbage
 //! holes), so results are reproducible and drop straight into the autoresearch loop.
 //!
-//! Combo is advanced on **line clears only** (see [`crate::action_clear_lines`]) — a
+//! Combo is advanced on **line clears only** (see `accounting::action_clear_lines`) — a
 //! hard drop emits its own `ScoreAwarded`, which must not inflate combo/attack.
 
 use std::time::Instant;
@@ -17,7 +17,8 @@ use tetr_core::player::{drive_engine, PlayerController};
 
 use crate::accounting::{action_clear_lines, controller_seed, fold_combo};
 use crate::versus::MAX_PIECE_FRAMES;
-use crate::{cheese_holes, marathon_config, versus_hole, GarbageQueue};
+use crate::versus_legacy::{versus_hole, GarbageQueue};
+use crate::{cheese_holes, marathon_config};
 
 /// A garbage scenario to measure the bot in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
