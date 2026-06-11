@@ -3,6 +3,7 @@
 //! versus bots — and, unlike empty-board APP, is NOT gameable by combo-farming.
 //! Fewer pieces to clear the cheese = stronger.
 
+use rayon::prelude::*;
 use tetr_core::engine::{CellKind, Engine, EngineConfig, EngineEvent, PieceType};
 use tetr_core::player::{drive_engine, PlayerController};
 
@@ -112,13 +113,14 @@ pub struct DownstackStats {
 
 /// Evaluate a bot's cheese-clear efficiency over `seeds`.
 pub fn evaluate_downstack(
-    make_bot: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_bot: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     seeds: &[u64],
     garbage_rows: u32,
     max_pieces: u32,
 ) -> DownstackStats {
+    // Order-stable parallel games; bit-identical to sequential (see versus).
     let outcomes: Vec<DownstackOutcome> = seeds
-        .iter()
+        .par_iter()
         .map(|&seed| play_downstack(make_bot, seed, garbage_rows, max_pieces))
         .collect();
     let cleared: Vec<&DownstackOutcome> = outcomes.iter().filter(|o| o.cleared).collect();

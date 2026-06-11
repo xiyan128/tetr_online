@@ -156,8 +156,8 @@ impl SprtState {
 
 /// Race `cand` against `incumbent` until a bound or a budget ends the test.
 pub fn sprt_race(
-    cand: &dyn Fn(u64) -> Box<dyn PlayerController>,
-    incumbent: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    cand: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
+    incumbent: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     format: VersusFormat,
     config: SprtConfig,
 ) -> SprtReport {

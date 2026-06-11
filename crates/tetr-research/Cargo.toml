@@ -15,6 +15,10 @@ tetr-core = { path = "../tetr-core" }
 # TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON).
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# Parallel match evaluation (research-only; the game never links this). Matches
+# are independent and internally deterministic, so order-stable collection
+# keeps every suite bit-reproducible — see the parallel==serial gates.
+rayon = "1"
 
 [lib]
 bench = false

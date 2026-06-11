@@ -7,6 +7,7 @@
 //! engine's 7-bag and the policy RNG are both seeded. Re-running an evaluation
 //! reproduces every number.
 
+use rayon::prelude::*;
 use tetr_core::engine::{Engine, EngineConfig, EngineEvent, GoalSystem, MAX_LEVEL};
 use tetr_core::player::{drive_engine, PlayerController};
 
@@ -159,7 +160,7 @@ pub struct MarathonStats {
 
 /// Evaluate a bot over `seeds`, returning aggregate Marathon stats.
 pub fn evaluate(
-    make_bot: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_bot: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     seeds: &[u64],
     max_frames: u32,
 ) -> MarathonStats {
@@ -169,13 +170,14 @@ pub fn evaluate(
 /// Like [`evaluate`] but with a per-game `max_pieces` cap — the fast metric path
 /// the `/autoresearch` loop uses (full uncapped marathon = `u32::MAX`).
 pub fn evaluate_capped(
-    make_bot: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_bot: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     seeds: &[u64],
     max_frames: u32,
     max_pieces: u32,
 ) -> MarathonStats {
+    // Order-stable parallel games; bit-identical to sequential (see versus).
     let outcomes: Vec<MarathonOutcome> = seeds
-        .iter()
+        .par_iter()
         .map(|&seed| play_marathon_capped(make_bot, seed, max_frames, max_pieces))
         .collect();
 

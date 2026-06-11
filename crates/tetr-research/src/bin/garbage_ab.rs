@@ -72,7 +72,7 @@ fn main() {
         rain_period: env_usize("RAIN_PERIOD", 0) as u32,
     };
 
-    let make: Box<dyn Fn(u64) -> Box<dyn PlayerController>> = match bot.as_str() {
+    let make: Box<dyn Fn(u64) -> Box<dyn PlayerController> + Sync> = match bot.as_str() {
         "bf" => {
             let depth = if depth < 4 { 6 } else { depth };
             // WEIGHTS=attack raises the duel to the shipped operating point's
@@ -97,7 +97,7 @@ fn main() {
         }
     };
     let make_blind = |s: u64,
-                      make: &dyn Fn(u64) -> Box<dyn PlayerController>|
+                      make: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync)|
      -> Box<dyn PlayerController> { Box::new(BlindToGarbage(make(s))) };
 
     // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds.

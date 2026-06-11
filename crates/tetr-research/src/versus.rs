@@ -10,6 +10,7 @@
 //! garbage scheduler (scripted pressure + the TBP referee's external
 //! bookkeeping) lives in [`crate::versus_legacy`], deliberately quarantined.
 
+use rayon::prelude::*;
 use tetr_core::engine::{Engine, EngineEvent, EngineSnapshot, InputFrame};
 use tetr_core::player::{drive_engine, PlayerController};
 
@@ -228,8 +229,8 @@ impl VersusStats {
 
 /// Evaluate bot A vs bot B over `seeds`.
 pub fn evaluate_versus(
-    make_a: &dyn Fn(u64) -> Box<dyn PlayerController>,
-    make_b: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_a: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
+    make_b: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     seeds: &[u64],
     max_plies: u32,
 ) -> VersusStats {
@@ -246,13 +247,16 @@ pub fn evaluate_versus(
 
 /// [`evaluate_versus`] under an explicit [`VersusFormat`].
 pub fn evaluate_versus_format(
-    make_a: &dyn Fn(u64) -> Box<dyn PlayerController>,
-    make_b: &dyn Fn(u64) -> Box<dyn PlayerController>,
+    make_a: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
+    make_b: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     seeds: &[u64],
     format: VersusFormat,
 ) -> VersusStats {
+    // One thread per match (rayon); collection is order-stable, and each match
+    // is a pure function of its seed, so the parallel stats are bit-identical
+    // to the sequential ones (pinned by `parallel_evaluation_matches_sequential`).
     let outcomes: Vec<VersusOutcome> = seeds
-        .iter()
+        .par_iter()
         .map(|&seed| play_versus_format(make_a, make_b, seed, format))
         .collect();
     let a_wins = outcomes
@@ -332,6 +336,37 @@ mod versus_rules_tests {
             event_total, fold_total,
             "engine-side attack must reproduce the research fold bit-for-bit"
         );
+    }
+
+    /// The parallel evaluation must be bit-identical to playing the same seeds
+    /// sequentially: matches are pure functions of their seed and collection
+    /// is order-stable, so threading may change *when* a match runs but never
+    /// *what* it returns. This is the gate that lets every suite go wide
+    /// without re-recording a single baseline.
+    #[test]
+    fn parallel_evaluation_matches_sequential() {
+        let make = |seed: u64| -> Box<dyn PlayerController> {
+            Box::new(AiController::new(Handicap::perfect(), seed))
+        };
+        let seeds: Vec<u64> = crate::seeds::seed_set(8);
+        let format = VersusFormat {
+            max_plies: 40,
+            rain_period: 4,
+        };
+        let parallel = evaluate_versus_format(&make, &make, &seeds, format);
+        let sequential: Vec<VersusOutcome> = seeds
+            .iter()
+            .map(|&s| play_versus_format(&make, &make, s, format))
+            .collect();
+        assert_eq!(parallel.outcomes.len(), sequential.len());
+        for (p, s) in parallel.outcomes.iter().zip(&sequential) {
+            assert_eq!(
+                (p.seed, p.result, p.plies, p.attack_a, p.attack_b),
+                (s.seed, s.result, s.plies, s.attack_a, s.attack_b),
+                "parallel and sequential evaluation diverged on seed {}",
+                p.seed
+            );
+        }
     }
 
     /// A whole match is a pure function of its seed: same seed, same bots ⇒
