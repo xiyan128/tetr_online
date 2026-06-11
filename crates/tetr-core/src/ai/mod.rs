@@ -57,7 +57,7 @@ pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
 pub use runner::{DecisionRunner, SlicedRunner, SyncRunner};
 pub use search::{
-    think_to_completion, BeamPlanner, BestFirstPlanner, GreedyPlanner, Mind, PlacementPlan,
-    SearchBudget, ThinkProgress,
+    think_to_completion, BeamPlanner, BestFirstPlanner, Mind, PlacementPlan, SearchBudget,
+    ThinkProgress,
 };
 pub use state::{BagState, SearchState};

@@ -404,7 +404,7 @@ mod tests {
     use super::*;
     use crate::ai::eval::LinearEvaluator;
     use crate::ai::movegen;
-    use crate::ai::search::{GreedyPlanner, SearchBudget};
+    use crate::ai::search::{BestFirstPlanner, SearchBudget};
     use crate::engine::{Board, CellKind, Engine, EngineConfig, InputFrame};
 
     fn linear() -> LinearEvaluator {
@@ -454,9 +454,9 @@ mod tests {
         // seam-faithful gate, BEAM.md §8).
         let state = tetris_well_state();
         let mut beam = BeamPlanner::new(16);
-        let mut greedy = GreedyPlanner::new();
+        let mut bf = BestFirstPlanner::new();
         let bp = drive(&mut beam, &state, &linear(), SearchBudget::beam(1)).unwrap();
-        let gp = drive(&mut greedy, &state, &linear(), SearchBudget::greedy()).unwrap();
+        let gp = drive(&mut bf, &state, &linear(), SearchBudget::single_ply()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
         assert_eq!(bp.placement.path, gp.placement.path);
@@ -468,9 +468,9 @@ mod tests {
         // And on a real engine snapshot (a non-crafted position with hold + queue).
         let state = engine_snapshot_state(42);
         let mut beam = BeamPlanner::new(16);
-        let mut greedy = GreedyPlanner::new();
+        let mut bf = BestFirstPlanner::new();
         let bp = drive(&mut beam, &state, &linear(), SearchBudget::beam(1)).unwrap();
-        let gp = drive(&mut greedy, &state, &linear(), SearchBudget::greedy()).unwrap();
+        let gp = drive(&mut bf, &state, &linear(), SearchBudget::single_ply()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
         assert_eq!(bp.placement.path, gp.placement.path);
@@ -649,9 +649,9 @@ mod tests {
         let state = SearchState::for_test(board, active, None, std::iter::empty());
 
         let mut beam = BeamPlanner::new(16).with_speculation(false);
-        let mut greedy = GreedyPlanner::new();
+        let mut bf = BestFirstPlanner::new();
         let bp = drive(&mut beam, &state, &linear(), SearchBudget::beam(2)).unwrap();
-        let gp = drive(&mut greedy, &state, &linear(), SearchBudget::greedy()).unwrap();
+        let gp = drive(&mut bf, &state, &linear(), SearchBudget::single_ply()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
     }

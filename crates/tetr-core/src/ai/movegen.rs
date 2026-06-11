@@ -288,7 +288,11 @@ fn apply_move<B: Occupancy>(board: &B, piece: &ActivePiece, mv: Move) -> Option<
 }
 
 /// One lateral cell, via the engine's `try_move`.
-fn shift<B: Occupancy>(board: &B, piece: &ActivePiece, dir: MoveDirection) -> Option<ActivePiece> {
+pub(crate) fn shift<B: Occupancy>(
+    board: &B,
+    piece: &ActivePiece,
+    dir: MoveDirection,
+) -> Option<ActivePiece> {
     let origin = piece.piece().try_move(board, piece.origin(), dir)?;
     let mut moved = piece.clone();
     moved.move_to(origin, PieceAction::Move);
@@ -299,7 +303,7 @@ fn shift<B: Occupancy>(board: &B, piece: &ActivePiece, dir: MoveDirection) -> Op
 ///
 /// Returns `None` for a no-op (kick number `0`, the O piece) or a pose that does
 /// not actually change `(origin, rotation)`, so the BFS does not loop.
-fn rotate<B: Occupancy>(
+pub(crate) fn rotate<B: Occupancy>(
     board: &B,
     piece: &ActivePiece,
     dir: RotationDirection,

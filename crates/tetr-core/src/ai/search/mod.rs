@@ -40,11 +40,9 @@
 
 pub mod beam;
 pub mod best_first;
-pub mod greedy;
 
 pub use beam::BeamPlanner;
 pub use best_first::BestFirstPlanner;
-pub use greedy::GreedyPlanner;
 
 use smallvec::SmallVec;
 
@@ -73,9 +71,12 @@ pub struct SearchBudget {
 }
 
 impl SearchBudget {
-    /// A budget for a one-shot, single-ply search (the greedy default): depth 1,
-    /// no node cap (greedy ignores it).
-    pub fn greedy() -> Self {
+    /// A budget for a one-shot, single-ply search — the greedy baseline's
+    /// operating point (best-first at depth 1 IS the single-ply argmax; the
+    /// dedicated greedy planner died in the no-compat sweep, its decisions
+    /// gate-pinned identical): depth 1, no node cap (the seed generation is
+    /// drained without expansion).
+    pub fn single_ply() -> Self {
         Self {
             nodes: 0,
             max_depth: 1,
@@ -103,7 +104,7 @@ impl SearchBudget {
 
 impl Default for SearchBudget {
     fn default() -> Self {
-        Self::greedy()
+        Self::single_ply()
     }
 }
 

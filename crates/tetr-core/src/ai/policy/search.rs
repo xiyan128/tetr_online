@@ -24,7 +24,7 @@ use crate::ai::eval::{EvalContext, Evaluator, LinearEvaluator};
 use crate::ai::movegen;
 use crate::ai::policy::{Decision, Observation, Policy, PolicyProgress};
 use crate::ai::search::{
-    score_placement, GreedyPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
+    score_placement, BestFirstPlanner, Mind, PlacementPlan, SearchBudget, ThinkProgress,
 };
 
 /// How many of the top placements the imperfection softmax samples from. A small
@@ -69,13 +69,15 @@ impl SearchPolicy {
         }
     }
 
-    /// The shipped Tier-1 brain: a greedy planner over the default linear
-    /// evaluator, with the given `imperfection` and RNG `seed`.
+    /// The shipped Tier-1 brain: the single-ply argmax ("greedy") over the
+    /// default linear evaluator, with the given `imperfection` and RNG `seed`.
+    /// Constructed as best-first at depth 1 — the dedicated greedy planner was
+    /// deleted with its decisions gate-pinned identical to this.
     pub fn greedy(imperfection: f32, seed: u64) -> Self {
         Self::new(
-            Box::new(GreedyPlanner::new()),
+            Box::new(BestFirstPlanner::new()),
             Box::new(LinearEvaluator::default()),
-            SearchBudget::greedy(),
+            SearchBudget::single_ply(),
             imperfection,
             seed,
         )
