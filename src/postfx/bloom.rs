@@ -1,8 +1,10 @@
 //! Neon bloom / HDR glow on the gameplay camera (the Tetris-Effect look).
 //!
-//! WebGPU-first: Bevy 0.18's built-in bloom is not WebGL2-compatible, so this
-//! whole module compiles only under the `bloom` cargo feature — present on native
-//! and the WebGPU web bundle, absent from the WebGL2 bundle (see `Cargo.toml`).
+//! An optional skin, never the core look — Kissaten is flat by rule. The whole
+//! module compiles only under the `bloom` cargo feature and ships in no
+//! default build; opt in with `--features bloom` (see `Cargo.toml`). Bevy
+//! 0.18's built-in bloom is also not WebGL2-compatible, so it could never
+//! join the WebGL2 bundle anyway.
 //!
 //! The glow itself comes from over-bright (`> 1.0`) mino colors — gated on the same
 //! feature in [`crate::level::common`] — rising past the bloom threshold. Everything

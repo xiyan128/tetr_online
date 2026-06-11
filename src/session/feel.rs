@@ -5,9 +5,10 @@
 //! be a drum roll — while line clears play for both seats and a garbage
 //! *rise* gets the lock-thunk cue (the thing you must hear is your own board
 //! getting heavier). Attack that actually leaves a board shows a brief "+n"
-//! pop by the sender's meter. Clears and rises feed the shared screen-shake
-//! trauma; the apply mover here is the only camera mover, and it rests the
-//! camera at the scene center for however many boards the session shows.
+//! pop in the sender's outer gutter, below the callout stack. Clears and
+//! rises feed the shared screen-shake trauma; the apply mover here is the
+//! only camera mover, and it rests the camera at the scene center for
+//! however many boards the session shows.
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -108,10 +109,20 @@ struct SeatCallout {
 
 const CALLOUT_TTL: f32 = 1.1;
 
-/// Where a seat's callouts live: just outside the seat's OUTER board edge
-/// (away from the shared gutter, the meters, and the opponent), mid-low on
-/// the board so a drifting callout never reaches the hold/preview columns.
-/// Returns the anchor x and the text anchor to use.
+/// Vertical lane of the callout stack's TOP line, in blocks. Lines stack
+/// DOWNWARD from here (away from the hold/preview columns above); the
+/// "BACK-TO-BACK" prefix sits one short step above. Both extremes stay clear
+/// of the columns and the floor — see `callout_lanes_stay_inside_the_gutter`.
+const CALLOUT_LANE_BLOCKS: f32 = 5.0;
+/// Step between stacked callout lines, px (display type plus leading).
+const CALLOUT_LINE_STEP: f32 = 36.0;
+/// Vertical lane of the "+n" attack pop, in blocks: under the callout stack,
+/// near the gutter floor.
+const POP_LANE_BLOCKS: f32 = 2.0;
+
+/// Where a seat's gutter feed lives: just outside the seat's OUTER board edge
+/// (away from the shared gutter, the meters, and the opponent). Returns the
+/// anchor x (board-relative) and the text anchor to use.
 fn callout_anchor(seat: usize) -> (f32, bevy::sprite::Anchor) {
     if seat == 0 {
         (-0.75 * SessionLayout::BLOCK, Anchor::CENTER_RIGHT)
@@ -148,8 +159,11 @@ fn callout_label(action: &crate::engine::EngineScoreAction) -> Option<String> {
 }
 
 /// Spawn a callout per scoring clear on any seat (both modes — reading the
-/// opponent's Tetris matters in versus too). A back-to-back clear gets a
-/// smaller "BACK-TO-BACK" prefix line above the core word, both amber.
+/// opponent's Tetris matters in versus too). The label stacks ONE WORD PER
+/// LINE down the gutter ("T-SPIN" over "DOUBLE") so the column never grows
+/// wider than one display-size word — that worst-case width is what
+/// `SessionLayout::scene_min` budgets per side. A back-to-back clear gets a
+/// smaller "BACK-TO-BACK" prefix line above the stack, all amber.
 fn spawn_seat_callouts(
     mut commands: Commands,
     assets: Res<crate::assets::GameAssets>,
@@ -172,34 +186,35 @@ fn spawn_seat_callouts(
             };
             let origin = SessionLayout::board_origin(seat.index);
             let (anchor_x, anchor) = callout_anchor(seat.index);
-            let mid_y = 6.0 * SessionLayout::BLOCK;
-            commands.spawn((
-                SeatCallout { age: 0.0 },
-                Text2d::new(label),
-                TextFont {
-                    font: assets.font.clone(),
-                    font_size: theme::TITLE_FONT_SIZE,
-                    ..Default::default()
-                },
-                TextColor(theme::ACCENT),
-                anchor,
-                Transform::from_translation(origin + Vec3::new(anchor_x, mid_y, 2.0)),
-                DespawnOnExit(GameState::Session),
-            ));
-            if *back_to_back_bonus {
+            let lane_y = CALLOUT_LANE_BLOCKS * SessionLayout::BLOCK;
+            let mut spawn_line = |text: &str, size: f32, y: f32| {
                 commands.spawn((
                     SeatCallout { age: 0.0 },
-                    Text2d::new("BACK-TO-BACK"),
+                    Text2d::new(text),
                     TextFont {
                         font: assets.font.clone(),
-                        font_size: theme::BUTTON_FONT_SIZE,
+                        font_size: size,
                         ..Default::default()
                     },
                     TextColor(theme::ACCENT),
                     anchor,
-                    Transform::from_translation(origin + Vec3::new(anchor_x, mid_y + 36.0, 2.0)),
+                    Transform::from_translation(origin + Vec3::new(anchor_x, y, 2.0)),
                     DespawnOnExit(GameState::Session),
                 ));
+            };
+            for (line, word) in label.split_whitespace().enumerate() {
+                spawn_line(
+                    word,
+                    theme::TITLE_FONT_SIZE,
+                    lane_y - line as f32 * CALLOUT_LINE_STEP,
+                );
+            }
+            if *back_to_back_bonus {
+                spawn_line(
+                    "BACK-TO-BACK",
+                    theme::BUTTON_FONT_SIZE,
+                    lane_y + 0.85 * CALLOUT_LINE_STEP,
+                );
             }
         }
     }
@@ -223,7 +238,10 @@ fn animate_seat_callouts(
     }
 }
 
-/// A floating "+n" by the sender's meter when net attack leaves a board.
+/// A floating "+n" in the sender's outer gutter when net attack leaves a
+/// board. Amber, not attack red — red is reserved for INCOMING pressure (the
+/// opponent reads this seat's outgoing attack on their own meter); sending is
+/// a positive moment and joins the gutter feed below the callout stack.
 /// `pub(crate)` so the match tests can assert the feedback fires.
 #[derive(Component)]
 pub(crate) struct AttackPop {
@@ -247,14 +265,8 @@ fn spawn_attack_pops(
         if sent == 0 {
             continue;
         }
-        // Next to the seat's meter (the inner board edge), just above the
-        // current stack area — world space, scoped to the session.
         let origin = SessionLayout::board_origin(seat.index);
-        let x = if seat.index == 0 {
-            origin.x + (SessionLayout::BOARD_W as f32 + 1.6) * SessionLayout::BLOCK
-        } else {
-            origin.x - 1.6 * SessionLayout::BLOCK
-        };
+        let (anchor_x, anchor) = callout_anchor(seat.index);
         commands.spawn((
             AttackPop { age: 0.0 },
             Text2d::new(format!("+{sent}")),
@@ -263,9 +275,11 @@ fn spawn_attack_pops(
                 font_size: crate::ui::widgets::theme::NUMERAL_FONT_SIZE,
                 ..default()
             },
-            TextColor(crate::ui::widgets::theme::ATTACK),
-            Anchor::CENTER,
-            Transform::from_translation(Vec3::new(x, 10.0 * SessionLayout::BLOCK, 0.8)),
+            TextColor(crate::ui::widgets::theme::ACCENT),
+            anchor,
+            Transform::from_translation(
+                origin + Vec3::new(anchor_x, POP_LANE_BLOCKS * SessionLayout::BLOCK, 0.8),
+            ),
             DespawnOnExit(GameState::Session),
         ));
     }
@@ -326,5 +340,98 @@ fn apply_session_shake(
     for mut transform in &mut cameras {
         transform.translation = translation;
         transform.rotation = rotation;
+    }
+}
+
+#[cfg(test)]
+mod gutter_tests {
+    use super::*;
+
+    /// Dogica is strictly monospaced at 1.0 em per glyph, so a word's world
+    /// width is `glyphs * font_size`.
+    const GLYPH_EM: f32 = 1.0;
+
+    /// Every word the callout feed can emit, across the whole engine
+    /// vocabulary (plus the B2B prefix, which renders at the label size).
+    fn callout_words() -> Vec<String> {
+        use crate::engine::{EngineScoreAction as A, TSpinKind};
+        let mut actions = vec![A::Single, A::Double, A::Triple, A::Tetris];
+        for kind in [TSpinKind::Mini, TSpinKind::Full] {
+            for lines in 0..=3 {
+                actions.push(A::TSpin { kind, lines });
+            }
+        }
+        actions
+            .iter()
+            .filter_map(callout_label)
+            .flat_map(|label| {
+                label
+                    .split_whitespace()
+                    .map(str::to_owned)
+                    .collect::<Vec<_>>()
+            })
+            .collect()
+    }
+
+    /// How much horizontal room `scene_min` guarantees outboard of a board's
+    /// outer edge, past the callout anchor.
+    fn gutter_room(seat_count: usize) -> f32 {
+        let (min_width, _) = SessionLayout::scene_min(seat_count);
+        let board_span = SessionLayout::board_origin(seat_count.saturating_sub(1)).x
+            + SessionLayout::BOARD_W as f32 * SessionLayout::BLOCK;
+        (min_width - board_span) / 2.0 - 0.75 * SessionLayout::BLOCK
+    }
+
+    #[test]
+    fn every_callout_word_fits_the_guaranteed_camera_framing() {
+        let widest = callout_words()
+            .iter()
+            .map(|w| w.len() as f32 * GLYPH_EM * crate::ui::widgets::theme::TITLE_FONT_SIZE)
+            .fold(0.0f32, f32::max);
+        let prefix =
+            "BACK-TO-BACK".len() as f32 * GLYPH_EM * crate::ui::widgets::theme::BUTTON_FONT_SIZE;
+        for seats in [1, 2] {
+            let room = gutter_room(seats);
+            assert!(
+                widest <= room && prefix <= room,
+                "a {seats}-seat scene guarantees {room}px of gutter; the feed needs \
+                 {widest}px (words) / {prefix}px (prefix) — widen scene_min"
+            );
+        }
+    }
+
+    #[test]
+    fn the_gutter_feed_lanes_clear_the_preview_column_and_the_floor() {
+        let block = SessionLayout::BLOCK;
+        // Worst-case preview column: MAX_NEXT_COUNT two-row avatars + gaps.
+        let avatar = 2.0 * block * SessionLayout::PREVIEW_SCALE;
+        let gap = 0.5 * block * SessionLayout::PREVIEW_SCALE;
+        let count = crate::settings::MAX_NEXT_COUNT as f32;
+        let preview_bottom =
+            SessionLayout::BOARD_H as f32 * block - (count * avatar + (count - 1.0) * gap);
+
+        let drift = 18.0 * CALLOUT_TTL;
+        let prefix_top = CALLOUT_LANE_BLOCKS * block
+            + 0.85 * CALLOUT_LINE_STEP
+            + crate::ui::widgets::theme::BUTTON_FONT_SIZE / 2.0
+            + drift;
+        assert!(
+            prefix_top < preview_bottom,
+            "the callout stack's top ({prefix_top}) must clear the preview column \
+             ({preview_bottom})"
+        );
+
+        let pop_top =
+            POP_LANE_BLOCKS * block + POP_RISE + crate::ui::widgets::theme::NUMERAL_FONT_SIZE / 2.0;
+        assert!(pop_top < preview_bottom);
+
+        // The deepest stack (three words) stays above the board floor.
+        let deepest = CALLOUT_LANE_BLOCKS * block
+            - 2.0 * CALLOUT_LINE_STEP
+            - crate::ui::widgets::theme::TITLE_FONT_SIZE / 2.0;
+        assert!(
+            deepest > 0.0,
+            "the third callout line sinks below the floor"
+        );
     }
 }

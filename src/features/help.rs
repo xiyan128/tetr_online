@@ -200,7 +200,7 @@ fn spawn_keybind_row(
         font,
         &format!("{:<12} {}", action.label(), keys),
         theme::TEXT,
-        14.0,
+        theme::LABEL_FONT_SIZE,
     );
 }
 
@@ -225,7 +225,7 @@ fn spawn_term_row(
                     Text::new(format!("{term}:")),
                     TextFont {
                         font: font.clone(),
-                        font_size: 14.0,
+                        font_size: theme::LABEL_FONT_SIZE,
                         ..default()
                     },
                     TextColor(theme::ACCENT),
@@ -234,7 +234,7 @@ fn spawn_term_row(
                     Text::new(blurb),
                     TextFont {
                         font: font.clone(),
-                        font_size: 14.0,
+                        font_size: theme::LABEL_FONT_SIZE,
                         ..default()
                     },
                     TextColor(theme::TEXT),

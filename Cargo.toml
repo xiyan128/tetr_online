@@ -85,10 +85,10 @@ default = ["webgl2"]
 webgl2 = ["bevy/webgl2"]
 webgpu = ["bevy/webgpu"]
 # Neon bloom / HDR glow (Tetris-Effect look). Pulls Bevy's `bevy_post_process`.
-# Bevy 0.18's built-in bloom is NOT WebGL2-compatible, so this is deliberately
-# absent from the shipped WebGL2 bundle and present on native + the WebGPU bundle.
-# Gating the CODE on `feature = "bloom"` (camera HDR/bloom + over-bright glow
-# colors) keeps the WebGL2 wasm lean and never lights up a broken path. A
+# Ships in NO build (native, WebGL2, or WebGPU): the Kissaten skin is flat by
+# rule, so bloom survives only as an opt-in experiment (`--features bloom`,
+# compile-checked by the gate so it can't rot). Bevy 0.18's built-in bloom is
+# also NOT WebGL2-compatible, so it could never join that bundle anyway. A
 # fine-grained feature, per the size policy — NOT the `2d`/`ui` collections.
 bloom = ["bevy/bevy_post_process"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it

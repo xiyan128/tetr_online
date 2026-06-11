@@ -62,6 +62,17 @@ impl FocusList {
     }
 }
 
+/// The per-row query data the focus restyle works over: identity, optional
+/// pointer state, the two restyled surfaces, and the (optional) label
+/// children. A row participates only if it carries BOTH color components.
+type FocusRowItem = (
+    &'static Focusable,
+    Option<&'static Interaction>,
+    &'static mut BackgroundColor,
+    &'static mut BorderColor,
+    Option<&'static Children>,
+);
+
 /// What the player did on a focused menu this frame.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum NavAction {
@@ -93,13 +104,7 @@ pub fn focus_navigation<M: Component>(
     keys: Res<ButtonInput<KeyCode>>,
     pointer_motion: Res<AccumulatedMouseMotion>,
     mut list: Single<&mut FocusList, With<M>>,
-    mut buttons: Query<(
-        &Focusable,
-        Option<&Interaction>,
-        &mut BackgroundColor,
-        &mut BorderColor,
-        &Children,
-    )>,
+    mut buttons: Query<FocusRowItem>,
     mut labels: Query<&mut TextColor, With<FocusLabel>>,
 ) {
     // Move the cursor to the pointed row — but weigh a press and a hover
@@ -131,6 +136,9 @@ pub fn focus_navigation<M: Component>(
 
     // Kissaten button states: a resting row is ground + frame border; focus
     // turns the border and label amber; a press inverts into an amber chip.
+    // NOTE: a row participates only if it carries BackgroundColor AND
+    // BorderColor (every current row builder does); Interaction and Children
+    // are optional so keyboard-only or childless rows still restyle.
     for (focusable, interaction, mut bg, mut border, children) in &mut buttons {
         let pressed = interaction.copied() == Some(Interaction::Pressed);
         let (bg_color, border_color, text_color) = if pressed {
@@ -142,7 +150,7 @@ pub fn focus_navigation<M: Component>(
         };
         *bg = bg_color.into();
         *border = BorderColor::all(border_color);
-        for child in children {
+        for child in children.into_iter().flatten() {
             if let Ok(mut label) = labels.get_mut(*child) {
                 label.0 = text_color;
             }

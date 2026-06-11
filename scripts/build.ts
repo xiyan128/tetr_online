@@ -7,7 +7,8 @@
  *
  * Bevy bakes the renderer in at compile time, so each bundle is the same binary
  * built with a different cargo feature: `webgl2` vs `webgpu` (both with
- * --no-default-features, so the default-only `bloom` feature ships WebGPU-only).
+ * --no-default-features). Neither bundle ships the optional `bloom` skin —
+ * Kissaten is flat by rule; bloom is opt-in via `--features bloom` only.
  * Per bundle: cargo build (profile `web`) -> wasm-bindgen (--target web) -> wasm-opt.
  *
  * Requirements: bun, rustup wasm32-unknown-unknown target, wasm-bindgen-cli
@@ -72,9 +73,9 @@ const WASM_OPT_FLAGS = [
 ];
 
 // Cargo features per renderer. Both bundles build with `--no-default-features`
-// and name their renderer explicitly: this keeps the default-only `bloom` feature
-// (HDR/neon, NOT WebGL2-compatible) OUT of the universal WebGL2 bundle while the
-// WebGPU bundle pulls it back in (its `webgpu` feature re-enables `bloom`).
+// and name their renderer explicitly because Bevy bakes the wasm backend in at
+// compile time. Bloom is part of neither: it is an opt-in skin feature
+// (`--features bloom`), and the Kissaten core look is flat by rule.
 const CARGO_ARGS: Record<Renderer, string[]> = {
   webgl2: ["--no-default-features", "--features", "webgl2"],
   webgpu: ["--no-default-features", "--features", "webgpu"],

@@ -35,6 +35,9 @@ RUSTDOCFLAGS="-D warnings" cargo doc --workspace --no-deps --locked
 step "check (dev feature)"
 cargo check --features dev --locked
 
+step "check (bloom feature)"
+cargo check --features bloom --locked
+
 step "build (embed, wasm32)"
 cargo build -p tetr-embed --target wasm32-unknown-unknown --locked
 

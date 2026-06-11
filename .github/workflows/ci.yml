@@ -59,6 +59,11 @@ jobs:
       - name: Check (dev feature)
         run: cargo check --features dev --locked
 
+      # Bloom is an opt-in skin in NO default build (Kissaten is flat by
+      # rule); without this check it would rot silently.
+      - name: Check (bloom feature)
+        run: cargo check --features bloom --locked
+
       # The embed's entire reason to exist is its wasm32 cdylib (hand-shipped to
       # the live blog embed), yet nothing compiled that target before this step.
       - name: Build (embed, wasm32)

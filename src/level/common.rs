@@ -89,17 +89,18 @@ pub fn piece_color(piece_type: PieceType) -> Color {
     }
 }
 
-/// Multiplier that lifts mino colors past the bloom threshold so they glow under
-/// the neon pass. Only compiled with the `bloom` feature — on the WebGL2 bundle an
-/// over-bright color would merely clamp to a washed-out white, so the plain palette
-/// is used instead.
+/// Multiplier that lifts mino colors past the bloom threshold so they glow
+/// under the neon pass. Only compiled with the opt-in `bloom` feature — every
+/// default build uses the plain palette (and on WebGL2 an over-bright color
+/// would merely clamp to a washed-out white anyway).
 #[cfg(feature = "bloom")]
 const MINO_GLOW: f32 = 1.6;
 
-/// On-screen color for a piece's minos: [`piece_color`] lifted into HDR for the
-/// bloom glow on capable builds, or the plain palette color otherwise. The hue is
-/// preserved (all channels scale together); the brightest channels clip to a
-/// neon-white core while bloom carries the color out into the halo.
+/// On-screen color for a piece's minos: the plain [`piece_color`], or — on
+/// opt-in `--features bloom` builds only — that color lifted into HDR for the
+/// glow. The hue is preserved (all channels scale together); the brightest
+/// channels clip to a neon-white core while bloom carries the color out into
+/// the halo.
 pub fn mino_render_color(piece_type: PieceType) -> Color {
     let base = piece_color(piece_type);
     #[cfg(feature = "bloom")]

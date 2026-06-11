@@ -57,13 +57,18 @@ impl SessionLayout {
     }
 
     /// Minimum world-space rectangle the camera must keep visible: every
-    /// board, the outer hold/preview columns, the texts above and below.
+    /// board, the outer hold/preview columns, the texts above and below, and
+    /// one display-size callout word in each OUTER gutter (the callout stack
+    /// in `session::feel` is one word per line; Dogica is monospaced at
+    /// 1 em/glyph, so the longest word — "BACK-TO-BACK" at 16 px, "TETRIS" at
+    /// 32 px — needs ~6 cells outboard of each board edge).
     pub fn scene_min(seat_count: usize) -> (f32, f32) {
         let width_cells = match seat_count {
-            // hold column + board + preview column + breathing room.
-            0 | 1 => 20.0,
-            // two board groups + the gutter between them.
-            _ => 40.0,
+            // hold column + board + preview column + a callout gutter.
+            0 | 1 => 24.0,
+            // two board groups, the shared gutter, and a callout gutter on
+            // each outer flank.
+            _ => 45.0,
         };
         (width_cells * Self::BLOCK, 25.0 * Self::BLOCK)
     }
@@ -286,27 +291,31 @@ fn setup_scene(
         // seat 0's on its right, seat 1's on its left. A full-height track in
         // `GRID` reads as a quiet groove at rest; the fill segments (children
         // of the meter root, one per pending batch) arrive in `ATTACK` and
-        // stack upward from the board floor.
-        let meter_x = if seat == 0 {
-            SessionLayout::BOARD_W as f32 * block + 0.25 * block
-        } else {
-            -0.5 * block
-        };
-        let track = commands
-            .spawn((
-                Sprite::from_color(theme::GRID, Vec2::new(METER_WIDTH, board_h)),
-                Transform::from_translation(Vec3::new(meter_x, 0.0, 0.4)),
-                Anchor::BOTTOM_LEFT,
-            ))
-            .id();
-        let meter = commands
-            .spawn((
-                SeatMeter { seat },
-                Transform::from_translation(Vec3::new(meter_x, 0.0, 0.5)),
-                Visibility::default(),
-            ))
-            .id();
-        commands.entity(root).add_children(&[track, meter]);
+        // stack upward from the board floor. Versus only — solo has no
+        // garbage channel, and an always-empty groove would read as a stuck
+        // UI element (the meter reconciler tolerates the missing root).
+        if matches!(config.mode, super::SessionMode::Versus) {
+            let meter_x = if seat == 0 {
+                SessionLayout::BOARD_W as f32 * block + 0.25 * block
+            } else {
+                -0.5 * block
+            };
+            let track = commands
+                .spawn((
+                    Sprite::from_color(theme::GRID, Vec2::new(METER_WIDTH, board_h)),
+                    Transform::from_translation(Vec3::new(meter_x, 0.0, 0.4)),
+                    Anchor::BOTTOM_LEFT,
+                ))
+                .id();
+            let meter = commands
+                .spawn((
+                    SeatMeter { seat },
+                    Transform::from_translation(Vec3::new(meter_x, 0.0, 0.5)),
+                    Visibility::default(),
+                ))
+                .id();
+            commands.entity(root).add_children(&[track, meter]);
+        }
 
         // Lock-down progress bar, under the field (grows left→right toward
         // lock). Quiet chrome: `FRAME`, like every other resting border.
@@ -553,7 +562,7 @@ fn reconcile_active_pieces(
 fn ghost_cell_outline(commands: &mut Commands, block: f32, x: isize, y: isize) -> [Entity; 4] {
     let gap = block * CELL_GAP_FRACTION;
     let side = block - gap; // the chiclet footprint the outline traces
-    let stroke = 2.0 * gap;
+    let stroke = gap;
     let base = to_translation(x, y, block) + Vec3::new(gap / 2.0, gap / 2.0, -0.1);
     let color = theme::TEXT.with_alpha(0.35);
     let edges = [

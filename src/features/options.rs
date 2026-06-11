@@ -14,8 +14,9 @@
 //! bridge feeds `lock_down_mode`, and the SFX feature reads the volumes. The
 //! keyboard controller reads [`Keybinds`] via [`keyboard_input_from_keybinds`].
 //!
-//! Encoding: a tiny hand-rolled `key=value` line format (one field per line) so
-//! we don't pull in a serializer; see [`encode_settings`]/[`decode_settings`].
+//! Encoding: RON through the serde derives on [`GameSettings`] — the wire
+//! format lives with the settings type (`settings::encode_settings` /
+//! `settings::decode_settings`), not with this UI.
 
 use bevy::prelude::*;
 
@@ -228,6 +229,10 @@ fn build_options_ui(
                 BorderColor::all(theme::FRAME),
                 children![
                     (
+                        // FocusLabel: the LEFT column follows the focus
+                        // cursor (amber when focused); the value column stays
+                        // semantically amber regardless.
+                        crate::ui::focus::FocusLabel,
                         Text::new(row.label()),
                         TextFont {
                             font: font.clone(),

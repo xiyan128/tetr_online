@@ -42,10 +42,12 @@ pub mod theme {
     /// Incoming damage and danger. The saturation ceiling of the whole system.
     pub const ATTACK: Color = Color::srgb(0.8196, 0.2941, 0.2588); // #D14B42
 
-    /// Dogica at native multiples only (8 px grid): 32 / 24 / 16.
+    /// Dogica at native multiples only (8 px grid): 32 / 24 / 16, plus the
+    /// countdown's single ceremony numeral at 96 (×12).
     pub const TITLE_FONT_SIZE: f32 = 32.0;
     pub const NUMERAL_FONT_SIZE: f32 = 24.0;
     pub const BUTTON_FONT_SIZE: f32 = 16.0;
+    pub const COUNTDOWN_FONT_SIZE: f32 = 96.0;
     /// Departure Mono, the working voice: body 14, micro 12.
     pub const LABEL_FONT_SIZE: f32 = 14.0;
     pub const MICRO_FONT_SIZE: f32 = 12.0;

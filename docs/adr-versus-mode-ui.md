@@ -170,8 +170,9 @@ ATK 12┗━━━━━━━━━━┛         ATK 34┗━━━━━━�
   rewrite).
 - **Camera**: one `Camera2d` with `ScalingMode::AutoMin` sized to the full
   scene, so both boards always fit; native window resizes and the web canvas
-  get the same framing for free. Tagged `GameplayCamera` so the CRT/bloom
-  passes apply unchanged.
+  get the same framing for free. Tagged `GameplayCamera` so the gameplay
+  post-FX stack (then CRT/bloom; since the Kissaten redesign, the optional
+  bloom skin only — the CRT pass is gone) applies unchanged.
 - **Garbage meter**, the signature versus readout: a thin vertical bar on
   each board's inner edge, one red segment per pending line, stacked
   bottom-up with a 2-px notch between batches (you can read "a 4 and a 2 are

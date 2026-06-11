@@ -112,7 +112,7 @@ fn spawn_countdown(mut commands: Commands, assets: Res<GameAssets>) {
             Text::new("3"),
             TextFont {
                 font: assets.font.clone(),
-                font_size: 96.0,
+                font_size: theme::COUNTDOWN_FONT_SIZE,
                 ..default()
             },
             TextColor(theme::ACCENT),

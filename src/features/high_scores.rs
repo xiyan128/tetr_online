@@ -231,8 +231,9 @@ fn spawn_variant_column(
     column
 }
 
-/// A column heading (variant name): amber display type at the label size —
-/// Dogica renders crisp only at its native multiples, so 16 px, never 18.
+/// A column heading (variant name): amber display type at the button size
+/// (16 px, Dogica's smallest native multiple — never 18, which would render
+/// off-grid).
 fn column_heading(text: &str, font: Handle<Font>) -> impl Bundle + use<> {
     (
         Text::new(text),
