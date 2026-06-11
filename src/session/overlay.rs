@@ -285,6 +285,7 @@ fn seat_label(config: &SessionConfig, registry: &crate::ai::ModelRegistry, seat:
     }
 }
 
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn spawn_result_banner(
     mut commands: Commands,
     assets: Res<GameAssets>,

@@ -206,6 +206,7 @@ fn refresh_row_labels(
 
 /// Enter on Start begins the match; Enter/click on a seat row cycles it (so a
 /// mouse-only player can configure everything); Esc backs out.
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<VersusSetupRoot>>,

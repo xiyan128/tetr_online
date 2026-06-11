@@ -84,6 +84,7 @@ fn setup(mut commands: Commands, assets: Res<GameAssets>) {
 /// whether the keyboard or the bot drives the engine. Arming it *here* (and
 /// clearing it on the Play path) means the flag is always fresh for the next
 /// session — a previous "Watch AI" run can never leave a keyboard game bot-driven.
+#[allow(clippy::too_many_arguments)] // a Bevy system's params are its dependency list
 fn activate(
     keys: Res<ButtonInput<KeyCode>>,
     list: Single<&FocusList, With<MainMenuRoot>>,

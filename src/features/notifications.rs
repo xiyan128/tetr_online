@@ -24,8 +24,7 @@ use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
 use crate::engine::{EngineEvent, SnapshotCell};
-use crate::level::common::{to_translation, LevelConfig, LevelSystems};
-use crate::level::engine_bridge::{FrameEvents, LatestSnapshot};
+use crate::level::common::to_translation;
 use crate::GameState;
 
 /// Lifetime of the white line-clear flash sheet.
@@ -69,16 +68,17 @@ impl Plugin for NotificationsPlugin {
         // Inspector/scene registration for this feature's transient markers.
         app.register_type::<LineClearFlash>()
             .register_type::<HardDropTrail>()
-            // Translate engine events into world effects. Runs in the Reconcile
-            // set so it sees the same frame's snapshot the other reconcilers do,
-            // after the engine driver has stepped.
-            .add_systems(Update, spawn_event_effects.in_set(LevelSystems::Reconcile))
-            // The fade animators are independent of the engine-step ordering; run
-            // them whenever they have work.
+            // Translate seat events into world effects while a session runs.
+            .add_systems(
+                Update,
+                spawn_event_effects.run_if(in_state(crate::session::SessionPhase::Running)),
+            )
+            // The fade animators are independent of the engine-step ordering;
+            // they keep fading through pause and the result banner.
             .add_systems(
                 Update,
                 (animate_line_clear_flash, animate_hard_drop_trail)
-                    .run_if(in_state(GameState::Playing)),
+                    .run_if(in_state(GameState::Session)),
             );
     }
 }
@@ -95,40 +95,40 @@ impl Plugin for NotificationsPlugin {
 /// still recover the columns/height it swept.
 fn spawn_event_effects(
     mut commands: Commands,
-    frame_events: Res<FrameEvents>,
-    snapshot: Res<LatestSnapshot>,
-    config: Res<LevelConfig>,
-    mut last_active: Local<Vec<SnapshotCell>>,
+    seats: Query<(
+        &crate::session::Seat,
+        &crate::session::SeatEvents,
+        &crate::session::SeatSnapshot,
+    )>,
+    mut last_active: Local<std::collections::HashMap<usize, Vec<SnapshotCell>>>,
 ) {
-    let mut hard_dropped_this_frame = false;
+    for (seat, events, snapshot) in &seats {
+        let origin = crate::session::render::SessionLayout::board_origin(seat.index);
+        let cache = last_active.entry(seat.index).or_default();
+        let mut hard_dropped_this_frame = false;
 
-    for event in &frame_events.0 {
-        match event {
-            EngineEvent::HardDropped { cells_dropped, .. } => {
-                hard_dropped_this_frame = true;
-                spawn_hard_drop_trail(
-                    &mut commands,
-                    &config,
-                    last_active.as_slice(),
-                    *cells_dropped,
-                );
+        for event in &events.0 {
+            match event {
+                EngineEvent::HardDropped { cells_dropped, .. } => {
+                    hard_dropped_this_frame = true;
+                    spawn_hard_drop_trail(&mut commands, origin, cache.as_slice(), *cells_dropped);
+                }
+                // Any line-clearing lock pulses the flash.
+                EngineEvent::Locked { lines_cleared, .. } if *lines_cleared > 0 => {
+                    spawn_line_clear_flash(&mut commands, origin);
+                }
+                _ => {}
             }
-            // Any line-clearing lock pulses the flash.
-            EngineEvent::Locked { lines_cleared, .. } if *lines_cleared > 0 => {
-                spawn_line_clear_flash(&mut commands, &config);
-            }
-            _ => {}
         }
-    }
 
-    // Cache the active piece for the *next* frame's potential hard drop. Skip on a
-    // hard-drop frame: the snapshot's active piece is already the freshly spawned
-    // successor, so caching it would point the next trail at the wrong cells. The
-    // cache we just consumed stays valid until a real falling piece is observed
-    // again.
-    if !hard_dropped_this_frame {
-        if let Some(active) = snapshot.0.active.as_ref() {
-            last_active.clone_from(&active.cells);
+        // Cache the active piece for the *next* frame's potential hard drop.
+        // Skip on a hard-drop frame: the snapshot's active piece is already the
+        // freshly spawned successor, so caching it would point the next trail
+        // at the wrong cells.
+        if !hard_dropped_this_frame {
+            if let Some(active) = snapshot.0.active.as_ref() {
+                cache.clone_from(&active.cells);
+            }
         }
     }
 }
@@ -139,20 +139,20 @@ fn spawn_event_effects(
 
 /// Spawn a white sheet covering the visible playfield. Sits just in front of the
 /// minos so the clear reads as a soft pulse.
-fn spawn_line_clear_flash(commands: &mut Commands, config: &LevelConfig) {
-    let width = config.block_size * config.board_width as f32;
-    let height = config.block_size * config.board_height as f32;
+fn spawn_line_clear_flash(commands: &mut Commands, origin: Vec3) {
+    use crate::session::render::SessionLayout;
+    let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32;
+    let height = SessionLayout::BLOCK * SessionLayout::BOARD_H as f32;
     commands.spawn((
         LineClearFlash { elapsed: 0.0 },
         Sprite::from_color(
             Color::WHITE.with_alpha(FLASH_PEAK_ALPHA),
             Vec2::new(width, height),
         ),
-        // Board origin is world (0,0), growing up/right; anchor bottom-left so
-        // the sheet lines up with the field.
-        Transform::from_translation(Vec3::new(0.0, 0.0, 0.5)),
+        // Anchored bottom-left at the SEAT's board origin.
+        Transform::from_translation(origin + Vec3::new(0.0, 0.0, 0.5)),
         Anchor::BOTTOM_LEFT,
-        DespawnOnExit(GameState::Playing),
+        DespawnOnExit(GameState::Session),
     ));
 }
 
@@ -185,7 +185,7 @@ fn animate_line_clear_flash(
 /// from the landing row up to the pre-drop top row.
 fn spawn_hard_drop_trail(
     commands: &mut Commands,
-    config: &LevelConfig,
+    origin: Vec3,
     start_cells: &[SnapshotCell],
     cells_dropped: usize,
 ) {
@@ -203,7 +203,7 @@ fn spawn_hard_drop_trail(
     }
 
     let dropped = cells_dropped as isize;
-    let block = config.block_size;
+    let block = crate::session::render::SessionLayout::BLOCK;
     let streak_height = (dropped as f32 + 1.0) * block;
 
     for (x, (bottom_y, color)) in column_bottom {
@@ -217,9 +217,9 @@ fn spawn_hard_drop_trail(
                 Vec2::new(block, streak_height),
             ),
             // Behind the minos but in front of the background grid.
-            Transform::from_translation(Vec3::new(base.x, base.y, -0.05)),
+            Transform::from_translation(origin + Vec3::new(base.x, base.y, -0.05)),
             Anchor::BOTTOM_LEFT,
-            DespawnOnExit(GameState::Playing),
+            DespawnOnExit(GameState::Session),
         ));
     }
 }

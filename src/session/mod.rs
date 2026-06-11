@@ -26,7 +26,7 @@ use crate::GameState;
 
 mod feel;
 mod overlay;
-mod render;
+pub(crate) mod render;
 
 /// Lifecycle of a live match, as a sub-state of [`GameState::Session`] — the
 /// session (seat entities, boards, camera) is scoped to `Versus` itself, so
