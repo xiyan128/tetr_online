@@ -20,19 +20,28 @@ use crate::cli::SplitMix64;
 /// The crate's seed-index partition. Regions are starting indices into the
 /// [`seed_set_from`] stream; each consumer documents its stride so regions
 /// can be audited for overlap at a glance.
+///
+/// Fixed-size regions sit low; the two regions that GROW with iteration count
+/// (the climb's rotation blocks and its per-accept confirmations) get
+/// power-of-two starts with explicit headroom, because writing the old map
+/// down exposed a latent collision: rotation at `8192 + iter × 24` walked
+/// into the SPRT region after ~340 iterations — never hit in the recorded
+/// runs (≤127 iters), but one overnight climb away. Headroom now:
+/// rotation reaches CONFIRM after ~44 billion iterations at default block
+/// size; confirmations never collide below ~10^14 iterations.
 pub mod regions {
     /// Training / screening seeds (the climb's fixed-seed mode, quick A/Bs).
     pub const TRAIN: usize = 0;
     /// Held-out validation — the honest verdict after an optimization run.
     pub const VALIDATION: usize = 4096;
-    /// The climb's per-iteration rotating screen blocks
-    /// (stride: one block per iteration from here).
-    pub const ROTATION: usize = 8192;
-    /// The standalone SPRT racer (`versus_sprt`).
+    /// The standalone SPRT racer (`versus_sprt`; stride: one block per SPRT
+    /// block, bounded by the race length — well under the next region).
     pub const SPRT: usize = 16384;
-    /// The climb's per-accept SPRT confirmations
-    /// (stride: 4096 per iteration from here).
-    pub const CONFIRM: usize = 32768;
+    /// The climb's per-iteration rotating screen blocks
+    /// (stride: one `SEEDS`-sized block per iteration).
+    pub const ROTATION: usize = 1 << 20;
+    /// The climb's per-accept SPRT confirmations (stride: 4096 per iteration).
+    pub const CONFIRM: usize = 1 << 50;
 }
 
 /// A deterministic, well-distributed set of `count` seeds (SplitMix64 over indices).
