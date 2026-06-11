@@ -29,7 +29,7 @@ mod t_spin;
 pub use active_piece::{ActivePiece, PieceAction, RotationDirection};
 pub use api::{
     ActivePieceSnapshot, Engine, EngineConfig, EngineEvent, EngineSnapshot, GameOverStatus,
-    InputFrame, SnapshotCell,
+    InputFrame, SnapshotCell, BUFFER_HEIGHT,
 };
 pub use attack::{attack_lines, COMBO_TABLE, PERFECT_CLEAR_ATTACK};
 pub use bit_board::{BitBoard, ColumnView, Occupancy};

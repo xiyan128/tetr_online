@@ -491,7 +491,7 @@ fn rebuild_board(snapshot: &EngineSnapshot) -> Board {
     let mut board = Board::with_top_margin(
         config.board_width,
         config.visible_height,
-        config.buffer_height,
+        crate::engine::BUFFER_HEIGHT,
     );
     for cell in &snapshot.board_cells {
         let kind = if cell.garbage {
@@ -759,7 +759,6 @@ mod tests {
                 let config = EngineConfig {
                     preview_count,
                     visible_height: 40,
-                    buffer_height: 20,
                     ..EngineConfig::default()
                 };
                 let mut engine = Engine::new(config, seed);

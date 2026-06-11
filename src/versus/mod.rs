@@ -146,7 +146,6 @@ fn versus_engine_config(settings: &crate::settings::GameSettings) -> EngineConfi
     EngineConfig {
         board_width: 10,
         visible_height: 20,
-        buffer_height: 20,
         preview_count: settings.next_count,
         lock_down_mode: settings.lock_down_mode,
         lock_down_seconds: LOCK_DOWN_SECONDS,

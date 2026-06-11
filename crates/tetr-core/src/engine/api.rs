@@ -24,11 +24,15 @@ use crate::engine::scoring::{score_action, EngineScoreAction, ScoreAward, ScoreS
 use crate::engine::t_spin::{classify_t_spin, is_t_slot, TSpinKind};
 use crate::engine::RotationDirection;
 
+/// Hidden rows above the visible field — the guideline buffer zone where
+/// pieces spawn and can lock (§16.4). A constant, not a config knob: nothing
+/// ever varied it, and the engine's rules (spawn rows, lock-out) assume it.
+pub const BUFFER_HEIGHT: usize = 20;
+
 #[derive(Debug, Clone, PartialEq)]
 pub struct EngineConfig {
     pub board_width: usize,
     pub visible_height: usize,
-    pub buffer_height: usize,
     pub preview_count: usize,
     pub lock_down_mode: LockDownMode,
     pub lock_down_seconds: f32,
@@ -48,7 +52,6 @@ impl Default for EngineConfig {
         Self {
             board_width: 10,
             visible_height: 20,
-            buffer_height: 20,
             preview_count: 5,
             lock_down_mode: LockDownMode::Extended,
             lock_down_seconds: LOCK_DOWN_SECONDS,
@@ -215,11 +218,8 @@ pub struct Engine {
 
 impl Engine {
     pub fn new(config: EngineConfig, seed: u64) -> Self {
-        let board = Board::with_top_margin(
-            config.board_width,
-            config.visible_height,
-            config.buffer_height,
-        );
+        let board =
+            Board::with_top_margin(config.board_width, config.visible_height, BUFFER_HEIGHT);
         let score_state = ScoreState::new(config.goal_system, config.starting_level);
         let mut engine = Self {
             config,
@@ -336,6 +336,12 @@ impl Engine {
     /// runs out-of-band of [`step`](Self::step) there is no event sink: the `bool`
     /// return (and the latched game-over in the snapshot) is the caller's signal,
     /// not an [`EngineEvent::GameOver`].
+    /// QUARANTINED legacy seam: inserts raw, bypassing the pending queue,
+    /// cancellation, the cap, and event emission that [`queue_garbage`]
+    /// (Self::queue_garbage) owns. Kept ONLY for the TBP referee and the
+    /// scripted-pressure scenarios (`tetr-research::versus_legacy`, whose
+    /// recorded CC2 baselines it underpins — deleting this means re-recording
+    /// them on the engine path first). Everything else uses `queue_garbage`.
     pub fn insert_garbage(&mut self, count: usize, hole_col: usize) -> bool {
         // A finished game accepts no more garbage: the board stays a faithful
         // record of how it ended, and the latched game-over reason is never
@@ -907,11 +913,8 @@ mod tests {
         let mut engine = Engine::new(config.clone(), 0);
         let first_piece_type = engine.snapshot().next_queue[0];
         let piece = Piece::from(first_piece_type);
-        let board = Board::with_top_margin(
-            config.board_width,
-            config.visible_height,
-            config.buffer_height,
-        );
+        let board =
+            Board::with_top_margin(config.board_width, config.visible_height, BUFFER_HEIGHT);
         let spawn_origin = piece.spawn_coords(config.board_width, config.visible_height);
         let expected_origin = piece
             .try_move(&board, spawn_origin, MoveDirection::Down)
@@ -1618,7 +1621,6 @@ mod tests {
             // is board-independent.
             let config = EngineConfig {
                 visible_height: 40,
-                buffer_height: 20,
                 ..EngineConfig::default()
             };
             let mut engine = Engine::new(config, seed);

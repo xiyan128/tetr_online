@@ -11,7 +11,6 @@ use std::fmt::{Display, Write};
 
 use crate::engine::pieces::PieceType;
 use array2d::Array2D;
-use itertools::iproduct;
 use smallvec::{smallvec, SmallVec};
 
 #[derive(Clone)]
@@ -86,10 +85,6 @@ impl Board {
         } else {
             CellKind::None
         }
-    }
-
-    pub fn coords(&self) -> impl Iterator<Item = (isize, isize)> {
-        iproduct!(0..self.width as isize, 0..self.height as isize)
     }
 
     pub fn cell_coords(&self) -> Vec<(isize, isize)> {

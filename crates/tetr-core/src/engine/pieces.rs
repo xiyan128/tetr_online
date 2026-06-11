@@ -206,17 +206,6 @@ impl Piece {
         shape
     }
 
-    pub fn board(&self) -> Board {
-        let (width, height) = self.board_size();
-        let mut board = Board::new(width, height);
-
-        for (x, y) in self.cells() {
-            board.set(x, y, CellKind::Some(self.piece_type));
-        }
-
-        board
-    }
-
     fn rotate_shape(height: usize, shape: &mut [(isize, isize)], n: u8) {
         for _ in 0..n {
             for (x, y) in shape.iter_mut() {
@@ -340,8 +329,7 @@ mod tests {
 
     fn global_cells(piece: &Piece, offset: (isize, isize)) -> Vec<(isize, isize)> {
         let mut cells = piece
-            .board()
-            .cell_coords()
+            .cells()
             .into_iter()
             .map(|(x, y)| (x + offset.0, y + offset.1))
             .collect::<Vec<_>>();
@@ -379,10 +367,14 @@ mod tests {
 
             for rotation in PieceRotation::all() {
                 piece.rotate_to(rotation);
+                // Four DISTINCT cells: the array is always length 4, so the real
+                // property is that no two cells of the rotated shape coincide.
+                let unique: std::collections::HashSet<(isize, isize)> =
+                    piece.cells().into_iter().collect();
                 assert_eq!(
-                    piece.board().cells().len(),
+                    unique.len(),
                     4,
-                    "{piece_type:?} at {rotation:?} should occupy four cells"
+                    "{piece_type:?} at {rotation:?} should occupy four distinct cells"
                 );
             }
         }

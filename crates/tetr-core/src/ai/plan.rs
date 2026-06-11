@@ -333,7 +333,7 @@ mod tests {
         let config = EngineConfig::default();
         let w = config.board_width;
         let h = config.visible_height;
-        let board = Board::with_top_margin(w, h, config.buffer_height);
+        let board = Board::with_top_margin(w, h, crate::engine::BUFFER_HEIGHT);
         let seed = 7;
 
         let spawned = Engine::new(config.clone(), seed)
@@ -412,7 +412,7 @@ mod tests {
         let config = EngineConfig::default();
         let w = config.board_width;
         let h = config.visible_height;
-        let buffer = config.buffer_height;
+        let buffer = crate::engine::BUFFER_HEIGHT;
         let seed = 7;
         let shelf_y = 4;
 

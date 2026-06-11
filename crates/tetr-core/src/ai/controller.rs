@@ -440,7 +440,7 @@ mod tests {
                 let mut real = Board::with_top_margin(
                     config.board_width,
                     config.visible_height,
-                    config.buffer_height,
+                    crate::engine::BUFFER_HEIGHT,
                 );
                 for c in &after.board_cells {
                     real.set(c.x, c.y, CellKind::Some(c.piece_type));
