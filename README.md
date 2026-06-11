@@ -76,6 +76,10 @@ The codebase is split along one hard boundary:
 - **The Bevy host** (`src/`) drives the engine through a small plain-data
   contract — `InputFrame` in, `EngineSnapshot` and `EngineEvent` out — and owns
   rendering, audio, input, menus, persistence, and the Watch-AI model registry.
+  Every game runs on one pipeline: a *session* of seat entities, one per board,
+  each seat driven by a human or a bot through the same controller seam —
+  single-player is simply the one-seat case of versus
+  (see `docs/adr-versus-mode-ui.md`).
 - **`crates/tetr-embed`** wraps the same core as a tiny headless wasm widget;
   **`crates/tetr-research`** is the benchmark harness (APP suites, bot-vs-bot
   versus, the Cold Clear 2 referee).
