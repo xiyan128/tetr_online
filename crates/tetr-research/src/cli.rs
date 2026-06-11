@@ -22,6 +22,11 @@ pub fn env_usize(key: &str, default: usize) -> usize {
     env_or(key, default)
 }
 
+/// [`env_or`] specialized to `f64` (rates, sigmas, SPRT hypotheses).
+pub fn env_f64(key: &str, default: f64) -> f64 {
+    env_or(key, default)
+}
+
 /// A tiny deterministic [SplitMix64](https://prng.di.unimi.it/splitmix64.c) PRNG —
 /// the hill-climbers' mutation / jitter source. No `rand` dependency and fully
 /// reproducible from the seed, so a climb replays bit-for-bit.

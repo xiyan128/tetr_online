@@ -23,7 +23,7 @@ use std::time::{Duration, Instant};
 
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
-use tetr_research::cli::env_usize;
+use tetr_research::cli::{env_f64, env_usize};
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{beam_cc2_weights_bot, VersusFormat};
 
@@ -43,13 +43,6 @@ const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
     4.478_138_4,
     3.782_923,
 ];
-
-fn env_f64(key: &str, default: f64) -> f64 {
-    std::env::var(key)
-        .ok()
-        .and_then(|v| v.parse().ok())
-        .unwrap_or(default)
-}
 
 fn main() {
     let budget_secs = env_usize("TIME_BUDGET_SECS", 3600) as u64;

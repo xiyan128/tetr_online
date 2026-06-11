@@ -76,7 +76,7 @@ use std::time::Instant;
 
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
-use tetr_research::cli::{env_usize, SplitMix64};
+use tetr_research::cli::{env_f64, env_usize, SplitMix64};
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
 use tetr_research::{
     beam_cc2_weights_bot, evaluate_versus_format, seed_set, seed_set_from, VersusFormat,
@@ -136,10 +136,7 @@ fn main() {
         max_plies: env_usize("MAX_PLIES", 240) as u32,
         rain_period: env_usize("RAIN_PERIOD", 8) as u32,
     };
-    let mut sigma = std::env::var("SIGMA")
-        .ok()
-        .and_then(|v| v.parse::<f64>().ok())
-        .unwrap_or(0.15);
+    let mut sigma = env_f64("SIGMA", 0.15);
     let mut rng = SplitMix64::new(env_usize("CLIMB_SEED", 1) as u64);
 
     eprintln!(
