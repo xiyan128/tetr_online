@@ -1,19 +1,21 @@
-//! The programmatic mino skin: piece-connected, three-tone, faceted.
+//! The programmatic mino skin: piece-connected, woven, pixel-rounded.
 //!
-//! A faithful hi-bit recreation of the original `assets/textures/block_tile.png`
-//! (an 8×8 three-tone tile: dark border, mid body, and a bright eight-point
-//! faceted core), repainted in code at 32×32 so the tones derive from the
-//! Kissaten piece palette instead of a grayscale multiply:
+//! Descended from the original `assets/textures/block_tile.png` (dark border
+//! around a lighter body) but repainted in code at 32×32 with the texture
+//! living at the PIECE level, never as a per-cell motif:
 //!
-//! * **edge** — the base color darkened, drawn only on EXPOSED sides (where
-//!   the neighbor is empty or a different kind). Cells of one piece share a
-//!   single perimeter, so a tetromino reads as one designed object while two
-//!   touching pieces keep a clear mortar seam between them.
-//! * **body** — the muted Kissaten piece color, flat.
-//! * **core** — the original's faceted diamond, scaled 4×, slightly lifted.
-//!   One facet per cell keeps every mino countable at speed even inside a
-//!   merged piece. Garbage is deliberately facet-LESS: dead weight doesn't
-//!   sparkle.
+//! * **edge** — the base color slightly darkened, drawn only on EXPOSED
+//!   sides (where the neighbor is empty or a different kind). Cells of one
+//!   piece share a single perimeter, so a tetromino reads as one designed
+//!   object while two touching pieces keep a mortar seam between them.
+//! * **weave** — a fine 4 px-period grain of faintly darker texels across
+//!   the body. Its period divides the cell, so it tiles seamlessly over a
+//!   whole piece: cloth-like material, the same grain vocabulary as the
+//!   ambient background — texture, not ornament. Garbage is weave-LESS:
+//!   dead weight has no nap.
+//! * **rounded corners** — where two exposed sides meet, the outermost 2×2
+//!   texels are cut to transparent, pixel-rounding the SILHOUETTE of the
+//!   piece (interior cells of a merged piece keep their square corners).
 //!
 //! All 8 kinds × 16 neighbor masks are painted once at startup into a
 //! [`MinoSkin`] resource; a cell is then a single textured sprite. Hard
@@ -32,12 +34,12 @@ pub const MINO_TEXTURE_SIZE: usize = 32;
 /// Exposed-edge thickness, px (the original's 1 px border at tile scale,
 /// halved for the hi-bit size so the seam stays fine).
 const EDGE_PX: usize = 2;
-/// Tone offsets. The core keeps the original tile's +7%-ish lift; the edge
-/// is deliberately SOFTER than the original's −22% border — at −12% it reads
-/// as shading on the tile itself, so the body fills its whole square instead
-/// of floating as a rectangle inside a dark recess.
+/// Tone offsets. The edge is deliberately SOFTER than the original tile's
+/// −22% border — at −12% it reads as shading on the tile itself, so the body
+/// fills its whole square instead of floating inside a dark recess. The
+/// weave is barely-there: material tooth, invisible as a shape.
 const EDGE_DARKEN: f32 = 0.12;
-const CORE_LIGHTEN: f32 = 0.10;
+const WEAVE_DARKEN: f32 = 0.05;
 
 /// Neighbor-mask bits: a set bit means "same kind continues that way", and
 /// that side is painted seamless instead of edged.
@@ -46,18 +48,9 @@ pub const MASK_E: u8 = 2;
 pub const MASK_S: u8 = 4;
 pub const MASK_W: u8 = 8;
 
-/// The original tile's faceted core, row by row (top to bottom): an
-/// eight-point diamond. `1` bits are core texels at 8×8 scale.
-const FACET_ROWS: [u8; 8] = [
-    0b0000_0000,
-    0b0010_0100,
-    0b0001_1000,
-    0b0011_1100,
-    0b0011_1100,
-    0b0001_1000,
-    0b0010_0100,
-    0b0000_0000,
-];
+/// Silhouette corner rounding, in texels: where two exposed sides meet, this
+/// square at the outermost corner is cut to transparent.
+const CORNER_CUT_PX: usize = 2;
 
 /// A paintable cell kind: the seven pieces, or garbage.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -138,6 +131,7 @@ pub fn build_mino_skin(mut commands: Commands, images: Option<ResMut<Assets<Imag
 /// One mino texture for a kind + neighbor mask, as an RGBA image.
 fn paint_mino(kind: MinoKind, mask: u8) -> Image {
     let pixels = paint_mino_pixels(kind.base_color(), mask, kind != MinoKind::Garbage);
+    debug_assert_eq!(pixels.len(), MINO_TEXTURE_SIZE * MINO_TEXTURE_SIZE * 4);
     Image::new(
         Extent3d {
             width: MINO_TEXTURE_SIZE as u32,
@@ -151,25 +145,47 @@ fn paint_mino(kind: MinoKind, mask: u8) -> Image {
     )
 }
 
-/// The pure painter: edge tone on exposed sides, flat body, and (for live
-/// pieces) the original's faceted core scaled 4×. Returns RGBA bytes, row 0
-/// at the TOP of the texture (sprite v axis) — callers pass a mask in board
-/// space, so north (`MASK_N`, y+1 on the board) is the top edge here.
-fn paint_mino_pixels(base: [u8; 3], mask: u8, faceted: bool) -> Vec<u8> {
+/// The pure painter: edge tone on exposed sides, a seamless 4 px weave over
+/// the body (live pieces only), and transparent corner cuts where two
+/// exposed sides meet. Returns RGBA bytes, row 0 at the TOP of the texture
+/// (sprite v axis) — callers pass a mask in board space, so north
+/// (`MASK_N`, y+1 on the board) is the top edge here.
+fn paint_mino_pixels(base: [u8; 3], mask: u8, woven: bool) -> Vec<u8> {
     let size = MINO_TEXTURE_SIZE;
     let edge = shade(base, -EDGE_DARKEN);
-    let core = shade(base, CORE_LIGHTEN);
+    let weave = shade(base, -WEAVE_DARKEN);
+    let exposed_n = mask & MASK_N == 0;
+    let exposed_s = mask & MASK_S == 0;
+    let exposed_w = mask & MASK_W == 0;
+    let exposed_e = mask & MASK_E == 0;
     let mut pixels = Vec::with_capacity(size * size * 4);
     for y in 0..size {
         for x in 0..size {
-            let exposed_n = mask & MASK_N == 0 && y < EDGE_PX;
-            let exposed_s = mask & MASK_S == 0 && y >= size - EDGE_PX;
-            let exposed_w = mask & MASK_W == 0 && x < EDGE_PX;
-            let exposed_e = mask & MASK_E == 0 && x >= size - EDGE_PX;
-            let tone = if exposed_n || exposed_s || exposed_w || exposed_e {
+            // Silhouette rounding: cut the outermost corner block wherever
+            // two exposed sides meet.
+            let near_n = y < CORNER_CUT_PX;
+            let near_s = y >= size - CORNER_CUT_PX;
+            let near_w = x < CORNER_CUT_PX;
+            let near_e = x >= size - CORNER_CUT_PX;
+            let cut = (exposed_n && exposed_w && near_n && near_w)
+                || (exposed_n && exposed_e && near_n && near_e)
+                || (exposed_s && exposed_w && near_s && near_w)
+                || (exposed_s && exposed_e && near_s && near_e);
+            if cut {
+                pixels.extend_from_slice(&[0, 0, 0, 0]);
+                continue;
+            }
+            let on_edge = (exposed_n && y < EDGE_PX)
+                || (exposed_s && y >= size - EDGE_PX)
+                || (exposed_w && x < EDGE_PX)
+                || (exposed_e && x >= size - EDGE_PX);
+            // The weave's 4 px period divides the cell, so the grain runs
+            // unbroken across every cell of a connected piece.
+            let on_weave = woven && matches!((x % 4, y % 4), (0, 0) | (2, 2));
+            let tone = if on_edge {
                 edge
-            } else if faceted && FACET_ROWS[y / 4] & (0x80 >> (x / 4)) != 0 {
-                core
+            } else if on_weave {
+                weave
             } else {
                 base
             };
@@ -251,8 +267,9 @@ mod tests {
         let connected_north = paint_mino_pixels(base, MASK_N, true);
         // Isolated: the top row is the edge tone, darker than the body.
         assert_eq!(texel(&isolated, 16, 0), shade(base, -EDGE_DARKEN));
-        // Connected to the north: the top row continues the body seamlessly.
-        assert_eq!(texel(&connected_north, 16, 0), base);
+        // Connected to the north: the top row continues the body seamlessly
+        // (probe a non-weave texel: x % 4 == 1).
+        assert_eq!(texel(&connected_north, 17, 0), base);
         // The other three sides stay edged either way.
         assert_eq!(
             texel(&connected_north, 16, MINO_TEXTURE_SIZE - 1),
@@ -261,19 +278,41 @@ mod tests {
     }
 
     #[test]
-    fn the_facet_core_matches_the_original_tile() {
+    fn the_weave_is_seamless_across_cells_and_garbage_has_none() {
         let base = [120, 120, 120];
+        // Fully connected cell: pure body + weave, no edges, no cuts.
         let pixels = paint_mino_pixels(base, 0xF, true);
-        let core = shade(base, CORE_LIGHTEN);
-        // Center of the diamond (original texel 3,3 → 4× block at 12..16).
-        assert_eq!(texel(&pixels, 14, 14), core);
-        // The corner sparks (original texel 2,1).
-        assert_eq!(texel(&pixels, 10, 6), core);
-        // Between spark and diamond stays body (original texel 3,1 is mid).
-        assert_eq!(texel(&pixels, 14, 6), base);
-        // Garbage never sparkles.
+        let weave = shade(base, -WEAVE_DARKEN);
+        assert_eq!(texel(&pixels, 8, 8), weave);
+        assert_eq!(texel(&pixels, 10, 10), weave);
+        assert_eq!(texel(&pixels, 9, 9), base);
+        // 4 px period divides the 32 px cell, so the pattern at one cell's
+        // last column continues at the next cell's first column: the texel
+        // pattern is purely position-mod-4, identical across the boundary.
+        assert_eq!(texel(&pixels, 0, 0), texel(&pixels, 28, 28));
+        // Garbage has no nap.
         let garbage = paint_mino_pixels(base, 0xF, false);
-        assert_eq!(texel(&garbage, 14, 14), base);
+        assert_eq!(texel(&garbage, 8, 8), base);
+    }
+
+    #[test]
+    fn silhouette_corners_round_only_where_two_exposed_sides_meet() {
+        let base = [120, 120, 120];
+        let alpha = |pixels: &[u8], x: usize, y: usize| pixels[(y * MINO_TEXTURE_SIZE + x) * 4 + 3];
+        // Isolated cell: all four corners cut.
+        let isolated = paint_mino_pixels(base, 0, true);
+        assert_eq!(alpha(&isolated, 0, 0), 0);
+        assert_eq!(
+            alpha(&isolated, MINO_TEXTURE_SIZE - 1, MINO_TEXTURE_SIZE - 1),
+            0
+        );
+        // Connected to the east: the two right corners stay square (opaque).
+        let joined = paint_mino_pixels(base, MASK_E, true);
+        assert_eq!(alpha(&joined, MINO_TEXTURE_SIZE - 1, 0), 0xFF);
+        assert_eq!(alpha(&joined, 0, 0), 0);
+        // Interior cell of a piece: no cuts anywhere.
+        let interior = paint_mino_pixels(base, 0xF, true);
+        assert_eq!(alpha(&interior, 0, 0), 0xFF);
     }
 
     #[test]
