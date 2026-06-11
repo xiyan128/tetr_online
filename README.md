@@ -87,10 +87,10 @@ Defaults (all remappable in **Options**):
 
 | Action | Key |
 | --- | --- |
-| Move left / right | ← / → |
-| Soft drop | ↓ |
+| Move left / right | ← / → or A / D |
+| Soft drop | ↓ or S |
 | Hard drop | Space |
-| Rotate clockwise | ↑ or X |
+| Rotate clockwise | ↑ or W |
 | Rotate counter-clockwise | Z |
 | Hold | Left Shift |
 | Pause | Esc |

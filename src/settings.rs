@@ -73,9 +73,8 @@ impl GameAction {
 /// Action→keys binding map.
 ///
 /// Each action may bind to a primary and an optional secondary [`KeyCode`]
-/// (e.g. rotate-CW defaults to both `ArrowUp` and `KeyX`, matching the existing
-/// hard-coded controller). The keyboard controller reads `pressed`/`just_pressed`
-/// for *either* key.
+/// (e.g. rotate-CW defaults to both `ArrowUp` and `KeyW`). The keyboard
+/// controller reads `pressed`/`just_pressed` for *either* key.
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[reflect(Resource)]
 // A missing binding falls back to its default, so older/partial blobs still load.
@@ -94,16 +93,17 @@ pub struct Keybinds {
 }
 
 impl Default for Keybinds {
-    /// The original hard-coded mapping, now just the default: arrows for
-    /// move/soft-drop, Space = hard drop, Up/X = rotate CW, Z = rotate CCW,
-    /// LeftShift = hold, Escape = pause.
+    /// Arrows OR WASD out of the box: arrows/AD for movement, Down/S soft
+    /// drop, Up/W rotate CW (W mirrors ArrowUp, displacing the old redundant
+    /// X alias), Z = rotate CCW, Space = hard drop, LeftShift = hold,
+    /// Escape = pause. Both hand positions work without a trip to Options.
     fn default() -> Self {
         Self {
-            move_left: (KeyCode::ArrowLeft, None),
-            move_right: (KeyCode::ArrowRight, None),
-            soft_drop: (KeyCode::ArrowDown, None),
+            move_left: (KeyCode::ArrowLeft, Some(KeyCode::KeyA)),
+            move_right: (KeyCode::ArrowRight, Some(KeyCode::KeyD)),
+            soft_drop: (KeyCode::ArrowDown, Some(KeyCode::KeyS)),
             hard_drop: (KeyCode::Space, None),
-            rotate_cw: (KeyCode::ArrowUp, Some(KeyCode::KeyX)),
+            rotate_cw: (KeyCode::ArrowUp, Some(KeyCode::KeyW)),
             rotate_ccw: (KeyCode::KeyZ, None),
             hold: (KeyCode::ShiftLeft, None),
             pause: (KeyCode::Escape, None),
@@ -270,11 +270,24 @@ mod tests {
     }
 
     #[test]
-    fn rotate_cw_defaults_to_arrow_up_and_x() {
+    fn the_default_map_covers_arrows_and_wasd() {
         let binds = Keybinds::default();
         assert_eq!(
             binds.get(GameAction::RotateCw),
-            (KeyCode::ArrowUp, Some(KeyCode::KeyX))
+            (KeyCode::ArrowUp, Some(KeyCode::KeyW)),
+            "W mirrors ArrowUp so a WASD hand can rotate"
+        );
+        assert_eq!(
+            binds.get(GameAction::MoveLeft),
+            (KeyCode::ArrowLeft, Some(KeyCode::KeyA))
+        );
+        assert_eq!(
+            binds.get(GameAction::MoveRight),
+            (KeyCode::ArrowRight, Some(KeyCode::KeyD))
+        );
+        assert_eq!(
+            binds.get(GameAction::SoftDrop),
+            (KeyCode::ArrowDown, Some(KeyCode::KeyS))
         );
     }
 
@@ -316,12 +329,12 @@ mod tests {
 
     #[test]
     fn secondary_keybind_alias_survives_a_round_trip() {
-        // The default rotate-CW binds a secondary alias (X); the round trip must
+        // The default rotate-CW binds a secondary alias (W); the round trip must
         // keep the full (primary, secondary) tuple, not just the primary.
         let decoded = decode_settings(&encode_settings(&GameSettings::default())).unwrap();
         assert_eq!(
             decoded.keybinds.get(GameAction::RotateCw),
-            (KeyCode::ArrowUp, Some(KeyCode::KeyX))
+            (KeyCode::ArrowUp, Some(KeyCode::KeyW))
         );
     }
 
