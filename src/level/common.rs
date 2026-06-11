@@ -5,8 +5,6 @@
 //! (`src/session/render.rs`); nothing here touches a schedule.
 
 use crate::engine::{LockDownMode, PieceType};
-#[cfg(feature = "bloom")]
-use bevy::color::LinearRgba;
 use bevy::math::{IVec2, Vec3};
 use bevy::prelude::{Color, Component, Reflect, ReflectComponent, ReflectResource, Resource};
 use std::time::Duration;
@@ -87,31 +85,4 @@ pub fn piece_color(piece_type: PieceType) -> Color {
         PieceType::T => Color::srgb_u8(156, 110, 150), // purple #9C6E96
         PieceType::Z => Color::srgb_u8(194, 85, 76),   // red    #C2554C
     }
-}
-
-/// Multiplier that lifts mino colors past the bloom threshold so they glow
-/// under the neon pass. Only compiled with the opt-in `bloom` feature — every
-/// default build uses the plain palette (and on WebGL2 an over-bright color
-/// would merely clamp to a washed-out white anyway).
-#[cfg(feature = "bloom")]
-const MINO_GLOW: f32 = 1.6;
-
-/// On-screen color for a piece's minos: the plain [`piece_color`], or — on
-/// opt-in `--features bloom` builds only — that color lifted into HDR for the
-/// glow. The hue is preserved (all channels scale together); the brightest
-/// channels clip to a neon-white core while bloom carries the color out into
-/// the halo.
-pub fn mino_render_color(piece_type: PieceType) -> Color {
-    let base = piece_color(piece_type);
-    #[cfg(feature = "bloom")]
-    {
-        let c = base.to_linear();
-        Color::LinearRgba(LinearRgba::rgb(
-            c.red * MINO_GLOW,
-            c.green * MINO_GLOW,
-            c.blue * MINO_GLOW,
-        ))
-    }
-    #[cfg(not(feature = "bloom"))]
-    base
 }

@@ -6,10 +6,11 @@
 //! 0.18's built-in bloom is also not WebGL2-compatible, so it could never
 //! join the WebGL2 bundle anyway.
 //!
-//! The glow itself comes from over-bright (`> 1.0`) mino colors — gated on the same
-//! feature in [`crate::level::common`] — rising past the bloom threshold. Everything
-//! else stays at LDR (`<= 1.0`), so the board background and UI text never bloom and
-//! the image stays crisp.
+//! The glow itself comes from over-bright (`> 1.0`) mino sprites — the
+//! skinned cells in `session::render` tint their textures past 1.0 under
+//! this feature — rising past the bloom threshold. Everything else stays at
+//! LDR (`<= 1.0`), so the board background and UI text never bloom and the
+//! image stays crisp.
 //!
 //! Bloom is attached only to the [`GameplayCamera`] (HDR is auto-required by the
 //! `Bloom` component), so the menus keep their flat look.

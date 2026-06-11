@@ -28,6 +28,7 @@ use crate::player::{KeyboardController, PlayerController, RawKeyboardFrame};
 mod feel;
 mod overlay;
 pub(crate) mod render;
+pub(crate) mod skin;
 
 /// Lifecycle of a live session, as a sub-state of [`GameState::Session`] —
 /// the session (seat entities, boards, camera) is scoped to the outer state,

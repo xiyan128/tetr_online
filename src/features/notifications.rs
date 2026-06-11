@@ -215,7 +215,7 @@ fn spawn_hard_drop_trail(
                 crate::level::common::piece_color(color.0).with_alpha(TRAIL_PEAK_ALPHA),
                 Vec2::new(block, streak_height),
             ),
-            // Behind the minos but in front of the background grid.
+            // Behind the minos but in front of the field backplate.
             Transform::from_translation(origin + Vec3::new(base.x, base.y, -0.05)),
             Anchor::BOTTOM_LEFT,
             DespawnOnExit(GameState::Session),

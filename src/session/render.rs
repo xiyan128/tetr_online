@@ -1,7 +1,8 @@
 //! Session rendering: a board group per seat, everything parented to it.
 //!
 //! Each seat gets a **board root** entity at its world-space origin; the
-//! field chrome (gridlines + frame), the mino layers (locked / falling / ghost), the hold and
+//! field chrome (backplate + frame), the mino layers (locked / falling /
+//! ghost, all skinned by `session::skin`), the hold and
 //! preview columns, the garbage meter, and the seat texts are all children of
 //! (or anchored to) that root — position is one transform, despawn is one
 //! subtree, and a future mirrored layout is a per-root parameter. One camera
@@ -20,11 +21,15 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
+use std::collections::{HashMap, HashSet};
+
 use crate::GameState;
 use crate::assets::GameAssets;
 use crate::engine::{Piece, PieceType, SnapshotCell};
-use crate::level::common::{GameplayCamera, mino_render_color, to_translation};
+use crate::level::common::{GameplayCamera, to_translation};
 use crate::ui::widgets::theme;
+
+use super::skin::{self, MinoKind, MinoSkin};
 
 use super::{Participant, Seat, SeatSnapshot, SeatStats, SessionConfig};
 
@@ -72,12 +77,6 @@ impl SessionLayout {
         };
         (width_cells * Self::BLOCK, 25.0 * Self::BLOCK)
     }
-}
-
-/// Warm gray for garbage cells (`theme::GARBAGE`) — zero chroma, so it reads
-/// as dead weight next to any live piece.
-pub fn garbage_color() -> Color {
-    crate::ui::widgets::theme::GARBAGE
 }
 
 /// A seat's render anchor; all of the seat's visuals hang off this entity.
@@ -144,7 +143,8 @@ pub struct SessionRenderPlugin;
 
 impl Plugin for SessionRenderPlugin {
     fn build(&self, app: &mut App) {
-        app.add_systems(OnEnter(GameState::Session), setup_scene)
+        app.add_systems(Startup, skin::build_mino_skin)
+            .add_systems(OnEnter(GameState::Session), setup_scene)
             .add_systems(
                 Update,
                 (
@@ -163,32 +163,38 @@ impl Plugin for SessionRenderPlugin {
     }
 }
 
-/// Fraction of a cell left as the articulation gap — 2 px at the 32 px desktop
-/// cell, scaling with the hold/preview avatars. Minos are flat fills separated
-/// by this gap; the gap (showing the `GRID`-lined ground) is the articulation,
-/// no bevels and no per-cell texture.
-const CELL_GAP_FRACTION: f32 = 2.0 / 32.0;
+/// Ghost-outline stroke thickness as a fraction of the cell — matches the
+/// skin's exposed-edge seam so the outline speaks the same pixel dialect.
+const GHOST_STROKE_FRACTION: f32 = 2.0 / 32.0;
 
-/// One mino chiclet at board-relative cell `(x, y)` — the block primitive: a
-/// flat color fill inset by half the articulation gap on every side. Colour is
-/// a parameter rather than derived from `PieceType`, because garbage cells
-/// have no piece type.
-fn block_sprite(block_size: f32, x: isize, y: isize, color: Color, z: f32) -> impl Bundle + use<> {
-    let gap = block_size * CELL_GAP_FRACTION;
-    let sprite = Sprite::from_color(color, Vec2::splat(block_size - gap));
-    let mut transform = Transform::from_translation(
-        to_translation(x, y, block_size) + Vec3::new(gap / 2.0, gap / 2.0, 0.0),
-    );
+/// One textured mino at board-relative cell `(x, y)`: a single sprite over
+/// the painted skin (`session::skin`), full cell size — adjacency is drawn
+/// INTO the texture (the neighbor mask), not left as a gap. On opt-in bloom
+/// builds the sprite tint lifts the texture into HDR for the glow.
+fn block_sprite(
+    image: Handle<Image>,
+    block_size: f32,
+    x: isize,
+    y: isize,
+    z: f32,
+) -> impl Bundle + use<> {
+    let mut sprite = Sprite::from_image(image);
+    sprite.custom_size = Some(Vec2::splat(block_size));
+    #[cfg(feature = "bloom")]
+    {
+        sprite.color = Color::srgb(1.6, 1.6, 1.6);
+    }
+    let mut transform = Transform::from_translation(to_translation(x, y, block_size));
     transform.translation.z = z;
     (sprite, transform, Anchor::BOTTOM_LEFT)
 }
 
-/// The colour of a snapshot cell: garbage gray, or the piece's render colour.
-fn cell_color(cell: &SnapshotCell) -> Color {
+/// The skin kind of a snapshot cell: garbage, or its piece.
+fn cell_kind(cell: &SnapshotCell) -> MinoKind {
     if cell.garbage {
-        garbage_color()
+        MinoKind::Garbage
     } else {
-        mino_render_color(cell.piece_type)
+        MinoKind::Piece(cell.piece_type)
     }
 }
 
@@ -215,9 +221,10 @@ fn setup_scene(
 
         // Field chrome, drawn once: an opaque `BG` backplate (the board
         // interior is exactly the ground — it blocks the ambient background
-        // layer and anchors "the field never changes"), gridlines in `GRID`
-        // (the 2 px articulation the chiclets sit between), and a 1 px
-        // `FRAME` border just outside the field.
+        // layer and anchors "the field never changes") and a 1 px `FRAME`
+        // border just outside the field. No gridlines: the field is calm
+        // open ground, and the mino skin's connected edges carry all the
+        // articulation.
         let board_w = SessionLayout::BOARD_W as f32 * block;
         let board_h = SessionLayout::BOARD_H as f32 * block;
         let mut chrome = Vec::new();
@@ -230,28 +237,6 @@ fn setup_scene(
                 ))
                 .id(),
         );
-        for x in 1..SessionLayout::BOARD_W {
-            chrome.push(
-                commands
-                    .spawn((
-                        Sprite::from_color(theme::GRID, Vec2::new(2.0, board_h)),
-                        Transform::from_translation(Vec3::new(x as f32 * block - 1.0, 0.0, -1.0)),
-                        Anchor::BOTTOM_LEFT,
-                    ))
-                    .id(),
-            );
-        }
-        for y in 1..SessionLayout::BOARD_H {
-            chrome.push(
-                commands
-                    .spawn((
-                        Sprite::from_color(theme::GRID, Vec2::new(board_w, 2.0)),
-                        Transform::from_translation(Vec3::new(0.0, y as f32 * block - 1.0, -1.0)),
-                        Anchor::BOTTOM_LEFT,
-                    ))
-                    .id(),
-            );
-        }
         // The frame's four edges carry `BoardFrame` so the danger pass can
         // warm them toward `ATTACK` as the stack climbs.
         let frame_edges = [
@@ -490,6 +475,7 @@ fn layer_for(
 /// cached cells, exactly like the single-player reconciler).
 fn reconcile_locked_boards(
     mut commands: Commands,
+    minos: Res<MinoSkin>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
     mut cache: Local<[Option<Vec<SnapshotCell>>; 2]>,
@@ -504,15 +490,26 @@ fn reconcile_locked_boards(
             continue;
         };
         commands.entity(layer).despawn_related::<Children>();
+        // Connectedness: a cell merges (seamless side) with same-kind
+        // neighbors, so a piece shares one perimeter and garbage reads as a
+        // slab; different kinds keep the mortar seam between them.
+        let kinds: HashMap<(isize, isize), MinoKind> = cells
+            .iter()
+            .map(|cell| ((cell.x, cell.y), cell_kind(cell)))
+            .collect();
         let ids: Vec<Entity> = cells
             .iter()
             .map(|cell| {
+                let kind = cell_kind(cell);
+                let mask = skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
+                    kinds.get(&(x, y)) == Some(&kind)
+                });
                 commands
                     .spawn(block_sprite(
+                        minos.handle(kind, mask),
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
-                        cell_color(cell),
                         0.0,
                     ))
                     .id()
@@ -526,6 +523,7 @@ fn reconcile_locked_boards(
 /// Rebuild each seat's falling piece every frame (4 sprites; always in sync).
 fn reconcile_active_pieces(
     mut commands: Commands,
+    minos: Res<MinoSkin>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
 ) {
@@ -537,16 +535,20 @@ fn reconcile_active_pieces(
         let Some(active) = snapshot.0.active.as_ref() else {
             continue;
         };
+        // The four cells are one piece by definition: they merge into a
+        // single connected object with one shared perimeter.
+        let occupied: HashSet<(isize, isize)> = active.cells.iter().map(|c| (c.x, c.y)).collect();
         let ids: Vec<Entity> = active
             .cells
             .iter()
             .map(|cell| {
+                let mask = skin::neighbor_mask(cell.x, cell.y, &occupied);
                 commands
                     .spawn(block_sprite(
+                        minos.handle(cell_kind(cell), mask),
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
-                        cell_color(cell),
                         0.0,
                     ))
                     .id()
@@ -559,33 +561,47 @@ fn reconcile_active_pieces(
 /// The ghost is an outline, never a fill (`theme::TEXT` at 35%): four hairline
 /// edges per cell, stroke as thick as the articulation gap. Readable at a
 /// glance and never mistakable for a placed mino.
-fn ghost_cell_outline(commands: &mut Commands, block: f32, x: isize, y: isize) -> [Entity; 4] {
-    let gap = block * CELL_GAP_FRACTION;
-    let side = block - gap; // the chiclet footprint the outline traces
-    let stroke = gap;
-    let base = to_translation(x, y, block) + Vec3::new(gap / 2.0, gap / 2.0, -0.1);
+/// Outline edges for one ghost cell, EXPOSED sides only (`mask` as in the
+/// mino skin): the ghost traces the piece's connected silhouette, matching
+/// the skin's shared-perimeter language, never a per-cell lattice.
+fn ghost_cell_outline(
+    commands: &mut Commands,
+    block: f32,
+    x: isize,
+    y: isize,
+    mask: u8,
+) -> Vec<Entity> {
+    let stroke = block * GHOST_STROKE_FRACTION;
+    let base = to_translation(x, y, block) + Vec3::new(0.0, 0.0, -0.1);
     let color = theme::TEXT.with_alpha(0.35);
+    // (mask bit, offset, size): the full side, so silhouette corners meet.
     let edges = [
-        (Vec2::new(0.0, 0.0), Vec2::new(side, stroke)),
-        (Vec2::new(0.0, side - stroke), Vec2::new(side, stroke)),
+        (skin::MASK_S, Vec2::new(0.0, 0.0), Vec2::new(block, stroke)),
         (
-            Vec2::new(0.0, stroke),
-            Vec2::new(stroke, side - 2.0 * stroke),
+            skin::MASK_N,
+            Vec2::new(0.0, block - stroke),
+            Vec2::new(block, stroke),
         ),
+        (skin::MASK_W, Vec2::new(0.0, 0.0), Vec2::new(stroke, block)),
         (
-            Vec2::new(side - stroke, stroke),
-            Vec2::new(stroke, side - 2.0 * stroke),
+            skin::MASK_E,
+            Vec2::new(block - stroke, 0.0),
+            Vec2::new(stroke, block),
         ),
     ];
-    edges.map(|(offset, size)| {
-        commands
-            .spawn((
-                Sprite::from_color(color, size),
-                Transform::from_translation(base + offset.extend(0.0)),
-                Anchor::BOTTOM_LEFT,
-            ))
-            .id()
-    })
+    edges
+        .into_iter()
+        .filter(|(bit, _, _)| mask & bit == 0)
+        .map(|(_, offset, size)| {
+            commands
+                .spawn((
+                    Sprite::from_color(color, size),
+                    Transform::from_translation(base + offset.extend(0.0)),
+                    Anchor::BOTTOM_LEFT,
+                ))
+                .id()
+        })
+        .collect()
 }
 
 /// Rebuild each seat's ghost every frame (hidden when grounded or disabled).
@@ -611,12 +627,15 @@ fn reconcile_ghost_pieces(
         if landed {
             continue;
         }
+        let occupied: HashSet<(isize, isize)> =
+            snapshot.0.ghost_cells.iter().map(|c| (c.x, c.y)).collect();
         let ids: Vec<Entity> = snapshot
             .0
             .ghost_cells
             .iter()
             .flat_map(|cell| {
-                ghost_cell_outline(&mut commands, SessionLayout::BLOCK, cell.x, cell.y)
+                let mask = skin::neighbor_mask(cell.x, cell.y, &occupied);
+                ghost_cell_outline(&mut commands, SessionLayout::BLOCK, cell.x, cell.y, mask)
             })
             .collect();
         commands.entity(layer).add_children(&ids);
@@ -680,6 +699,7 @@ fn reconcile_garbage_meters(
 /// avatar's world height so callers can stack entries.
 fn spawn_avatar(
     commands: &mut Commands,
+    minos: &MinoSkin,
     parent: Entity,
     piece_type: PieceType,
     y_top: f32,
@@ -701,16 +721,19 @@ fn spawn_avatar(
             Visibility::default(),
         ))
         .id();
+    // The avatar is one piece: connected, one shared perimeter.
+    let occupied: HashSet<(isize, isize)> = piece.avatar_cells().iter().copied().collect();
     let ids: Vec<Entity> = piece
         .avatar_cells()
         .iter()
         .map(|&(x, y)| {
+            let mask = skin::neighbor_mask(x, y, &occupied);
             commands
                 .spawn(block_sprite(
+                    minos.handle(MinoKind::Piece(piece_type), mask),
                     block,
                     x,
                     y,
-                    mino_render_color(piece_type),
                     0.0,
                 ))
                 .id()
@@ -724,6 +747,7 @@ fn spawn_avatar(
 /// Rebuild a seat's hold avatar when the held piece changes.
 fn reconcile_hold_views(
     mut commands: Commands,
+    minos: Res<MinoSkin>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     views: Query<(Entity, &SeatHoldView)>,
     mut cache: Local<[Option<Option<PieceType>>; 2]>,
@@ -739,7 +763,7 @@ fn reconcile_hold_views(
         };
         commands.entity(view).despawn_related::<Children>();
         if let Some(piece_type) = hold {
-            spawn_avatar(&mut commands, view, piece_type, 0.0, true);
+            spawn_avatar(&mut commands, &minos, view, piece_type, 0.0, true);
         }
         cache[index] = Some(hold);
     }
@@ -748,6 +772,7 @@ fn reconcile_hold_views(
 /// Rebuild a seat's next-queue column when the visible queue changes.
 fn reconcile_preview_views(
     mut commands: Commands,
+    minos: Res<MinoSkin>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     mut views: Query<(Entity, &mut SeatPreviewView)>,
 ) {
@@ -763,7 +788,7 @@ fn reconcile_preview_views(
         let gap = 0.5 * SessionLayout::BLOCK * SessionLayout::PREVIEW_SCALE;
         let mut y_top = 0.0;
         for &piece_type in queue {
-            let height = spawn_avatar(&mut commands, view, piece_type, y_top, false);
+            let height = spawn_avatar(&mut commands, &minos, view, piece_type, y_top, false);
             y_top -= height + gap;
         }
         state.cache = Some(queue.clone());
