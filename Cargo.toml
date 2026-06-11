@@ -98,7 +98,7 @@ bloom = ["bevy/bevy_post_process"]
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
-directories = "5.0"
+directories = "6"
 
 [target.wasm32-unknown-unknown.dependencies.web-sys]
 version = "0.3"
