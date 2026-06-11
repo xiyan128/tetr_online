@@ -218,6 +218,9 @@ mod tests {
             })
             .add_plugins(LevelPlugin)
             .add_plugins(AiSandboxPlugin);
+        app.insert_resource(crate::level::RunSeed(Some(
+            crate::level::engine_bridge::DEFAULT_SEED,
+        )));
         // Arm (or clear) the sandbox before entering the session, exactly as the
         // menu does, so `OnEnter(GameState::Playing)` sees the right flag.
         app.insert_resource(AiSandbox(arm));

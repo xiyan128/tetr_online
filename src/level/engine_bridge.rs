@@ -25,10 +25,18 @@ use crate::variant::Variant;
 pub const SIM_HZ: f32 = 60.0;
 pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
 
-/// Seed for the engine's piece generator. Fixed for now (matches the renderer's
-/// previous `PieceGenerator::with_seed(0)`); a replay/match layer may supply it
-/// later.
+/// The pinned piece-generator seed for **tests** (headless suites pin it via
+/// [`RunSeed`] so schedule-driven games reproduce byte-for-byte). Live sessions
+/// draw per-run entropy instead — the audit found every single-player game was
+/// dealing the identical bag sequence, which made Sprint's leaderboard a
+/// route-memorization contest.
 pub const DEFAULT_SEED: u64 = 0;
+
+/// Optional seed override for the next gameplay session (the versus
+/// `VersusConfig.seed` idiom): `None` = fresh app-clock entropy per run,
+/// `Some` = pinned (tests, future replays).
+#[derive(Resource, Default)]
+pub struct RunSeed(pub Option<u64>);
 
 /// The single authoritative simulation.
 #[derive(Resource)]

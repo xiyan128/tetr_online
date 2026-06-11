@@ -80,7 +80,15 @@ fn record_run(
     active: Res<ActiveVariant>,
     storage: Res<StorageResource>,
     mut scores: ResMut<HighScores>,
+    sandbox: Option<Res<crate::ai::AiSandbox>>,
 ) {
+    // A Watch-AI session ends on this same screen, but a bot's run is not a
+    // human achievement: it must never file into the leaderboard (the audit
+    // found bot runs silently ranking against the player).
+    if sandbox.is_some_and(|s| s.active()) {
+        return;
+    }
+
     let snap = &snapshot.0;
     let variant = active.0;
 
@@ -448,6 +456,33 @@ S 1500 30.0 40 6
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_bot_run_never_files_into_the_leaderboard() {
+        // Watch-AI ends on the same GameOver screen as a human run; the
+        // sandbox guard must drop it before any qualify/insert logic runs.
+        use crate::storage::StorageResource;
+        use crate::variant::{ActiveVariant, VariantProgress};
+        use bevy::ecs::system::RunSystemOnce;
+        let mut world = bevy::prelude::World::new();
+        let mut engine = crate::engine::Engine::new(crate::engine::EngineConfig::default(), 1);
+        engine.step(crate::engine::InputFrame::default());
+        world.insert_resource(crate::level::LatestSnapshot(engine.snapshot()));
+        world.insert_resource(VariantProgress::default());
+        world.insert_resource(ActiveVariant(Variant::Marathon));
+        world.insert_resource(StorageResource(crate::storage::default_storage()));
+        world.insert_resource(HighScores::default());
+        world.insert_resource(crate::ai::AiSandbox(true));
+
+        world.run_system_once(record_run).unwrap();
+
+        let scores = world.resource::<HighScores>();
+        assert!(
+            scores.table(Variant::Marathon).is_empty(),
+            "an armed sandbox run must not insert a high score"
+        );
+    }
+
     use crate::engine::{Engine, EngineConfig};
 
     fn snapshot_with_lines(lines: usize) -> EngineSnapshot {
