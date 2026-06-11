@@ -32,9 +32,11 @@ pub const MINO_TEXTURE_SIZE: usize = 32;
 /// Exposed-edge thickness, px (the original's 1 px border at tile scale,
 /// halved for the hi-bit size so the seam stays fine).
 const EDGE_PX: usize = 2;
-/// Tone offsets, matching the original tile's ratios (border 167 / body 215
-/// / core 229 — roughly −22% and +7% around the body).
-const EDGE_DARKEN: f32 = 0.24;
+/// Tone offsets. The core keeps the original tile's +7%-ish lift; the edge
+/// is deliberately SOFTER than the original's −22% border — at −12% it reads
+/// as shading on the tile itself, so the body fills its whole square instead
+/// of floating as a rectangle inside a dark recess.
+const EDGE_DARKEN: f32 = 0.12;
 const CORE_LIGHTEN: f32 = 0.10;
 
 /// Neighbor-mask bits: a set bit means "same kind continues that way", and

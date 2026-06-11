@@ -78,21 +78,23 @@ const TAU_AMBER: f32 = 2.5;
 /// never gated, so a crest can neither break into clumps nor read as a
 /// straight ellipse — it is a continuous curved line, like grain in wood or
 /// swell drawn by hand. All cycles well past the 8 s floor.
-const CYCLE_PRIMARY_SECONDS: f32 = 19.0;
-const CYCLE_SECONDARY_SECONDS: f32 = 31.0;
-const WAVELENGTH_PRIMARY_TEXELS: f32 = 210.0;
-const WAVELENGTH_SECONDARY_TEXELS: f32 = 130.0;
+const CYCLE_PRIMARY_SECONDS: f32 = 26.0;
+const CYCLE_SECONDARY_SECONDS: f32 = 41.0;
+const WAVELENGTH_PRIMARY_TEXELS: f32 = 420.0;
+const WAVELENGTH_SECONDARY_TEXELS: f32 = 240.0;
 /// The two transverse sways (along `x - y`) that bend the crests: amplitude
-/// and wavelength in texels, counter-drifting on slow cycles.
-const SWAY_A_AMPLITUDE_TEXELS: f32 = 45.0;
-const SWAY_A_WAVELENGTH_TEXELS: f32 = 520.0;
+/// and wavelength in texels, counter-drifting on slow cycles (scaled with
+/// the carrier so the meander stays visible at the broader swell size).
+const SWAY_A_AMPLITUDE_TEXELS: f32 = 60.0;
+const SWAY_A_WAVELENGTH_TEXELS: f32 = 700.0;
 const SWAY_A_CYCLE_SECONDS: f32 = 41.0;
-const SWAY_B_AMPLITUDE_TEXELS: f32 = 18.0;
-const SWAY_B_WAVELENGTH_TEXELS: f32 = 270.0;
+const SWAY_B_AMPLITUDE_TEXELS: f32 = 24.0;
+const SWAY_B_WAVELENGTH_TEXELS: f32 = 360.0;
 const SWAY_B_CYCLE_SECONDS: f32 = 61.0;
-/// Crest sharpening across the travel axis: holds the troughs near zero so
-/// there is calm water between the curved crests.
-const CREST_GAMMA: f32 = 2.0;
+/// Crest profile across the travel axis: a LOW gamma keeps the ramp long
+/// and soft — broad dither gradients shading in and out of each swell,
+/// with calmer (not hard-empty) water at the beat nodes.
+const CREST_GAMMA: f32 = 1.3;
 
 /// Grain ink: a dark warm neutral two steps under `bg` (#211E1B). Defined
 /// here, not in `theme` — it is this layer's only private color.
@@ -351,7 +353,7 @@ fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
     let secondary = 0.5
         + 0.5
             * (TAU * (along / WAVELENGTH_SECONDARY_TEXELS - phase / CYCLE_SECONDARY_SECONDS)).sin();
-    let band = (0.6 * primary + 0.4 * secondary).powf(CREST_GAMMA);
+    let band = (0.65 * primary + 0.35 * secondary).powf(CREST_GAMMA);
     (level * band).clamp(0.0, 1.0)
 }
 
