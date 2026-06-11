@@ -51,9 +51,10 @@ Mind       — the session: reroot / think(quantum) / best / nodes_expanded
 - **Runner = venue**: `SyncRunner` (blocking; headless) and `SlicedRunner`
   (cooperative; one quantum per poll; submit is free, all work in polls). Quanta
   are **configured node counts, never measured time** — a sliced game is
-  reproducible from `(seed, quantum, poll cadence)`. `take_now` is the trait's
-  anytime valve for deadline pressure; it is implemented and tested but unwired —
-  the shipped controller waits for the budget contract (see "operating point").
+  reproducible from `(seed, quantum, poll cadence)`. (An anytime `take_now`
+  valve for deadline pressure shipped with the seam, sat unwired, and was
+  deleted in the 2026-06-10 no-compat sweep — the policy's `take` verb is the
+  anytime primitive, and a deadline venue re-adds the runner verb trivially.)
 - **Controller**: pumps the runner every poll (the cooperative venue's quantum
   runs *inside* the reaction window, which is what hides the latency), buffers
   the finished decision until the reaction elapses, and owns staleness — including
@@ -88,11 +89,11 @@ conversation.
   pace-neutral budget the sliced venue already delivers within the reaction
   window deterministically and costs ≤ ~5 ms/frame; a request/response thread
   buys nothing until budgets exceed the window, and exploiting *that* properly
-  requires continuous-ponder controller semantics (act-at-deadline via
-  `take_now`, root advancement on world events) — versus-era work. Shipping a
-  timing-nondeterministic venue with no customer is worse engineering than
-  waiting for one. The protocol it needs is already the trait
-  (`submit/poll/take_now/cancel`).
+  requires continuous-ponder controller semantics (act at a deadline through
+  the policy's anytime `take`, root advancement on world events) — versus-era
+  work. Shipping a timing-nondeterministic venue with no customer is worse
+  engineering than waiting for one. The protocol it needs is the trait
+  (`submit/poll/cancel`) plus a deadline verb that is trivial to re-add.
 - **Web Worker venue** — *deferred to the NN era*. Even with COOP/COEP
   attainable, wasm-atomics builds of the full Bevy bundle are the fragile path.
   The strategic wasm scale-up is a dedicated worker running a small headless
@@ -114,5 +115,5 @@ conversation.
 - The interactive bot no longer hitches the main thread anywhere, and its budget
   rose 150 → 192 for free (window capacity).
 - MCGS, the value net, versus pondering, and a worker venue all land behind
-  existing seams (`Mind`, `Evaluator::evaluate_batch`, `take_now`, the runner
-  trait) rather than new ones.
+  existing seams (`Mind`, the `Evaluator` trait — a batched backend re-adds a
+  batch verb there — and the runner trait) rather than new ones.

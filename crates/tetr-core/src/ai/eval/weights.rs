@@ -296,15 +296,6 @@ impl Weights {
         board: BoardWeights::DT20,
         reward: RewardWeights::SURVIVAL,
     };
-
-    /// A **downstacking** profile for a future Tier-2 beam: DT-20 board weights +
-    /// Cold Clear's reward weights (which penalize small clears to hold out for
-    /// Tetrises / T-spins). Only viable with multi-ply lookahead — a 1-ply greedy
-    /// using this buries itself, which is exactly why it is NOT the default.
-    pub const DOWNSTACK: Self = Self {
-        board: BoardWeights::DT20,
-        reward: RewardWeights::COLD_CLEAR,
-    };
 }
 
 impl Default for Weights {

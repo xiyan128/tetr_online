@@ -93,13 +93,6 @@ impl DecisionRunner for SlicedRunner {
         None
     }
 
-    fn take_now(&mut self) -> Option<Decision> {
-        // Anytime: whatever has been thought so far, through the policy's own
-        // error model. Ends the in-flight decision like a delivering poll does.
-        let obs = self.obs.take()?;
-        Some(self.policy.take(&obs))
-    }
-
     fn cancel(&mut self) {
         self.obs = None;
     }
@@ -196,19 +189,6 @@ mod tests {
             }
         }
         assert!(delivered, "a resubmitted decision lands");
-    }
-
-    #[test]
-    fn take_now_is_anytime_valid() {
-        // Deadline pressure mid-think: take_now returns a real decision from the
-        // partial search and ends the in-flight computation.
-        let mut runner = SlicedRunner::with_quantum(Box::new(attack_shaped_policy(1)), 16);
-        runner.submit(engine_obs(7));
-        assert!(runner.poll().is_none(), "still working after one quantum");
-        let early = runner.take_now().expect("anytime decision");
-        let _ = placement(early);
-        assert!(runner.poll().is_none(), "take_now ended the computation");
-        assert!(runner.take_now().is_none(), "nothing left to take");
     }
 
     #[test]

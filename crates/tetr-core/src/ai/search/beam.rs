@@ -26,13 +26,13 @@
 //! [`ThinkProgress::Exhausted`] once it reaches the run's depth cap or the
 //! frontier empties. [`Mind::best`] is the backed-up ply-1 argmax at any point.
 
-use crate::ai::eval::{EvalContext, Evaluator, Reward};
+use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
     best_root_plan, commit_child, hold_placements, Mind, PlacementPlan, RootKey, ThinkProgress,
 };
 use crate::ai::state::SearchState;
-use crate::engine::{ColumnView, LockOutcome, PieceType, TSpinKind};
+use crate::engine::{LockOutcome, PieceType, TSpinKind};
 
 /// Multiplicative pessimism applied to a speculative branch's *reward* contribution
 /// per speculative ply (BEAM.md §5): we cannot rely on a piece we have not seen, so
@@ -245,15 +245,13 @@ impl BeamPlanner {
         eval: &dyn Evaluator,
         beam_width: usize,
     ) {
-        // The batch borrows each child's lock + board straight out of `pending`
-        // (scoped so `pending` is free to move into the frontier below).
-        let scores = {
-            let inputs: Vec<(&LockOutcome, ColumnView, Option<TSpinKind>, EvalContext)> = pending
-                .iter()
-                .map(|p| (&p.lock, p.state.board.view(), p.t_spin, p.ctx))
-                .collect();
-            eval.evaluate_batch(&inputs)
-        };
+        // Score each child on the hot path directly. (A batched eval seam lived
+        // here for the value net; it died with the NN prune — a batched backend
+        // would reintroduce it AT the Evaluator trait, not here.)
+        let scores: Vec<(Value, Reward)> = pending
+            .iter()
+            .map(|p| eval.evaluate_cols(&p.lock, p.state.board.view(), p.t_spin, p.ctx))
+            .collect();
 
         let mut next: Vec<BeamNode> = Vec::with_capacity(pending.len());
         for (p, (value, reward)) in pending.into_iter().zip(scores) {

@@ -126,12 +126,8 @@ impl Policy for SearchPolicy {
     /// `take`, fused — so the one-shot and incremental drivings can never
     /// disagree on a decision.
     fn decide(&mut self, obs: &Observation) -> Decision {
-        // Bounded like `think_to_completion`: a misbehaving mind (never exhausting
-        // under an uncapped budget) must not spin forever.
-        const MAX_THINK_CALLS: u32 = 100_000;
-
         self.reroot(obs);
-        for _ in 0..MAX_THINK_CALLS {
+        for _ in 0..crate::ai::MAX_THINK_CALLS {
             if self.think(u32::MAX) == PolicyProgress::Ready {
                 break;
             }

@@ -47,12 +47,6 @@ impl DecisionRunner for SyncRunner {
         self.pending.take()
     }
 
-    fn take_now(&mut self) -> Option<Decision> {
-        // Synchronous decisions are always complete: "best available right now"
-        // is simply the buffered decision.
-        self.pending.take()
-    }
-
     fn cancel(&mut self) {
         self.pending = None;
     }

@@ -138,27 +138,6 @@ pub trait Evaluator: Send + Sync {
     ) -> (Value, Reward) {
         self.evaluate(lock, &board.to_board(), t_spin, ctx)
     }
-
-    /// Score a batch in one shot. `out[i]` scores `inputs[i]` (order preserved).
-    ///
-    /// The default loops [`evaluate_cols`](Self::evaluate_cols); a batched backend
-    /// (e.g. a neural evaluator) overrides this to fold a whole search generation
-    /// into a single forward pass. The override **must** be bit-identical to mapping
-    /// [`evaluate_cols`](Self::evaluate_cols) over the same inputs.
-    fn evaluate_batch(
-        &self,
-        inputs: &[(
-            &LockOutcome,
-            crate::engine::ColumnView,
-            Option<TSpinKind>,
-            EvalContext,
-        )],
-    ) -> Vec<(Value, Reward)> {
-        inputs
-            .iter()
-            .map(|(l, b, t, ctx)| self.evaluate_cols(l, *b, *t, *ctx))
-            .collect()
-    }
 }
 
 /// The shipped Tier-1 evaluator: a linear weighted sum of the Dellacherie / BCTS
@@ -694,15 +673,18 @@ mod tests {
             (&lock_c, bb_c.view(), t_c, ctx),
         ];
 
-        // `evaluate_batch` is now bitboard-based; it must equal scalar `evaluate` on the
-        // equivalent dense boards — batch==scalar and cols==dense in one assertion.
-        let batched = eval.evaluate_batch(&inputs);
+        // The cols fast path must equal scalar `evaluate` on the equivalent
+        // dense boards — the differential that keeps the override honest.
+        let cols: Vec<_> = inputs
+            .iter()
+            .map(|(l, b, t, ctx)| eval.evaluate_cols(l, *b, *t, *ctx))
+            .collect();
         let scalar = vec![
             eval.evaluate(&lock_a, &board_a, t_a, ctx),
             eval.evaluate(&lock_b, &board_b, t_b, ctx),
             eval.evaluate(&lock_c, &board_c, t_c, ctx),
         ];
 
-        assert_eq!(batched, scalar);
+        assert_eq!(cols, scalar);
     }
 }

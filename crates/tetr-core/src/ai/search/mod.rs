@@ -350,7 +350,7 @@ pub fn think_to_completion(
 ) -> Option<PlacementPlan> {
     // Bounded so a misbehaving mind (one that never exhausts under an uncapped
     // budget) cannot spin forever; real minds finish in a few coarse calls.
-    const MAX_THINK_CALLS: u32 = 100_000;
+    const MAX_THINK_CALLS: u32 = crate::ai::MAX_THINK_CALLS;
 
     mind.reroot(state, eval, budget.max_depth);
     for _ in 0..MAX_THINK_CALLS {
