@@ -1,4 +1,4 @@
-//! Shared menu widgets + theme (M1 shared UI).
+//! Shared menu widgets + theme.
 //!
 //! Small Bevy-UI bundle builders so every screen (Title/MainMenu/ModeSelect/
 //! Options/Help/HighScores) and the menu-related feature agents share one look:

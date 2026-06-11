@@ -1,4 +1,4 @@
-//! SRS-aware placement movement generation (AI3.3).
+//! SRS-aware placement movement generation.
 //!
 //! A placement search needs the *set of final resting poses* the active piece can
 //! reach from spawn, plus the button sequence to reach each one. This module

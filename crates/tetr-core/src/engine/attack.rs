@@ -3,7 +3,7 @@
 //! A **pure** function from a scored clear + chain state to the number of garbage
 //! lines it sends — the primitive the versus / attack benchmark measures, and the
 //! shared rule a future versus mode and an attack-rewarding evaluator will reuse.
-//! No engine state is touched (ADR-7): the caller supplies the Back-to-Back flag,
+//! No engine state is touched: the caller supplies the Back-to-Back flag,
 //! the current combo count, and whether the lock perfect-cleared the board, all of
 //! which it can read from the engine's events/snapshot.
 //!

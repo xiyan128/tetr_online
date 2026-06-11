@@ -1,6 +1,6 @@
-//! Plan-to-input: render a chosen placement into engine [`InputFrame`]s (AI3.4).
+//! Plan-to-input: render a chosen placement into engine [`InputFrame`]s.
 //!
-//! The planner (AI3.3) picks a [`Placement`] and movegen records the [`Move`] path
+//! The planner picks a [`Placement`] and movegen records the [`Move`] path
 //! that reaches it. This module is the last step before the controller: it turns
 //! that abstract path into the concrete per-frame button presses the engine reads,
 //! honoring the engine's input model exactly.
@@ -15,8 +15,8 @@
 //! rotation that shares a frame with a shift would be applied *before* the shift
 //! against a different pose. To stay faithful to the path movegen validated, this
 //! translator emits **one [`Move`] per [`InputFrame`]**: discrete one-cell lateral
-//! pulses (DAS is player-side, so there is no auto-repeat to model here — finding in
-//! the M2 plan), one rotation per frame, the hold as its own leading frame, and a
+//! pulses (DAS is player-side, so there is no auto-repeat to model here), one
+//! rotation per frame, the hold as its own leading frame, and a
 //! single trailing hard-drop frame.
 //!
 //! # Soft drop is the sonic-drop approximation
@@ -36,7 +36,7 @@
 //! never advance *while* the AI is positioning the piece, so the maneuver lands the
 //! piece at exactly the column and rotation movegen intended regardless of how many
 //! frames it spans. The trailing hard-drop frame then locks it. Real wall-clock
-//! pacing (think-time, acting cadence) is the controller's job (AI3.5), not this
+//! pacing (think-time, acting cadence) is the controller's job, not this
 //! pure translator's.
 //!
 //! # Determinism

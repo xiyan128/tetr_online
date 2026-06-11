@@ -1,20 +1,21 @@
-//! Game variants (M1 shared contract): Marathon, Sprint, Ultra.
+//! Game variants: Marathon, Sprint, Ultra.
 //!
 //! A [`Variant`] selects the *rules around* a single game: which
 //! [`EngineConfig`] overrides apply, the goal system, the end condition, the
 //! display name, and which high-score category the result is filed under. The
 //! three variants are implemented inline here (rather than as separate plugins)
-//! because they cross-cut the info-panel (which reads goal/time/score) and
+//! because they cross-cut the session HUD (which reads goal/time/score) and
 //! high-scores (which file per category).
 //!
 //! Wiring:
 //! * [`ActiveVariant`] resource (default [`Variant::Marathon`]) holds the chosen
 //!   variant. Mode-select writes it; the engine bridge reads its
 //!   [`VariantDef::apply_engine_overrides`] when building the engine.
-//! * the session's `MatchClock` tracks wall-clock elapsed time for a run.
-//! * [`check_variant_end_conditions`] runs each frame while `Playing` and
-//!   the session ends the run when the variant's goal/limit is met
-//!   (engine-driven block/lock-out is handled separately by the level plugin).
+//! * the session's `MatchClock` tracks elapsed play time for a run.
+//! * [`end_condition_met`] is the pure predicate; the session's solo end check
+//!   calls it every frame while running and completes the run when the
+//!   variant's goal/limit is met (an engine block-/lock-out ends a run
+//!   separately, as a death).
 
 use bevy::prelude::*;
 
@@ -102,7 +103,7 @@ pub enum ScoreKind {
 }
 
 /// The resolved rules for a variant. Returned by [`Variant::def`]; consumed by
-/// the engine bridge, info-panel, and high-scores.
+/// the engine bridge, the session HUD, and high-scores.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct VariantDef {
     pub variant: Variant,

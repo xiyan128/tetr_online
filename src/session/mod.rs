@@ -1,18 +1,19 @@
-//! Versus mode: two engines, attack routed between them.
+//! The session: every game is N seat entities on one pipeline.
 //!
 //! The design record is `docs/adr-versus-mode-ui.md`. The shape in one
-//! paragraph: a match is two **seat entities** (engine + snapshot + events +
-//! stats each), a [`Participant`] per seat saying who drives it (the local
-//! keyboard or a [`ModelRegistry`](crate::ai::ModelRegistry) bot; a future
-//! remote human is one more arm), and one fixed-update step that advances both
-//! engines, routes every [`EngineEvent::AttackSent`] into the opposite seat's
-//! pending queue, and ends the match when a seat dies. The engine already owns
-//! every garbage *rule* (`docs/adr-versus-rules.md`); this module only routes.
+//! paragraph: a session is [`SessionMode::seat_count`] **seat entities**
+//! (engine + snapshot + events + stats each), a [`Participant`] per seat
+//! saying who drives it (the local keyboard or a
+//! [`ModelRegistry`](crate::ai::ModelRegistry) bot; a future remote human is
+//! one more arm), and one fixed-update step that advances every engine,
+//! routes [`EngineEvent::AttackSent`] into the opposite seat's pending queue,
+//! and ends the session when a seat dies or a solo goal is met. The engine
+//! owns every garbage *rule* (`docs/adr-versus-rules.md`); this module only
+//! routes. Single-player is the one-seat case: same step, same render, with
+//! the variant's rules folded in through the engine-config seam.
 //!
-//! The match lives in [`GameState::Session`] with its own
-//! [`SessionPhase`] lifecycle (countdown → running ⇄ paused → over). The
-//! single-player `level` module is untouched: nothing here reads or writes its
-//! resources, and its systems never run in `Versus`.
+//! The session lives in [`GameState::Session`] with its own
+//! [`SessionPhase`] lifecycle (countdown → running ⇄ paused → over).
 
 use bevy::prelude::*;
 
@@ -28,9 +29,9 @@ mod feel;
 mod overlay;
 pub(crate) mod render;
 
-/// Lifecycle of a live match, as a sub-state of [`GameState::Session`] — the
-/// session (seat entities, boards, camera) is scoped to `Versus` itself, so
-/// phase changes never despawn it. `Over` keeps the final boards on screen
+/// Lifecycle of a live session, as a sub-state of [`GameState::Session`] —
+/// the session (seat entities, boards, camera) is scoped to the outer state,
+/// so phase changes never despawn it. `Over` keeps the final boards on screen
 /// under the result banner.
 #[derive(SubStates, Clone, PartialEq, Eq, Hash, Debug, Default)]
 #[source(GameState = GameState::Session)]
@@ -120,7 +121,7 @@ pub struct SeatEngine(pub Engine);
 pub struct SeatSnapshot(pub EngineSnapshot);
 
 /// Engine events of every slice that ran this render frame (cleared in
-/// `PreUpdate`, like the single-player `FrameEvents`).
+/// `PreUpdate`, refilled by the slices that run after it).
 #[derive(Component, Default)]
 pub struct SeatEvents(pub Vec<EngineEvent>);
 
@@ -144,9 +145,9 @@ pub struct HumanSeat {
     edges: PendingEdges,
 }
 
-/// The bots seated this match, keyed by seat index. A non-send resource for
-/// the same reason as the sandbox's `AiPlayer`: `AiController` is
-/// `Send`-but-not-`Sync`, and the fixed-update driver runs on the main thread.
+/// The bots seated this match, keyed by seat index. A non-send resource
+/// because `AiController` is `Send`-but-not-`Sync`, and the fixed-update
+/// driver runs on the main thread anyway.
 #[derive(Default)]
 pub struct SessionBots(pub Vec<(usize, crate::ai::AiController)>);
 
@@ -202,42 +203,49 @@ pub struct SessionPlugin;
 
 impl Plugin for SessionPlugin {
     fn build(&self, app: &mut App) {
-        app.add_sub_state::<SessionPhase>()
-            .init_resource::<SessionConfig>()
-            .init_resource::<MatchClock>()
-            // Self-sufficiency for headless tests (idempotent: `GamePlugin`
-            // stays the canonical owner of the shared contracts).
-            .init_resource::<crate::settings::GameSettings>()
-            .init_resource::<crate::ai::ModelRegistry>()
-            .init_resource::<LevelConfig>()
-            .init_resource::<crate::high_scores::HighScores>()
-            .add_systems(OnEnter(GameState::Session), session_setup)
-            .add_systems(OnExit(GameState::Session), versus_teardown)
-            .add_systems(
-                PreUpdate,
-                (clear_seat_events, latch_human_input)
-                    .chain()
-                    .after(bevy::input::InputSystems)
-                    .run_if(in_state(SessionPhase::Running)),
-            )
-            .add_systems(
-                FixedUpdate,
-                versus_step.run_if(in_state(SessionPhase::Running)),
-            )
-            .add_systems(
-                Update,
-                (advance_match_clock, check_solo_end)
-                    .chain()
-                    .run_if(in_state(SessionPhase::Running)),
-            )
-            .add_systems(OnEnter(SessionPhase::Over), record_solo_run)
-            // A press latched in the same render frame as a pause (a frame
-            // that ran zero slices) must not fire on the first slice after a
-            // resume, minutes later.
-            .add_systems(OnEnter(SessionPhase::Running), reset_human_latch)
-            .add_plugins(render::VersusRenderPlugin)
-            .add_plugins(overlay::VersusOverlayPlugin)
-            .add_plugins(feel::VersusFeelPlugin);
+        // The simulation contract: FixedUpdate runs at SIM_HZ, and every engine
+        // step is stamped SIM_DT_SECONDS. Both sides of that equation live here
+        // because this plugin owns the stepping; Bevy's default fixed clock is
+        // 64 Hz, which would run a 1/60-stamped simulation ~7% fast.
+        app.insert_resource(Time::<Fixed>::from_hz(
+            crate::level::engine_bridge::SIM_HZ as f64,
+        ))
+        .add_sub_state::<SessionPhase>()
+        .init_resource::<SessionConfig>()
+        .init_resource::<MatchClock>()
+        // Self-sufficiency for headless tests (idempotent: `GamePlugin`
+        // stays the canonical owner of the shared contracts).
+        .init_resource::<crate::settings::GameSettings>()
+        .init_resource::<crate::ai::ModelRegistry>()
+        .init_resource::<LevelConfig>()
+        .init_resource::<crate::high_scores::HighScores>()
+        .add_systems(OnEnter(GameState::Session), session_setup)
+        .add_systems(OnExit(GameState::Session), session_teardown)
+        .add_systems(
+            PreUpdate,
+            (clear_seat_events, latch_human_input)
+                .chain()
+                .after(bevy::input::InputSystems)
+                .run_if(in_state(SessionPhase::Running)),
+        )
+        .add_systems(
+            FixedUpdate,
+            session_step.run_if(in_state(SessionPhase::Running)),
+        )
+        .add_systems(
+            Update,
+            (advance_match_clock, check_solo_end)
+                .chain()
+                .run_if(in_state(SessionPhase::Running)),
+        )
+        .add_systems(OnEnter(SessionPhase::Over), record_solo_run)
+        // A press latched in the same render frame as a pause (a frame
+        // that ran zero slices) must not fire on the first slice after a
+        // resume, minutes later.
+        .add_systems(OnEnter(SessionPhase::Running), reset_human_latch)
+        .add_plugins(render::SessionRenderPlugin)
+        .add_plugins(overlay::SessionOverlayPlugin)
+        .add_plugins(feel::SessionFeelPlugin);
     }
 }
 
@@ -320,7 +328,7 @@ fn session_setup(world: &mut World) {
 
 /// Drop the bots and the outcome when the session ends. Seat entities are
 /// `DespawnOnExit(GameState::Session)`-scoped, so Bevy tears those down.
-fn versus_teardown(world: &mut World) {
+fn session_teardown(world: &mut World) {
     world.remove_non_send_resource::<SessionBots>();
     world.remove_resource::<SessionOutcome>();
 }
@@ -377,7 +385,7 @@ type SeatStepQuery<'w, 's> = Query<
     ),
 >;
 
-fn versus_step(
+fn session_step(
     mut seats: SeatStepQuery,
     bots: Option<NonSendMut<SessionBots>>,
     outcome: Option<Res<SessionOutcome>>,
@@ -578,7 +586,7 @@ pub(crate) fn restart_match(world: &mut World) {
     for entity in seats {
         world.entity_mut(entity).despawn();
     }
-    versus_teardown(world);
+    session_teardown(world);
     session_setup(world);
     // Render roots rebuild from the fresh seats on their next reconcile pass.
     world
@@ -613,8 +621,8 @@ mod tests {
     /// A headless versus app on a frozen clock: enter `Versus`, force the
     /// phase to `Running` (skipping the countdown), and advance only via
     /// explicit fixed slices.
-    fn headless_versus_app(config: SessionConfig) -> App {
-        let mut app = bare_versus_app(config);
+    fn headless_session_app(config: SessionConfig) -> App {
+        let mut app = bare_session_app(config);
         app.world_mut()
             .resource_mut::<NextState<SessionPhase>>()
             .set(SessionPhase::Running);
@@ -624,7 +632,7 @@ mod tests {
 
     /// The harness without the phase override: enters `Versus` and leaves the
     /// match on its natural opening phase (the countdown).
-    fn bare_versus_app(config: SessionConfig) -> App {
+    fn bare_session_app(config: SessionConfig) -> App {
         let mut app = App::new();
         app.add_plugins((MinimalPlugins, StatesPlugin))
             .insert_resource(TimeUpdateStrategy::ManualDuration(Duration::ZERO))
@@ -642,6 +650,21 @@ mod tests {
         app.update(); // queue the transition
         app.update(); // apply Versus + run setup
         app
+    }
+
+    /// The simulation contract has two halves: every engine step stamps
+    /// `SIM_DT_SECONDS`, and `FixedUpdate` must run at `SIM_HZ` for those
+    /// stamps to be wall-true. Bevy defaults the fixed clock to 64 Hz, so a
+    /// session app that forgets to seed it simulates ~7% fast (a 500 ms lock
+    /// delay elapses in ~469 ms). The fixed-timestep harness can't see the
+    /// rate (it advances whole slices), hence this direct pin.
+    #[test]
+    fn the_session_app_steps_at_sim_hz() {
+        let app = bare_session_app(solo_human(7));
+        assert_eq!(
+            app.world().resource::<Time<Fixed>>().timestep(),
+            Duration::from_secs_f64(1.0 / f64::from(crate::level::engine_bridge::SIM_HZ)),
+        );
     }
 
     /// Run exactly `n` fixed slices, in chunks of 10 per render frame:
@@ -664,7 +687,7 @@ mod tests {
     /// overflow kills the seat mid-schedule exactly like a real top-out.
     #[test]
     fn a_natural_solo_death_records_incomplete() {
-        let mut app = headless_versus_app(solo_human(7));
+        let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, 1); // spawn
                                  // Bury the seat: queue far more garbage than the board holds, then a
                                  // clear-less lock rises it (the human seat plays neutral frames, so
@@ -726,7 +749,7 @@ mod tests {
     /// ending with no death anywhere near.
     #[test]
     fn a_solo_goal_completion_records_complete() {
-        let mut app = headless_versus_app(SessionConfig {
+        let mut app = headless_session_app(SessionConfig {
             seats: [Participant::Human, Participant::Bot { model: 0 }],
             mode: SessionMode::Solo {
                 variant: crate::variant::Variant::Ultra,
@@ -757,7 +780,7 @@ mod tests {
     /// restores it. Versus pause is covered by the overlay's own tests.
     #[test]
     fn solo_pause_conceals_the_board() {
-        let mut app = headless_versus_app(solo_human(7));
+        let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, 2);
 
         app.world_mut()
@@ -798,15 +821,14 @@ mod tests {
         }
     }
 
-    /// THE schedule-determinism pin, re-homed from the deleted level driver:
-    /// N fixed slices through the real schedule must leave a keys-untouched
-    /// human seat's engine byte-identical to a directly-stepped reference
-    /// (neutral frames, same dt) — gravity and lock-down advance independent
-    /// of render framing.
+    /// THE schedule-determinism pin: N fixed slices through the real schedule
+    /// must leave a keys-untouched human seat's engine byte-identical to a
+    /// directly-stepped reference (neutral frames, same dt) — gravity and
+    /// lock-down advance independent of render framing.
     #[test]
     fn solo_schedule_matches_direct_engine_stepping() {
         let slices = 10u32;
-        let mut app = headless_versus_app(solo_human(7));
+        let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, slices);
 
         let level = LevelConfig::default();
@@ -836,10 +858,10 @@ mod tests {
     }
 
     /// One press = one action even when several fixed slices run in a single
-    /// render frame — the edge-latch property, re-homed from the level driver.
+    /// render frame — the edge-latch property.
     #[test]
     fn one_press_yields_one_action_across_slices() {
-        let mut app = headless_versus_app(solo_human(7));
+        let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, 1); // spawn the first piece
 
         app.world_mut()
@@ -859,11 +881,10 @@ mod tests {
     }
 
     /// Pause must freeze WITHOUT despawning: the seat entities and the
-    /// engine's exact state survive a pause/resume round-trip (the property
-    /// the old computed-states pause bug violated).
+    /// engine's exact state survive a pause/resume round-trip.
     #[test]
     fn pause_preserves_the_session() {
-        let mut app = headless_versus_app(solo_human(7));
+        let mut app = headless_session_app(solo_human(7));
         tick_fixed(&mut app, 30);
 
         let before: Vec<_> = {
@@ -892,11 +913,11 @@ mod tests {
         assert_eq!(before, after, "pause must freeze, not rebuild or advance");
     }
 
-    /// Watch-AI re-homed: a one-seat BOT session plays the game (the deleted
-    /// sandbox plugin's contract).
+    /// Watch-AI: a one-seat BOT session plays the game with no keyboard
+    /// input at all.
     #[test]
     fn a_solo_bot_seat_drives_the_engine() {
-        let mut app = headless_versus_app(SessionConfig {
+        let mut app = headless_session_app(SessionConfig {
             seats: [Participant::Bot { model: 0 }, Participant::Bot { model: 0 }],
             mode: SessionMode::Solo {
                 variant: crate::variant::Variant::Marathon,
@@ -922,8 +943,8 @@ mod tests {
         assert!(locked, "the bot must lock a piece with no keyboard input");
     }
 
-    /// The leaderboard rules, re-homed: a finished HUMAN solo run files (and
-    /// stashes its rank); a BOT solo run never does.
+    /// The leaderboard rules: a finished HUMAN solo run files (and stashes
+    /// its rank); a BOT solo run never does.
     #[test]
     fn solo_recording_files_humans_and_skips_bots() {
         for (config, expect_recorded) in [
@@ -939,7 +960,7 @@ mod tests {
                 false,
             ),
         ] {
-            let mut app = headless_versus_app(config);
+            let mut app = headless_session_app(config);
             tick_fixed(&mut app, 5);
             app.world_mut()
                 .resource_mut::<NextState<SessionPhase>>()
@@ -981,7 +1002,7 @@ mod tests {
         // Enter Versus WITHOUT forcing the phase: the match must open on the
         // countdown, hold the engines (no first spawn), and hand off to
         // Running on its own once the beats elapse.
-        let mut app = bare_versus_app(bot_match(7));
+        let mut app = bare_session_app(bot_match(7));
         assert_eq!(
             app.world().resource::<State<SessionPhase>>().get(),
             &SessionPhase::Countdown,
@@ -1018,7 +1039,7 @@ mod tests {
 
     #[test]
     fn pause_freezes_the_match_and_esc_resumes() {
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         tick_fixed(&mut app, 60);
 
         // The pause keybind (Escape by default) freezes the whole match.
@@ -1064,7 +1085,7 @@ mod tests {
 
     #[test]
     fn setup_seats_two_engines_with_the_same_deal() {
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         tick_fixed(&mut app, 1);
 
         let snaps = snapshots(&mut app);
@@ -1082,7 +1103,7 @@ mod tests {
     #[test]
     fn bots_drive_both_seats_and_the_match_is_deterministic() {
         let run = |seed: u64, slices: u32| {
-            let mut app = headless_versus_app(bot_match(seed));
+            let mut app = headless_session_app(bot_match(seed));
             tick_fixed(&mut app, slices);
             snapshots(&mut app)
         };
@@ -1109,7 +1130,7 @@ mod tests {
         // pieces (verified at this seed), the engine emits `AttackSent`, and
         // the routed lines must appear against seat 1 (pending, or already
         // risen as garbage cells).
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         {
             let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
             for (seat, mut engine) in query.iter_mut(app.world_mut()) {
@@ -1156,7 +1177,7 @@ mod tests {
 
     #[test]
     fn a_dead_seat_ends_the_match_with_the_survivor_winning() {
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         // Bury seat 1: queue far more garbage than the board holds; its next
         // clear-less lock rises it into a block-out.
         {
@@ -1199,7 +1220,7 @@ mod tests {
         // The blinding is a strip on the snapshot handed to the bot; the
         // engine-side queue must remain intact (it still rises by rule, and
         // the UI's meter renders from the published snapshot).
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         {
             let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
             for (seat, mut engine) in query.iter_mut(app.world_mut()) {
@@ -1223,7 +1244,7 @@ mod tests {
 
     #[test]
     fn restart_match_reseats_fresh_engines() {
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         tick_fixed(&mut app, 240); // four seconds in: boards have content
         let before = snapshots(&mut app);
         assert!(before[0].1.board_cells.len() + before[1].1.board_cells.len() > 0);
@@ -1248,7 +1269,7 @@ mod tests {
     fn the_renderer_mirrors_both_seats() {
         use render::{BoardRoot, LayerSeat, SeatMeter, VsLayer};
 
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         // Queue garbage against seat 1 so the meter has something to show.
         {
             let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
@@ -1297,7 +1318,7 @@ mod tests {
         // plays a different, slower-dying game) — and the verdict must name a
         // winner: under frame-granular detection both would read dead at the
         // end of the chunk and mis-score a draw.
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         {
             let mut query = app.world_mut().query::<(&Seat, &mut SeatEngine)>();
             for (seat, mut engine) in query.iter_mut(app.world_mut()) {
@@ -1334,7 +1355,7 @@ mod tests {
     fn the_rematch_request_rebuilds_the_match() {
         // The exact path the result banner's Rematch button takes: insert the
         // request resource; the exclusive applier reseats the match.
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         tick_fixed(&mut app, 240);
         assert!(
             snapshots(&mut app)[0].1.lines > 0 || !snapshots(&mut app)[0].1.board_cells.is_empty()
@@ -1357,7 +1378,7 @@ mod tests {
 
     #[test]
     fn leaving_versus_tears_down_seats_and_bots() {
-        let mut app = headless_versus_app(bot_match(7));
+        let mut app = headless_session_app(bot_match(7));
         assert!(app.world().get_non_send_resource::<SessionBots>().is_some());
 
         app.world_mut()

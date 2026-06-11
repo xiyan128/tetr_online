@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn every_t_spin_line_clear_qualifies_for_back_to_back() {
         // The guideline "difficult clears" rule: Tetris + every T-spin LINE clear
-        // (Mini Double included — the row the tables used to disagree on).
+        // (Mini Double included — the row scoring tables most often get wrong).
         assert!(qualifies_for_back_to_back(None, 4));
         assert!(qualifies_for_back_to_back(Some(TSpinKind::Mini), 1));
         assert!(qualifies_for_back_to_back(Some(TSpinKind::Mini), 2));

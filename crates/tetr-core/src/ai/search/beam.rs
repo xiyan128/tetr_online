@@ -245,9 +245,9 @@ impl BeamPlanner {
         eval: &dyn Evaluator,
         beam_width: usize,
     ) {
-        // Score each child on the hot path directly. (A batched eval seam lived
-        // here for the value net; it died with the NN prune — a batched backend
-        // would reintroduce it AT the Evaluator trait, not here.)
+        // Score each child on the hot path directly. (No batch seam here on
+        // purpose: a batched value-net backend belongs AT the Evaluator trait,
+        // not in the search loop — docs/value-net-postmortem.md has the history.)
         let scores: Vec<(Value, Reward)> = pending
             .iter()
             .map(|p| eval.evaluate_cols(&p.lock, p.state.board.view(), p.t_spin, p.ctx))

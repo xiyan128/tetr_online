@@ -3,7 +3,7 @@
 //! [`EngineScoreAction`] names every scoreable event; [`ScoreState`] accumulates
 //! score, lines, level/goal progress, and the Back-to-Back chain. Awards are
 //! computed by [`score_action`] as a pure transition over a borrowed state so
-//! placement/replay code can score without owning an `Engine` (ADR-7).
+//! placement/replay code can score without owning an `Engine`.
 
 use crate::engine::goals::{
     breaks_back_to_back, qualifies_for_back_to_back, variable_goal_units, GoalProgress, GoalSystem,
@@ -16,7 +16,7 @@ use crate::engine::t_spin::TSpinKind;
 ///
 /// Free function so future placement / replay code can run the scoring rules
 /// against a borrowed state without having to construct an `Engine`. The
-/// state-mutation surface is explicit (`&mut ScoreState`) per ADR-7.
+/// state-mutation surface is explicit (`&mut ScoreState`).
 ///
 /// `goal_system` is required only for lock-result actions; manual drops ignore
 /// it.

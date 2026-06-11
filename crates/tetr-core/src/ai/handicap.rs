@@ -1,4 +1,4 @@
-//! The AI handicap (AI3.5): how a strong bot is deliberately weakened.
+//! The AI handicap: how a strong bot is deliberately weakened.
 //!
 //! [`Handicap`] is the small, model-agnostic bundle that turns a strong bot into a
 //! beatable opponent. It is split across the AI player's two layers, and consumed
@@ -16,10 +16,10 @@
 //! `Handicap`). Search *capability* (lookahead depth, node budget) is **not** here
 //! — that belongs to the search policy, not the handicap.
 //!
-//! The plan (M2 §AI3.5, open question OQ2) calls for a **beatable / even** default
-//! rather than peak strength: a perfect bot is no fun, and no web source survived
-//! verification on human-like degradation, so the defaults are pragmatic and meant
-//! to be tuned empirically in the AI3.6 sandbox.
+//! The default is **beatable / even** rather than peak strength: a perfect bot
+//! is no fun. No published source on human-like degradation survived
+//! verification, so the defaults are pragmatic, meant to be tuned empirically
+//! against real play.
 //!
 //! # Determinism
 //!
@@ -56,7 +56,7 @@ impl Handicap {
 }
 
 impl Default for Handicap {
-    /// A **beatable / even** opponent (M2 plan default): a short reaction delay and
+    /// A **beatable / even** opponent: a short reaction delay and
     /// a small imperfection so it occasionally misplaces. Tuned to be fun to play
     /// against, not to win.
     fn default() -> Self {

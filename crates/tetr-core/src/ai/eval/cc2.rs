@@ -579,8 +579,8 @@ mod tests {
         // placement, using the search-path combo the planners supply via EvalContext.
         // So combo 0/1/2 add nothing and the reward steps up at combo 3, 5, ... (the
         // staircase is floor((combo-1)/2), NOT floor(combo/2)). This is the only place
-        // EvalContext.combo reaches the shipped CC2 evaluator, and was previously
-        // untested (every other cc2 test uses EvalContext::default()).
+        // EvalContext.combo reaches the shipped CC2 evaluator, and this test is
+        // its only coverage (every other cc2 test uses EvalContext::default()).
         let eval = Cc2Evaluator::default();
         let mut board = Board::new(10, 20);
         board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear

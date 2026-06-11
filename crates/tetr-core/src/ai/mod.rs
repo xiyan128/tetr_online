@@ -1,4 +1,4 @@
-//! The AI player (roadmap Milestone M2 / ADR-4).
+//! The AI player.
 //!
 //! This module is the bot that drives an `Engine` through the same
 //! [`PlayerController`](crate::player::PlayerController) seam the keyboard uses:
@@ -19,17 +19,17 @@
 //!
 //! # Layers
 //!
-//! - [`state`] (AI3.1) — cheap cloneable search state from a snapshot.
-//! - [`eval`] (AI3.2) — the `(Value, Reward)` evaluator seam.
-//! - [`movegen`] + [`search`] (AI3.3) — reachable placements + the anytime
+//! - [`state`] — cheap cloneable search state from a snapshot.
+//! - [`eval`] — the `(Value, Reward)` evaluator seam.
+//! - [`movegen`] + [`search`] — reachable placements + the anytime
 //!   search session ([`Mind`]).
-//! - [`plan`] (AI3.4) — placement → [`InputFrame`](crate::engine::InputFrame)s.
-//! - [`runner`] + [`controller`] (AI3.5) — the compute seam and the
+//! - [`plan`] — placement → [`InputFrame`](crate::engine::InputFrame)s.
+//! - [`runner`] + [`controller`] — the compute seam and the
 //!   [`AiController`] (a [`PlayerController`](crate::player::PlayerController)).
 //!
-//! The Bevy-aware "Watch AI" sandbox (AI3.6) that drove a gameplay session with the
-//! bot lives in the game crate now (`tetr_online::ai::sandbox`), outside this
-//! engine-agnostic core — keeping `tetr-core` free of Bevy.
+//! The Bevy-aware surface that seats the bot in a game session lives in the game
+//! crate (`tetr_online::session`), outside this engine-agnostic core — keeping
+//! `tetr-core` free of Bevy.
 
 pub mod controller;
 pub mod eval;

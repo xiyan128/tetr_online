@@ -6,7 +6,7 @@
 //! that occurred; [`Engine::snapshot`] produces a self-contained [`EngineSnapshot`]
 //! for rendering. The engine owns the board, the active piece, the seven-bag
 //! generator, hold slot, and score/goal state, and wires together the pure rule
-//! modules in this crate. Per ADR-7 the engine carries no rendering or Bevy
+//! modules in this crate. The engine carries no rendering or Bevy
 //! types; it is driven entirely through these plain data structures.
 
 use crate::engine::active_piece::ActivePiece;
@@ -1121,8 +1121,8 @@ mod tests {
     fn extended_lock_down_budget_stops_resetting_after_fifteen_grounded_moves() {
         // The budget counts grounded moves regardless of direction, so an
         // alternating left/right walk exercises all 15 within the standard
-        // board (the old fixture used a 40-wide board purely for travel room;
-        // the unified board's envelope is 16 columns).
+        // board (the envelope caps width at 16, so travel room comes from
+        // alternation, not board width).
         let mut engine = Engine::new(EngineConfig::default(), 0);
         let mut active = ActivePiece::new(PieceType::T, (4, -1));
         active.mark_landed();

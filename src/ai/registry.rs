@@ -1,16 +1,15 @@
-//! The AI model registry: the catalog of "brains" the Watch-AI sandbox can run.
+//! The AI model registry: the catalog of "brains" a bot seat can run.
 //!
 //! Each [`ModelEntry`] names a bot and knows how to build a fresh [`AiController`]
 //! for it. The shipped catalog spans the linear DT-20 evaluator and the ported
 //! Cold Clear 2 attack evaluator, on greedy / beam / best-first search.
 //! **Adding a model is one entry in [`ModelRegistry::default`].**
 //!
-//! The picker screen ([`crate::screens`]) renders [`labels`](ModelRegistry::labels)
-//! and writes the selection; the sandbox ([`crate::ai::sandbox`]) builds
-//! [`selected_controller`](ModelRegistry::selected_controller) when a Watch-AI
-//! session starts. Difficulty is the shared `beatable()` handicap for every entry —
-//! only the *model* (the planner + board evaluator) differs, so picks compare
-//! like-for-like: greedy vs beam, linear eval vs ported CC2 eval.
+//! The setup screens ([`crate::screens`]) render [`labels`](ModelRegistry::labels)
+//! and write the selection; the session's seat spawner builds a controller per
+//! bot seat when a session starts. Difficulty is the shared `beatable()` handicap
+//! for every entry: only the *model* (the planner + board evaluator) differs, so
+//! picks compare like-for-like: greedy vs beam, linear eval vs ported CC2 eval.
 
 use bevy::prelude::*;
 
@@ -30,7 +29,8 @@ const BEAM_DEPTH: u8 = 2;
 /// factory for a fresh controller.
 ///
 /// The factory is `Send + Sync` (it only *builds* a controller); the produced
-/// [`AiController`] is `Send`-but-not-`Sync` and lives in the non-send `AiPlayer`.
+/// [`AiController`] is `Send`-but-not-`Sync` and lives in the non-send
+/// `SessionBots`.
 struct ModelEntry {
     /// Short name — must fit a 220 px menu row (pinned by `labels_fit_a_menu_row`).
     label: String,
@@ -54,8 +54,8 @@ impl ModelEntry {
 }
 
 /// The catalog of AI models plus the current selection. Inserted by the
-/// [`GamePlugin`](crate::GamePlugin); read by the model-select screen and the
-/// sandbox.
+/// [`GamePlugin`](crate::GamePlugin); read by the setup screens and the
+/// session's seat spawner.
 ///
 /// Invariant: `entries` is non-empty ([`Default`] always populates it) and
 /// `selected` is always in bounds (it starts at 0 and [`select`](Self::select)

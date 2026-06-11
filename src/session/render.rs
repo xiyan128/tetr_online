@@ -1,4 +1,4 @@
-//! Versus rendering: two board groups, everything parented per seat.
+//! Session rendering: a board group per seat, everything parented to it.
 //!
 //! Each seat gets a **board root** entity at its world-space origin; the
 //! background grid, the mino layers (locked / falling / ghost), the hold and
@@ -7,13 +7,12 @@
 //! subtree, and a future mirrored layout is a per-root parameter. One camera
 //! frames both boards with `ScalingMode::AutoMin`, so native window resizes
 //! and the web canvas keep the whole match visible. The camera carries the
-//! [`GameplayCamera`] tag, so the bloom/CRT stack applies exactly as in
-//! single-player (the screen-shake mover is `Playing`-gated and never touches
-//! it).
+//! [`GameplayCamera`] tag, so the bloom/CRT stack applies to it; the
+//! screen-shake mover (`session::feel`) offsets it around the scene's rest
+//! center.
 //!
-//! Reconcilers mirror the single-player pattern — diff the cached snapshot
-//! slice, despawn-and-respawn only what changed — but query per seat instead
-//! of per global marker. Garbage cells (`SnapshotCell::garbage`) paint a
+//! Reconcilers diff the cached snapshot slice and despawn-and-respawn only
+//! what changed, querying per seat. Garbage cells (`SnapshotCell::garbage`) paint a
 //! neutral gray: telling your own stack from their attack at a glance is the
 //! point of having a versus renderer at all.
 
@@ -124,9 +123,9 @@ pub struct SeatAtkText {
     pub seat: usize,
 }
 
-pub struct VersusRenderPlugin;
+pub struct SessionRenderPlugin;
 
-impl Plugin for VersusRenderPlugin {
+impl Plugin for SessionRenderPlugin {
     fn build(&self, app: &mut App) {
         app.add_systems(OnEnter(GameState::Session), setup_scene)
             .add_systems(
@@ -146,9 +145,9 @@ impl Plugin for VersusRenderPlugin {
     }
 }
 
-/// One mino-sized sprite at board-relative cell `(x, y)` — the versus block
-/// primitive (the shared `spawn_free_block` couples colour to `PieceType`,
-/// which garbage cells deliberately do not have).
+/// One mino-sized sprite at board-relative cell `(x, y)` — the block
+/// primitive. Colour is a parameter rather than derived from `PieceType`,
+/// because garbage cells have no piece type.
 fn block_sprite(
     assets: &GameAssets,
     block_size: f32,
@@ -329,8 +328,8 @@ fn setup_scene(
         commands.entity(root).add_children(&[label_id, atk_id]);
     }
 
-    // One camera, both boards always in frame. `GameplayCamera` opts into the
-    // bloom/CRT stack; the shake mover is gated on `Playing` and never runs here.
+    // One camera, every board always in frame. `GameplayCamera` opts into the
+    // bloom/CRT stack and is the entity the shake mover offsets.
     commands.spawn((
         Camera2d,
         GameplayCamera,
@@ -659,10 +658,9 @@ fn update_seat_timer_bars(
 }
 
 /// Lock-bar fill for a snapshot: only a GROUNDED piece shows progress. The
-/// engine reports `lock_timer_fraction` as the fraction REMAINING — but `0.0`
-/// also means "timer not running" (a falling piece), which without the
-/// `landed` gate rendered as a permanently full bar (the old pipeline hid the
-/// hazard by despawning the bar entirely outside its Locking sub-state).
+/// engine reports `lock_timer_fraction` as the fraction REMAINING, and `0.0`
+/// also means "timer not running" (a falling piece) — so without the `landed`
+/// gate every falling piece reads as a permanently full bar.
 fn lock_bar_progress(snapshot: &crate::engine::EngineSnapshot) -> f32 {
     match snapshot.active.as_ref() {
         Some(active) if active.landed => 1.0 - active.lock_timer_fraction,

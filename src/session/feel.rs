@@ -1,4 +1,4 @@
-//! Versus game feel: seat-aware audio, attack pops, and the garbage slam.
+//! Session game feel: seat-aware audio, attack pops, and the garbage slam.
 //!
 //! Sound design (the ADR's Decision 5): move/rotate/drop SFX play for the
 //! **human seat only** — a bot's input stream is noise, and bot-vs-bot would
@@ -6,9 +6,8 @@
 //! *rise* gets the lock-thunk cue (the thing you must hear is your own board
 //! getting heavier). Attack that actually leaves a board shows a brief "+n"
 //! pop by the sender's meter. Clears and rises feed the shared screen-shake
-//! trauma; the versus apply mover rests the camera at the two-board scene
-//! center and runs only in `Versus`, so it never fights the single-player
-//! mover (gated to `Playing`).
+//! trauma; the apply mover here is the only camera mover, and it rests the
+//! camera at the scene center for however many boards the session shows.
 
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
@@ -27,16 +26,16 @@ use super::{HumanSeat, Seat, SeatEvents, SessionPhase};
 const POP_SECONDS: f32 = 0.8;
 const POP_RISE: f32 = 28.0;
 
-pub struct VersusFeelPlugin;
+pub struct SessionFeelPlugin;
 
-impl Plugin for VersusFeelPlugin {
+impl Plugin for SessionFeelPlugin {
     fn build(&self, app: &mut App) {
         app
             // Idempotent: `ScreenShakePlugin`/`GamePlugin` own these in the
             // full game; the inits keep a headless versus app self-sufficient.
             .init_resource::<ScreenShake>()
             .init_resource::<crate::vfx::VfxToggles>()
-            .add_systems(OnEnter(GameState::Session), reset_versus_shake)
+            .add_systems(OnEnter(GameState::Session), reset_session_shake)
             .add_systems(
                 Update,
                 (emit_seat_audio, spawn_attack_pops, spawn_seat_callouts)
@@ -46,7 +45,7 @@ impl Plugin for VersusFeelPlugin {
             // panel); the apply below keeps running and bleeds to rest.
             .add_systems(
                 Update,
-                feed_versus_trauma
+                feed_session_trauma
                     .run_if(in_state(SessionPhase::Running).and(crate::vfx::shake_enabled)),
             )
             .add_systems(
@@ -57,14 +56,14 @@ impl Plugin for VersusFeelPlugin {
             // the single-player mover — but resting at the two-board center.
             .add_systems(
                 PostUpdate,
-                apply_versus_shake
+                apply_session_shake
                     .before(TransformSystems::Propagate)
                     .run_if(in_state(GameState::Session)),
             );
     }
 }
 
-fn reset_versus_shake(mut shake: ResMut<ScreenShake>) {
+fn reset_session_shake(mut shake: ResMut<ScreenShake>) {
     shake.reset();
 }
 
@@ -263,7 +262,7 @@ fn animate_attack_pops(
 /// Clears thump exactly like single-player; a garbage rise slams in
 /// proportion to how many rows just arrived. Both seats feed one trauma —
 /// the whole scene shakes, which is right for a shared screen.
-fn feed_versus_trauma(seats: Query<&SeatEvents>, mut shake: ResMut<ScreenShake>) {
+fn feed_session_trauma(seats: Query<&SeatEvents>, mut shake: ResMut<ScreenShake>) {
     for events in &seats {
         for event in &events.0 {
             match event {
@@ -283,7 +282,7 @@ fn feed_versus_trauma(seats: Query<&SeatEvents>, mut shake: ResMut<ScreenShake>)
 
 /// The versus camera mover: same noise/decay as single-player (one shared
 /// home, `ScreenShake::pose_and_decay`), resting at the two-board center.
-fn apply_versus_shake(
+fn apply_session_shake(
     time: Res<Time>,
     mut shake: ResMut<ScreenShake>,
     config: Res<super::SessionConfig>,

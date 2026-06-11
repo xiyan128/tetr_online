@@ -4,7 +4,7 @@
 //!   * Tap left/right moves one cell.        -> tap_left/right_moves_one_cell
 //!   * Rotation has no auto-repeat.          -> rotation_has_no_auto_repeat
 //!
-//! DESIGN NOTE (§25.3 timing is PLAYER-SIDE, per roadmap ADR-4 / E0.13): the DAS
+//! DESIGN NOTE (§25.3 timing is PLAYER-SIDE): the DAS
 //! *timing* items — the ~0.3s hold delay, the auto-repeat interval, carry-over of
 //! auto-repeat across Lock Down, and opposite-direction delay restart — are NOT
 //! engine responsibilities. `Engine::step` treats `left`/`right` as a per-frame
@@ -193,7 +193,7 @@ fn rotation_has_no_auto_repeat() {
 // -------------------------------------------------------------------------
 
 /// DESIGN INVARIANT (not a placeholder): the engine must NOT grow DAS timing.
-/// DAS is player-side (ADR-4); the engine translates the piece by exactly one
+/// DAS is player-side; the engine translates the piece by exactly one
 /// cell per held frame regardless of elapsed `dt`. Holding `left` across many
 /// frames therefore yields one move *per frame* — never an accelerating burst
 /// and never a delay before the first move. The player layer

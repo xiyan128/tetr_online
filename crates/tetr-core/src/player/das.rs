@@ -16,8 +16,7 @@
 use crate::engine::MoveDirection;
 
 /// Player-side DAS timings. These live with the player, not the engine — the
-/// engine applies one cell per `left`/`right` pulse and never consults them
-/// (roadmap ADR-4 / E0.13).
+/// engine applies one cell per `left`/`right` pulse and never consults them.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct DasConfig {
     /// Initial delay before auto-shift begins, in seconds (~0.3s per spec).

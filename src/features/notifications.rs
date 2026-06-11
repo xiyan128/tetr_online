@@ -1,18 +1,18 @@
-//! Line-clear visual effects (A1.9, guideline §19.2).
+//! Line-clear visual effects (guideline §19.2).
 //!
-//! Consumes the engine's per-frame [`FrameEvents`] while
-//! a running session's seats and turns them into transient
-//! *world-space* flourishes over the playfield:
+//! Consumes each seat's per-frame [`SeatEvents`](crate::session::SeatEvents)
+//! while a session runs and turns them into transient *world-space* flourishes
+//! over that seat's playfield:
 //!
-//! * **Line-clear flash** — a white sheet over the field that pulses and fades on
+//! * **Line-clear flash**: a white sheet over the field that pulses and fades on
 //!   every line clear.
-//! * **Hard-drop trail** — fading vertical streaks down the columns a hard-dropped
+//! * **Hard-drop trail**: fading vertical streaks down the columns a hard-dropped
 //!   piece swept through.
 //!
 //! The textual callouts ("SINGLE" / "TETRIS" / "T-SPIN" / "COMBO x2" / …) are
-//! deliberately *not* here. They live in the on-board score-type readout
-//! ([`crate::level::ui`], fed by [`crate::level::score`]), the single home for
-//! that text — this module is purely the visual flourish around it.
+//! deliberately *not* here. They live in the session's callout feed
+//! ([`crate::session::feel`]), the single home for that text; this module is
+//! purely the visual flourish around it.
 //!
 //! Everything here reads only the engine event stream and never mutates
 //! simulation state, so it stays deterministic.
@@ -87,8 +87,8 @@ impl Plugin for NotificationsPlugin {
 // Engine events -> world effects
 // ---------------------------------------------------------------------------
 
-/// Drain this frame's [`FrameEvents`] and spawn a line-clear flash on any clear
-/// plus a hard-drop trail down the columns a hard drop swept through.
+/// Drain each seat's events for the frame and spawn a line-clear flash on any
+/// clear plus a hard-drop trail down the columns a hard drop swept through.
 ///
 /// `last_active` caches the active piece's cells from the previous frame so a hard
 /// drop — which locks (and replaces) the active piece in the same frame — can

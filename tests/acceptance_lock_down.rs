@@ -126,8 +126,8 @@ fn extended_landing_starts_half_second_timer() {
 /// §25.6 Extended: "Successful grounded movement/rotation resets timer while
 /// under 15-action limit." The budget counts grounded moves in any direction,
 /// so an alternating left/right walk exercises all 15 on the standard board
-/// (the old fixture used a 40-wide board purely for one-directional travel,
-/// beyond the unified board's 16-column envelope).
+/// (the envelope caps boards at 16 columns, so travel room comes from
+/// alternation, not width).
 #[test]
 fn extended_grounded_move_resets_timer_under_budget() {
     let mut engine = Engine::new(EngineConfig::default(), SEED);

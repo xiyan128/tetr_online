@@ -180,8 +180,7 @@ fn build_options_ui(
     settings: Res<GameSettings>,
     rebind: Res<RebindState>,
     assets: Res<GameAssets>,
-    // `Single` skips the system on frames where the root was not just added — the
-    // same no-op the early `single()` return used to express.
+    // `Single` skips the system on frames where the root was not just added.
     root: Single<Entity, Added<OptionsRoot>>,
     existing: Query<(), With<OptionValueText>>,
 ) {
@@ -629,8 +628,8 @@ mod tests {
     fn hold_disabled_suppresses_the_hold_action() {
         // The `hold_enabled` setting must actually disable the hold mechanic: with it
         // off, pressing the Hold keybind produces no hold edge, so the engine never
-        // swaps. With it on, the same press does. (Regression guard for the Options
-        // "Hold" toggle being cosmetic — it used to be read nowhere in gameplay.)
+        // swaps. With it on, the same press does. (Regression guard: the Options
+        // "Hold" toggle must gate gameplay, not just the HUD.)
         let binds = Keybinds::default();
         let (hold_key, _) = binds.get(GameAction::Hold);
         let mut keyboard = ButtonInput::<KeyCode>::default();

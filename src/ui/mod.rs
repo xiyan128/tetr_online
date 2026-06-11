@@ -1,4 +1,4 @@
-//! Shared UI toolkit for menu screens (M1).
+//! Shared UI toolkit for menu screens.
 //!
 //! * [`widgets`] — themed bundle builders (root, title/label, focusable button).
 //! * [`focus`] — keyboard focus-navigation helper (Up/Down move, Enter select,

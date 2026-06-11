@@ -1,4 +1,4 @@
-//! Keyboard focus-navigation helper for menu screens (M1 shared UI).
+//! Keyboard focus-navigation helper for menu screens.
 //!
 //! A screen marks each selectable row with [`Focusable`] (carrying its 0-based
 //! index) and puts one [`FocusList`] on the screen root tracking how many items

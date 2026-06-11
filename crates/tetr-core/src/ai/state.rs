@@ -1,4 +1,4 @@
-//! Cheap, cloneable search state for the placement-search AI (AI3.1).
+//! Cheap, cloneable search state for the placement-search AI.
 //!
 //! [`Engine`](crate::engine::Engine) is intentionally **not** `Clone` — it owns
 //! the seeded piece generator, the score machine, and per-tick timing that a
@@ -529,7 +529,7 @@ fn spawn_origin(
 
 /// Drop `active` straight down on `board` until it rests, returning the landed
 /// piece. A movement-free helper used by the tests to build realistic
-/// placements; the real movegen (AI3.3) will supply the lateral path.
+/// placements; the real movegen supplies the lateral path.
 #[cfg(test)]
 fn hard_drop<B: crate::engine::Occupancy>(active: &ActivePiece, board: &B) -> ActivePiece {
     let mut landed = active.clone();
@@ -747,8 +747,9 @@ mod tests {
         // position — any preview length, across bag boundaries, through a hold —
         // the search bag's draw-set equals the true bag (the complement of what
         // the current bag has dealt, derived from a same-seed generator replay).
-        // The old window reconstruction was wrong in ~78% of positions at preview
-        // 5 and unsoundly over-claimed dealt pieces at preview <= 4.
+        // A window-style reconstruction (rebuilding the bag from the visible
+        // preview alone) is wrong in ~78% of positions at preview 5 and unsoundly
+        // over-claims dealt pieces at preview <= 4 — hence the replay derivation.
         for preview_count in [5usize, 2] {
             for seed in [0u64, 7, 42, 12345] {
                 let stream: Vec<PieceType> = crate::engine::PieceGenerator::with_seed(seed)

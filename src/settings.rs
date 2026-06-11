@@ -1,4 +1,4 @@
-//! Shared player-settings contract (M1).
+//! Shared player-settings contract.
 //!
 //! [`GameSettings`] is the single source of truth for tunables the player can
 //! change from the Options screen and that gameplay/render systems read:
@@ -94,9 +94,9 @@ pub struct Keybinds {
 
 impl Default for Keybinds {
     /// Arrows OR WASD out of the box: arrows/AD for movement, Down/S soft
-    /// drop, Up/W rotate CW (W mirrors ArrowUp, displacing the old redundant
-    /// X alias), Z = rotate CCW, Space = hard drop, LeftShift = hold,
-    /// Escape = pause. Both hand positions work without a trip to Options.
+    /// drop, Up/W rotate CW (W mirrors ArrowUp), Z = rotate CCW,
+    /// Space = hard drop, LeftShift = hold, Escape = pause. Both hand
+    /// positions work without a trip to Options.
     fn default() -> Self {
         Self {
             move_left: (KeyCode::ArrowLeft, Some(KeyCode::KeyA)),

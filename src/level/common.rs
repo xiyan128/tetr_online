@@ -1,8 +1,8 @@
 //! Shared session vocabulary: the renderer-side [`LevelConfig`], the
 //! engine-decoupled [`AudioCue`], the gameplay-camera marker, and the
 //! colour/translation helpers that turn engine coordinates into world-space
-//! sprites. (The per-frame schedule sets and block markers that lived here
-//! died with the single-player pipeline — the session render owns its own.)
+//! sprites. Schedule sets and block markers are the session render's own
+//! (`src/session/render.rs`); nothing here touches a schedule.
 
 use crate::engine::{LockDownMode, PieceType};
 #[cfg(feature = "bloom")]

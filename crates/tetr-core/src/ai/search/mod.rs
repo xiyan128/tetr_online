@@ -1,4 +1,4 @@
-//! The placement search: an anytime, re-rootable session seam (AI3.3).
+//! The placement search: an anytime, re-rootable session seam.
 //!
 //! A search turns a [`SearchState`] into a decision: which placement to play next,
 //! and the [`Move`] path to execute it. The [`Mind`] trait is the **session**
@@ -108,7 +108,7 @@ impl Default for SearchBudget {
     }
 }
 
-/// A planner's chosen placement, ready for the plan-to-input layer (AI3.4).
+/// A planner's chosen placement, ready for the plan-to-input layer.
 ///
 /// Carries the [`Placement`] (its resting pose + the [`Move`] path movegen found)
 /// and the score the evaluator gave it, so a caller can compare plans or surface a
@@ -303,7 +303,7 @@ pub enum ThinkProgress {
 ///
 /// Object-safe (`&mut dyn Mind`) so a policy holds one behind a trait object and
 /// swaps paradigms without code changes; `Send + Sync` so a venue may move the
-/// session off-thread on native targets (AI3.5).
+/// session off-thread on native targets.
 pub trait Mind: Send + Sync {
     /// Root the session at `state`, seeding the ply-1 placements (scored with
     /// `eval`) under a `max_depth` ply cap. Re-rooting at the **same**

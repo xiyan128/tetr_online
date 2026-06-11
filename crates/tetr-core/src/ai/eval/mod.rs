@@ -1,4 +1,4 @@
-//! The board evaluator: the Cold Clear `(Value, Reward)` seam (AI3.2).
+//! The board evaluator: the Cold Clear `(Value, Reward)` seam.
 //!
 //! A placement search needs to score candidate placements. Following Cold Clear
 //! (research finding [3]), scoring splits into two distinct quantities:
@@ -12,7 +12,7 @@
 //! (`impl Add<Reward> for Value`), rewards accumulate along a search path: a
 //! multi-ply search sums the rewards of every move on a branch and adds them to
 //! the leaf board's static [`Value`], all through one [`Evaluator`]. So the *same*
-//! evaluator serves the greedy one-piece Tier-1 search (AI3.3) and a future
+//! evaluator serves the greedy one-piece Tier-1 search and a future
 //! multi-ply Tier-2 search with no rework.
 //!
 //! # The trait

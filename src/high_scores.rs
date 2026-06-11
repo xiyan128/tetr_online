@@ -1,4 +1,4 @@
-//! High-score model (M1 shared contract).
+//! High-score model: the shared tables every screen and the session read.
 //!
 //! [`HighScores`] holds a top-10 leaderboard per [`Variant`]. The *primary* sort
 //! key is variant-specific (Sprint ranks by elapsed time ascending — fastest

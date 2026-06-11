@@ -290,8 +290,8 @@ impl Weights {
     /// The shipped **Tier-1 default**: DT-20 board weights + the survival reward
     /// profile. The board group keeps the stack clean and low; the reward group
     /// pays the greedy planner to clear lines (see [`RewardWeights::SURVIVAL`]).
-    /// Citable starting points, not a tuned-for-this-engine optimum — tune in the
-    /// AI3.6 sandbox.
+    /// Citable starting points, not a tuned-for-this-engine optimum; the
+    /// research harness is the tuning venue.
     pub const SURVIVAL: Self = Self {
         board: BoardWeights::DT20,
         reward: RewardWeights::SURVIVAL,

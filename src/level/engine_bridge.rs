@@ -1,12 +1,12 @@
-//! Engine ↔ Bevy bridge (P2.2).
+//! Engine ↔ Bevy bridge: the configuration seam and the input-edge latch.
 //!
-//! Makes the renderer a one-way consumer of the engine: `Engine → Snapshot →
-//! Renderer`. The renderer holds a single authoritative [`Engine`] in
-//! [`EngineState`], drives it at a fixed sim rate from real frame time, and
-//! publishes the per-frame [`EngineSnapshot`] and [`EngineEvent`] list into
-//! resources that every render / audio / score / UI system reads. No renderer
-//! system mutates simulation state; all state changes flow through
-//! `engine.step(controller.poll(&snapshot))`.
+//! The session (`src/session/`) owns the engines and steps them; this module
+//! owns what a step is built from. [`engine_config_for_game`] folds
+//! `LevelConfig`/`GameSettings`/`Variant` into an [`EngineConfig`],
+//! [`das_config_from_level`] does the same for the keyboard's DAS timings,
+//! and [`PendingEdges`] latches just-pressed input for the fixed slices. The
+//! renderer stays a one-way consumer of the engine: no render system mutates
+//! simulation state.
 
 use bevy::prelude::*;
 
@@ -20,8 +20,8 @@ use crate::variant::Variant;
 /// schedule, which runs as many fixed slices per render frame as the accumulated
 /// virtual time allows, so gravity/lock-down advance deterministically
 /// regardless of render frame rate. `SIM_HZ` seeds `Time::<Fixed>` in
-/// `LevelPlugin::build`; `SIM_DT_SECONDS` mirrors the per-slice `dt` for tests
-/// and the few places that need the constant directly.
+/// `SessionPlugin::build` (Bevy's default is 64 Hz, which would not match);
+/// `SIM_DT_SECONDS` mirrors the per-slice `dt` for the engine steps and tests.
 pub const SIM_HZ: f32 = 60.0;
 pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
 
@@ -90,7 +90,7 @@ impl PendingEdges {
 ///
 /// The board is `board_width × board_height` visible with a hidden buffer above
 /// (the renderer historically used a 20-row top margin to fake a 10×20 field).
-/// DAS timings are intentionally NOT part of `EngineConfig` (player-side, ADR-4).
+/// DAS timings are intentionally NOT part of `EngineConfig`; DAS is player-side.
 pub fn engine_config_from_level(config: &LevelConfig) -> EngineConfig {
     EngineConfig {
         board_width: config.board_width,
@@ -110,7 +110,7 @@ pub fn engine_config_from_level(config: &LevelConfig) -> EngineConfig {
 /// [`LevelConfig`], overlay the player's [`GameSettings`] (preview/next count and
 /// lock-down rule), then apply the [`Variant`]'s engine overrides (goal system).
 ///
-/// This is the single seam where shared M1 contracts feed the engine, so the
+/// This is the single seam where the shared contracts feed the engine, so the
 /// previewer (which reads `LevelConfig.preview_count`), the engine queue, and the
 /// variant goal system all stay consistent. Callers also mirror
 /// `settings.next_count` into `LevelConfig.preview_count` before building UI.

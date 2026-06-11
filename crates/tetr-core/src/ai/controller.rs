@@ -1,8 +1,8 @@
-//! The AI player controller (AI3.5): the model-agnostic shell.
+//! The AI player controller: the model-agnostic shell.
 //!
 //! [`AiController`] is a [`PlayerController`]: it reads an [`EngineSnapshot`] and
 //! returns the next [`InputFrame`], exactly like the keyboard controller, so it
-//! drops into the same engine-driver seam (see `src/level/mod.rs`).
+//! drops into the same engine-driver seam the game's session seats use.
 //!
 //! It is the *shell* around an AI brain, and it is deliberately **model-agnostic**:
 //! it knows nothing about search, evaluators, or weights — only a
@@ -53,7 +53,7 @@
 //! The shell adds no randomness and no clock — it only integrates the poll `dt`
 //! (deterministic given the poll cadence). All AI randomness lives in the policy's
 //! own seeded RNG. So a fixed `(engine seed, ai seed, handicap)` reproduces an
-//! identical game every run — the determinism the M2 headless benchmark relies on.
+//! identical game every run — the determinism the headless benchmarks rely on.
 //!
 //! # No Bevy here
 //!
@@ -130,8 +130,8 @@ pub struct AiController {
 /// swaps the active piece one frame later. [`AiController::apply_decision`]
 /// retargets `piece_type` to the post-hold piece when it enqueues such a plan, so
 /// the swap the controller itself caused never discards the rest of the maneuver
-/// (which used to re-pay the reaction delay *and* a full search on every held
-/// piece).
+/// (without the retarget, the bot re-pays the reaction delay *and* a full search
+/// on every held piece).
 #[derive(Clone, Copy, PartialEq, Eq)]
 struct PieceSignature {
     piece_type: PieceType,
@@ -177,7 +177,7 @@ impl AiController {
     }
 
     /// A controller with the **default** handicap (a beatable opponent) and the
-    /// default AI seed — the convenient construction for the game and sandbox.
+    /// default AI seed — the convenient construction for the game's bot seats.
     pub fn beatable() -> Self {
         Self::new(Handicap::default(), DEFAULT_AI_SEED)
     }
@@ -419,7 +419,7 @@ mod tests {
 
     #[test]
     fn controller_executes_the_planners_first_placement_faithfully() {
-        // The fidelity guarantee AI3.5 owns: the controller lands its first piece
+        // The controller's fidelity guarantee: it lands its first piece
         // exactly where the *planner* intends. We plan independently from the first
         // snapshot, then drive a perfect (instant, no-error) controller until the
         // piece locks, and assert the resulting board equals the planner's
@@ -610,11 +610,11 @@ mod tests {
 
     #[test]
     fn a_hold_plan_executes_without_a_second_reaction() {
-        // The double-reaction bug: emitting the plan's leading hold frame swaps
-        // the active piece, which used to read as a "new piece" — discarding the
-        // queued maneuver and re-paying the reaction delay plus a full search on
-        // every held piece. Fixed: the swap is pre-targeted, so the maneuver
-        // continues on the very next poll.
+        // The double-reaction hazard: emitting the plan's leading hold frame
+        // swaps the active piece, which an unguarded staleness check reads as a
+        // "new piece" — discarding the queued maneuver and re-paying the reaction
+        // delay plus a full search on every held piece. The pin: the swap is
+        // pre-targeted, so the maneuver continues on the very next poll.
         let handicap = Handicap {
             reaction: core::time::Duration::from_millis(200),
             ..Handicap::perfect()

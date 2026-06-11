@@ -1,12 +1,12 @@
-//! Player abstraction (roadmap ADR-4).
+//! Player abstraction.
 //!
 //! A [`PlayerController`] turns the latest [`EngineSnapshot`] into the next
 //! [`InputFrame`] that an `Engine` should be stepped with. Multiplayer is "N
 //! engines + N controllers stepped in lockstep"; replays and AI are other
 //! controllers behind the same trait.
 //!
-//! DAS (Delayed Auto Shift) is **player-side** state, not engine state (ADR-4 /
-//! roadmap E0.13). The engine treats `InputFrame.left` / `.right` as a per-frame
+//! DAS (Delayed Auto Shift) is **player-side** state, not engine state.
+//! The engine treats `InputFrame.left` / `.right` as a per-frame
 //! one-cell pulse and never owns a charge timer. [`KeyboardController`] is the
 //! reference owner of that DAS state machine: it converts a held arrow key into
 //! the correct cadence of pulses (one tap, then an initial-delay wait, then
@@ -24,7 +24,7 @@ pub use keyboard::{KeyboardController, RawKeyboardFrame};
 
 /// Produces the next [`InputFrame`] for an `Engine`, given the latest snapshot.
 ///
-/// Per ADR-4 the engine is stepped as `engine.step(controller.poll(&snapshot))`.
+/// The engine is stepped as `engine.step(controller.poll(&snapshot))`.
 /// The snapshot lets stateful controllers (AI, replay) react to what the engine
 /// did last frame; simple controllers may ignore it.
 pub trait PlayerController {
@@ -39,10 +39,10 @@ pub trait PlayerController {
 /// This is the engine-agnostic driving seam. A controller that is **not** the
 /// keyboard (the AI, a replay, a remote peer) needs no `PreUpdate` raw-input
 /// latching, so it can drive an engine through nothing but `poll → step`. The
-/// AI sandbox (AI3.6) and a future N-player local game (M3) own their own
+/// game's bot seats and the embed's autoplay own their own
 /// `(Engine, Box<dyn PlayerController>)` pair(s) and tick them with this helper;
-/// the single-player **keyboard** path keeps its dedicated latch-in-`PreUpdate`
-/// pipeline (`src/level`) unchanged, because its controller needs the raw frame
+/// a **keyboard** seat keeps its dedicated latch-in-`PreUpdate` step (the game's
+/// engine bridge), because its controller needs the raw frame
 /// staged before `poll`.
 ///
 /// # The controller owns `dt`
@@ -97,7 +97,7 @@ mod tests {
     /// The integration seam: an engine can be driven entirely through a
     /// `Box<dyn PlayerController>` (here the AI) with nothing but
     /// [`drive_engine`] — no keyboard, no `PreUpdate` latching. This is the path
-    /// the AI sandbox (AI3.6) and future N-player local games (M3) use.
+    /// the game's bot seats and the embed's autoplay use.
     #[test]
     fn drive_engine_runs_a_boxed_controller_to_place_pieces() {
         let mut controller: Box<dyn PlayerController> =

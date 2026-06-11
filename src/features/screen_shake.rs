@@ -48,9 +48,8 @@ pub struct ScreenShake {
 
 impl ScreenShake {
     /// Add `amount` of trauma, saturating at the `1.0` ceiling. `pub(crate)`:
-    /// the versus mode feeds the same resource from its own per-seat events
-    /// (its apply runs only in `Versus`, this module's only in `Playing`, so
-    /// the two movers never fight over a camera).
+    /// the session's feel module feeds this resource from per-seat events and
+    /// owns the one camera mover; this module owns the trauma model.
     pub(crate) fn add(&mut self, amount: f32) {
         self.trauma = (self.trauma + amount).clamp(0.0, 1.0);
     }

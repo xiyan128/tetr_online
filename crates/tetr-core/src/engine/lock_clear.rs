@@ -3,7 +3,7 @@
 //! [`lock_and_clear`] writes the active piece's cells onto the board, clears any
 //! now-full rows, and reports what happened via [`LockOutcome`]. It is a pure,
 //! board-shaped operation (no engine/tick state) so search bots, replay
-//! validators, and garbage solvers can reuse it (ADR-7, roadmap §10).
+//! validators, and garbage solvers can reuse it.
 
 use crate::engine::active_piece::ActivePiece;
 use crate::engine::bit_board::{full_rows, highest_occupied_y};
@@ -32,7 +32,7 @@ pub struct LockOutcome {
 /// Lock the given piece into the board and clear any resulting full rows.
 ///
 /// Free function rather than a method on `Engine` so the same code path can be
-/// reused by a future placement / search API (ADR-7, roadmap §10). The
+/// reused by a future placement / search API. The
 /// function never reads "current tick" or input state — it only consults the
 /// piece and the board.
 pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {

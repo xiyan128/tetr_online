@@ -1,10 +1,10 @@
 //! `tetr_online` — a guideline Tetris built on Bevy.
 //!
-//! The crate is split along the ADR-7 boundary: [`engine`] is the
+//! The crate is split along one hard boundary: [`engine`] is the
 //! engine-agnostic rule core (no Bevy types), and everything else is the Bevy
-//! host that drives it. The `level` module owns the in-game loop (stepping the
-//! engine in `FixedUpdate` and reconciling snapshots into the ECS world);
-//! `screens` and `features` provide menus and presentation; [`player`]
+//! host that drives it. The [`session`] module owns the in-game loop (seat
+//! entities stepped in `FixedUpdate`, snapshots reconciled into the ECS
+//! world); `screens` and `features` provide menus and presentation; [`player`]
 //! translates input into engine [`InputFrame`]s; [`storage`], [`settings`],
 //! [`high_scores`], and [`variant`] handle persistence and run configuration.
 //! The flat `tetr_online::` re-export surface below exposes the engine API the
@@ -20,12 +20,11 @@ use bevy_egui::{egui, EguiContext, EguiPlugin, EguiPrimaryContextPass, PrimaryEg
 #[cfg(feature = "dev")]
 use bevy_inspector_egui::{bevy_inspector, DefaultInspectorConfigPlugin};
 
-// Engine-agnostic core (ADR-7), now the `tetr-core` crate: re-export `engine` and
-// `player` so the host's existing `crate::engine::…` / `crate::player::…` paths keep
-// resolving unchanged.
+// The engine-agnostic core is the `tetr-core` crate: re-export `engine` and
+// `player` so the host addresses them as `crate::engine::…` / `crate::player::…`.
 pub use tetr_core::{engine, player};
 
-/// Game-side AI: the engine-agnostic `tetr-core::ai` plus the Bevy `sandbox`.
+/// Game-side AI: `tetr-core::ai` re-exported, plus the Watch-AI model registry.
 pub mod ai;
 mod assets;
 pub(crate) mod features;
@@ -54,9 +53,9 @@ pub use crate::engine::{
 
 /// Top-level screen the app is on. Drives which plugins' systems run and which
 /// UI is spawned. Flow: `Loading` (asset load) -> `Title` -> `MainMenu`, with
-/// `ModeSelect`/`Options`/`Help`/`HighScores` reachable from the menu, `Playing`
-/// the active game, and `GameOver` after it. Pausing is a sub-state of `Playing`
-/// (see [`session::SessionPhase`]) inside the Session state, never a sibling.
+/// `ModeSelect`/`Options`/`Help`/`HighScores` reachable from the menu and every
+/// game running in `Session`. Pause, countdown, and the result banner are
+/// phases of the session ([`session::SessionPhase`]), never sibling states.
 #[derive(States, PartialEq, Eq, Debug, Clone, Hash, Default)]
 pub enum GameState {
     /// Asset loading; advances to [`GameState::Title`] when assets are ready.
@@ -94,18 +93,18 @@ impl Plugin for GamePlugin {
                     .load_collection::<crate::assets::GameAssets>()
                     .continue_to_state(GameState::Title),
             )
-            // Shared M1 contracts (defined once, read everywhere).
+            // Shared contracts (defined once, read everywhere).
             .init_resource::<crate::settings::GameSettings>()
             .init_resource::<crate::variant::ActiveVariant>()
             .init_resource::<crate::high_scores::HighScores>()
             // The Watch-AI model registry (linear DT-20 + ported CC2 models on
-            // greedy / beam / best-first). Read by the model-select screen and the
-            // sandbox.
+            // greedy / beam / best-first). Read by the setup screens and the
+            // session's bot-seat spawner.
             .init_resource::<crate::ai::ModelRegistry>()
             // Runtime visual-FX toggles (all-on; the dev panel flips them live).
             .init_resource::<crate::vfx::VfxToggles>()
             .register_type::<crate::vfx::VfxToggles>()
-            // Reflection registration for the shared M1 contracts (canonical
+            // Reflection registration for the shared contracts (canonical
             // owner). Inner non-engine types embedded in these (Keybinds,
             // GameAction, Variant, HighScore) are registered so the inspector can
             // descend into them. Engine-typed fields (LockDownMode) are

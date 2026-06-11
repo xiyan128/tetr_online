@@ -152,8 +152,7 @@ fn populate_tables(
     mut commands: Commands,
     assets: Res<GameAssets>,
     scores: Res<HighScores>,
-    // `Single` skips the system on frames where the root was not just added — the
-    // same no-op the early `single()` return used to express.
+    // `Single` skips the system on frames where the root was not just added.
     root: Single<Entity, Added<HighScoresRoot>>,
     existing: Query<(), With<HighScoresTables>>,
 ) {

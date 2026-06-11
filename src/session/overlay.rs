@@ -1,4 +1,4 @@
-//! Versus overlays: the countdown, the pause screen, and the result banner.
+//! Session overlays: the countdown, the pause screen, and the result banner.
 //!
 //! All three are screen-space UI scoped to their [`SessionPhase`], drawn over
 //! the live board scene (the result banner deliberately leaves the final
@@ -23,9 +23,9 @@ use super::{
 const NUMBER_BEAT_SECONDS: f32 = 0.7;
 const GO_BEAT_SECONDS: f32 = 0.5;
 
-pub struct VersusOverlayPlugin;
+pub struct SessionOverlayPlugin;
 
-impl Plugin for VersusOverlayPlugin {
+impl Plugin for SessionOverlayPlugin {
     fn build(&self, app: &mut App) {
         app
             // Countdown
@@ -68,7 +68,7 @@ impl Plugin for VersusOverlayPlugin {
                 apply_rematch.run_if(
                     // The state gate is belt-and-braces: the only inserter is
                     // Over-gated, but a stray request must never reseat a
-                    // match outside `Versus` (the seats would leak past their
+                    // match outside `Session` (the seats would leak past their
                     // DespawnOnExit and the phase would dangle).
                     resource_exists::<RematchRequested>.and(in_state(GameState::Session)),
                 ),
@@ -182,8 +182,8 @@ fn pause_on_keybind(
     }
 }
 
-/// Solo pause CONCEALS the field (the guideline-era anti-pause-to-think rule
-/// the old single-player pause enforced); a versus pause keeps both boards
+/// Solo pause CONCEALS the field (the guideline anti-pause-to-think rule);
+/// a versus pause keeps both boards
 /// visible under the scrim — pausing a local match is mutual anyway.
 fn conceal_boards_on_solo_pause(
     config: Res<super::SessionConfig>,

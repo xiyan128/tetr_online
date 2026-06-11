@@ -1,4 +1,4 @@
-//! Feature plugins (M1): one self-contained plugin per gameplay/UI feature.
+//! Feature plugins: one self-contained plugin per gameplay/UI feature.
 //!
 //! Each feature lives in its OWN file with its own Bevy plugin, all wired into the
 //! app via [`FeaturesPlugin`]. Keeping them separate means adding or changing one

@@ -1,4 +1,4 @@
-//! The compute seam: the **venue** where the AI's decision runs (AI3.5).
+//! The compute seam: the **venue** where the AI's decision runs.
 //!
 //! [`DecisionRunner`] decouples *what* the AI decides (a [`Policy`](crate::ai::Policy)
 //! over an [`Observation`]) from *where* that decision is computed. The controller

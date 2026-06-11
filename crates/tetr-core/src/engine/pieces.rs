@@ -220,9 +220,9 @@ impl Piece {
         let (x_offset, y_offset) = offset;
 
         for (x, y) in self.cells() {
-            // `Occupancy::blocked` is exactly the old `get_cell_kind(..) != None`:
-            // out-of-bounds (wall/floor) or a filled cell. Generic over the board so the
-            // search can collision-check on the fast `BitBoard`, not just the `Array2D`.
+            // `Occupancy::blocked` means out-of-bounds (wall/floor) or a filled
+            // cell. Generic over the occupancy so the engine's `Board` and the
+            // search's bare `BitBoard` collision-check through one impl.
             if board.blocked(x + x_offset, y + y_offset) {
                 return true;
             }

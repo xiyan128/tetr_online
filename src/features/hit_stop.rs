@@ -12,7 +12,7 @@
 //! `FixedUpdate`, so the *un*pause can't be scheduled on the virtual clock — it
 //! would never fire. The countdown therefore runs on [`Time<Real>`], which keeps
 //! ticking while the simulation is frozen. As defence in depth the freeze is also
-//! force-cleared on every `Playing` enter/exit, so a paused clock can never leak
+//! force-cleared on every `Session` enter/exit, so a paused clock can never leak
 //! across a session boundary and wedge the game.
 
 use bevy::prelude::*;
@@ -60,10 +60,11 @@ impl Plugin for HitStopPlugin {
             )
             // Tick the countdown on the REAL clock so it advances while virtual time
             // is paused. Ordered after the trigger so a freeze begun this frame is
-            // timed from its full duration. Gated on `Running` (not bare `Playing`)
-            // so a freeze and a manual pause compose: the freeze holds through the
-            // pause menu and resolves on resume, instead of unpausing virtual time
-            // behind the overlay. (`clear_freeze` on `Playing` exit handles teardown.)
+            // timed from its full duration. Gated on `Running` (not the bare
+            // session state) so a freeze and a manual pause compose: the freeze
+            // holds through the pause menu and resolves on resume, instead of
+            // unpausing virtual time behind the overlay. (`clear_freeze` on
+            // `Session` exit handles teardown.)
             .add_systems(
                 Update,
                 tick_hit_stop
