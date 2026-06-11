@@ -22,12 +22,10 @@
 //! `MAX_PLIES` (160).
 
 use tetr_core::ai::Cc2Weights;
-use tetr_core::player::PlayerController;
+use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
-use tetr_research::{
-    beam_cc2_bot, bestfirst_cc2_weights_bot, evaluate_versus_format, seed_set, BlindToGarbage,
-    VersusFormat, VersusResult, VersusStats,
-};
+use tetr_research::seeds::seed_set;
+use tetr_research::versus::{evaluate_versus_format, VersusFormat, VersusResult, VersusStats};
 
 /// Deaths and cap-game outcomes for the aware arm of one orientation.
 /// `aware_is_a`: which side the aware bot played in this run.
@@ -72,7 +70,7 @@ fn main() {
         rain_period: env_usize("RAIN_PERIOD", 0) as u32,
     };
 
-    let make: Box<dyn Fn(u64) -> Box<dyn PlayerController> + Sync> = match bot.as_str() {
+    let make: BotSpec = match bot.as_str() {
         "bf" => {
             let depth = if depth < 4 { 6 } else { depth };
             // WEIGHTS=attack raises the duel to the shipped operating point's
@@ -86,23 +84,21 @@ fn main() {
                 "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies, rain {}",
                 seeds.len(), env_usize("RAIN_PERIOD", 0)
             );
-            Box::new(move |s| bestfirst_cc2_weights_bot(s, nodes, depth, weights))
+            BotSpec::best_first(nodes, depth).cc2(weights)
         }
         _ => {
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies, rain {}",
                 seeds.len(), env_usize("RAIN_PERIOD", 0)
             );
-            Box::new(move |s| beam_cc2_bot(s, width, depth))
+            BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT)
         }
     };
-    let make_blind = |s: u64,
-                      make: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync)|
-     -> Box<dyn PlayerController> { Box::new(BlindToGarbage(make(s))) };
 
-    // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds.
-    let fwd = evaluate_versus_format(&make, &|s| make_blind(s, &make), &seeds, format);
-    let rev = evaluate_versus_format(&|s| make_blind(s, &make), &make, &seeds, format);
+    // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds; the
+    // blind arm is the same spec with the pending queue hidden.
+    let fwd = evaluate_versus_format(&make.factory(), &make.blind().factory(), &seeds, format);
+    let rev = evaluate_versus_format(&make.blind().factory(), &make.factory(), &seeds, format);
 
     let (fd_a, fd_b, fc_a, fc_b) = tally(&fwd, true);
     let (rd_a, rd_b, rc_a, rc_b) = tally(&rev, false);

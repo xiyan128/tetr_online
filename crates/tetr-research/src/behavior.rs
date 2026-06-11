@@ -16,9 +16,10 @@ use tetr_core::engine::{CellKind, Engine, EngineEvent, EngineScoreAction, PieceT
 use tetr_core::player::{drive_engine, PlayerController};
 
 use crate::accounting::{action_clear_lines, controller_seed, fold_combo};
+use crate::downstack::cheese_holes;
+use crate::marathon::marathon_config;
 use crate::versus::MAX_PIECE_FRAMES;
 use crate::versus_legacy::{versus_hole, GarbageQueue};
-use crate::{cheese_holes, marathon_config};
 
 /// A garbage scenario to measure the bot in.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

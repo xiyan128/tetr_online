@@ -7,9 +7,12 @@
 //! Env: `SEEDS` (12), `BEAM_DEPTH` (2), `BEAM_WIDTH` (16), `MAX_PLIES` (160),
 //!      `GARBAGE_ROWS` (9), `MAX_PIECES` (100).
 
-use tetr_research::{beam_cc2_bot, beam_linear_bot, evaluate_downstack, evaluate_versus, seed_set};
-
+use tetr_core::ai::eval::Cc2Weights;
+use tetr_research::bots::BotSpec;
 use tetr_research::cli::env_usize;
+use tetr_research::downstack::evaluate_downstack;
+use tetr_research::seeds::seed_set;
+use tetr_research::versus::evaluate_versus;
 
 fn main() {
     let seeds = seed_set(env_usize("SEEDS", 12));
@@ -18,6 +21,8 @@ fn main() {
     let plies = env_usize("MAX_PLIES", 160) as u32;
     let rows = env_usize("GARBAGE_ROWS", 9) as u32;
     let cap = env_usize("MAX_PIECES", 100) as u32;
+    let cc2 = BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT);
+    let dt20 = BotSpec::beam(width, depth);
 
     eprintln!(
         "Native CC2-eval vs DT-20-eval — both on beam(depth={depth}, width={width}); {} seeds",
@@ -25,12 +30,7 @@ fn main() {
     );
 
     // --- Versus (fair, our engine, mutual garbage): A = CC2-eval, B = DT-20 ---
-    let vs = evaluate_versus(
-        &|s| beam_cc2_bot(s, width, depth),
-        &|s| beam_linear_bot(s, width, depth),
-        &seeds,
-        plies,
-    );
+    let vs = evaluate_versus(&cc2.factory(), &dt20.factory(), &seeds, plies);
     println!("versus_cc2eval_win_rate {:.2}", vs.a_win_rate());
     eprintln!(
         "VERSUS  CC2-eval(A) vs DT20(B) | CC2 {} / DT20 {} / draw {} | mean attack CC2 {:.1} DT20 {:.1} | {plies} plies",
@@ -38,8 +38,8 @@ fn main() {
     );
 
     // --- Downstack: defense (pieces, lower=better) + offense (attack, higher) ---
-    let cc2_ds = evaluate_downstack(&|s| beam_cc2_bot(s, width, depth), &seeds, rows, cap);
-    let dt_ds = evaluate_downstack(&|s| beam_linear_bot(s, width, depth), &seeds, rows, cap);
+    let cc2_ds = evaluate_downstack(&cc2.factory(), &seeds, rows, cap);
+    let dt_ds = evaluate_downstack(&dt20.factory(), &seeds, rows, cap);
     eprintln!(
         "DOWNSTACK {rows} rows | CC2-eval: {:.2} pieces  {:.1} attack  {:.0}% clear  ||  DT20: {:.2} pieces  {:.1} attack  {:.0}% clear",
         cc2_ds.mean_pieces_to_clear,

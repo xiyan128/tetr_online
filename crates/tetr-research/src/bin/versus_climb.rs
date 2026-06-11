@@ -84,13 +84,11 @@
 use std::time::Instant;
 
 use tetr_core::ai::Cc2Weights;
-use tetr_core::player::PlayerController;
+use tetr_research::bots::BotSpec;
 use tetr_research::cli::{env_f64, env_usize, SplitMix64};
-use tetr_research::seeds::regions;
+use tetr_research::seeds::{regions, seed_set, seed_set_from};
 use tetr_research::sprt::{sprt_race, SprtConfig, SprtVerdict};
-use tetr_research::{
-    beam_cc2_weights_bot, evaluate_versus_format, seed_set, seed_set_from, VersusFormat,
-};
+use tetr_research::versus::{evaluate_versus_format, VersusFormat};
 
 /// One standard-normal draw (Box-Muller over the deterministic SplitMix64).
 fn gauss(rng: &mut SplitMix64) -> f64 {
@@ -111,12 +109,10 @@ fn objective(
     format: VersusFormat,
 ) -> f64 {
     let weights = Cc2Weights::attack_tuned().with_board_params(params);
-    let cand = move |s: u64| -> Box<dyn PlayerController> {
-        beam_cc2_weights_bot(s, width, depth, weights)
-    };
-    let incumbent = move |s: u64| -> Box<dyn PlayerController> {
-        beam_cc2_weights_bot(s, width, depth, Cc2Weights::attack_tuned())
-    };
+    let cand = BotSpec::beam(width, depth).cc2(weights).factory();
+    let incumbent = BotSpec::beam(width, depth)
+        .cc2(Cc2Weights::attack_tuned())
+        .factory();
 
     let fwd = evaluate_versus_format(&cand, &incumbent, seeds, format);
     let rev = evaluate_versus_format(&incumbent, &cand, seeds, format);
@@ -215,14 +211,12 @@ fn main() {
             // or an in-budget inconclusive demotes it — the v1/v2/v3 lesson is
             // that block means at this size pass noise; the racer does not.
             if accepted && confirm_matches > 0 {
-                let cand_weights = Cc2Weights::attack_tuned().with_board_params(&proposal);
-                let inc_weights = Cc2Weights::attack_tuned().with_board_params(&best_params);
-                let cand = move |s: u64| -> Box<dyn PlayerController> {
-                    beam_cc2_weights_bot(s, width, depth, cand_weights)
-                };
-                let incumbent = move |s: u64| -> Box<dyn PlayerController> {
-                    beam_cc2_weights_bot(s, width, depth, inc_weights)
-                };
+                let cand = BotSpec::beam(width, depth)
+                    .cc2(Cc2Weights::attack_tuned().with_board_params(&proposal))
+                    .factory();
+                let incumbent = BotSpec::beam(width, depth)
+                    .cc2(Cc2Weights::attack_tuned().with_board_params(&best_params))
+                    .factory();
                 let report = sprt_race(
                     &cand,
                     &incumbent,
@@ -297,12 +291,10 @@ fn main() {
     // Held-out validation: the honest verdict on DISJOINT seeds.
     let val = |params: &[f32; Cc2Weights::BOARD_PARAM_COUNT]| -> (u32, u32, u32, u32, f64) {
         let weights = Cc2Weights::attack_tuned().with_board_params(params);
-        let cand = move |s: u64| -> Box<dyn PlayerController> {
-            beam_cc2_weights_bot(s, width, depth, weights)
-        };
-        let incumbent = move |s: u64| -> Box<dyn PlayerController> {
-            beam_cc2_weights_bot(s, width, depth, Cc2Weights::attack_tuned())
-        };
+        let cand = BotSpec::beam(width, depth).cc2(weights).factory();
+        let incumbent = BotSpec::beam(width, depth)
+            .cc2(Cc2Weights::attack_tuned())
+            .factory();
         let fwd = evaluate_versus_format(&cand, &incumbent, &val_seeds, format);
         let rev = evaluate_versus_format(&incumbent, &cand, &val_seeds, format);
         let (mut dw, mut dl, mut margin) = (0u32, 0u32, 0.0f64);

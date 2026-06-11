@@ -15,11 +15,12 @@ use std::collections::VecDeque;
 use std::time::Duration;
 
 use tetr_core::engine::{attack_lines, EngineScoreAction, PieceGenerator, PieceType, TSpinKind};
+use tetr_research::bots::BotSpec;
 use tetr_research::cc2::{Cc2, TbpBoard, TbpMove};
+use tetr_research::downstack::{cheese_holes, evaluate_downstack};
+use tetr_research::seeds::seed_set;
+use tetr_research::versus::{decide_versus, VersusResult};
 use tetr_research::versus_legacy::{versus_hole, GarbageQueue, VersusEngine};
-use tetr_research::{
-    beam_linear_bot, cheese_holes, decide_versus, evaluate_downstack, seed_set, VersusResult,
-};
 
 const WIDTH: i32 = 10;
 const FULL_ROW: u16 = (1 << WIDTH) - 1;
@@ -388,7 +389,7 @@ fn run_versus(
     think: Duration,
 ) -> std::io::Result<(VersusResult, u32, u32)> {
     // A = our bot, on its own engine.
-    let mut ours = VersusEngine::new(&|s| beam_linear_bot(s, 16, 2), seed);
+    let mut ours = VersusEngine::new(&BotSpec::beam(16, 2).factory(), seed);
     let mut ours_q = GarbageQueue::default();
     let mut ours_attack = 0u32;
 
@@ -515,7 +516,7 @@ fn main() -> std::io::Result<()> {
     if std::env::var("DOWNSTACK").is_ok() {
         let garbage_rows = env_usize("GARBAGE_ROWS", 9) as u32;
         let cap = pieces as u32;
-        let ours = evaluate_downstack(&|s| beam_linear_bot(s, 16, 2), &seeds, garbage_rows, cap);
+        let ours = evaluate_downstack(&BotSpec::beam(16, 2).factory(), &seeds, garbage_rows, cap);
         let mut cc2_sum = 0.0f64;
         let mut cc2_cleared = 0usize;
         for &seed in &seeds {
