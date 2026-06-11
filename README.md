@@ -130,19 +130,20 @@ cargo test                       # unit tests + the guideline acceptance suite
 cargo run --features dev         # in-game ECS inspector overlay (egui)
 cargo bench                      # criterion benchmarks (engine + AI)
 
-# AI play-evaluation harness (dev-only; deterministic, never ships):
-cargo run --release --example arena_smoke --features arena
+# AI research harness (deterministic, never ships with the game):
+cargo run --release -p tetr-research --bin bench-marathon
 ```
 
-The `arena` feature is a harness for measuring *how well* a bot plays —
-reproducible, variance-aware numbers used to tune and compare AI implementations.
-It is gated off so it never compiles into the shipped game.
+`crates/tetr-research` is the measurement side of the project — reproducible,
+variance-aware experiments for tuning and comparing bots: APP benchmark suites,
+bot-vs-bot versus races with SPRT stopping, and the Cold Clear 2 referee. See
+`docs/research-guide.md` for the full tour.
 
 ## Roadmap
 
 - [x] **Engine** — pure, deterministic, guideline-correct, with a full acceptance suite.
 - [x] **Single-player** — Marathon / Sprint / Ultra, menus, options, high scores, pause.
-- [x] **AI player** — a model-agnostic bot with a tunable handicap and a sandbox mode.
+- [x] **AI player** — a model-agnostic bot with a tunable handicap and a Watch-AI mode.
 - [x] **Versus** — human-vs-AI and AI-vs-AI on one machine, with guideline attack and
   garbage (engine-owned rules, garbage-aware search seams). Local human-vs-human
   needs a second keymap on the same seat architecture.

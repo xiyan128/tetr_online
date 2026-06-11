@@ -37,7 +37,10 @@ its byte-identical pipeline and its deterministic-schedule tests.
 re-home): single-player and Watch-AI are one-seat sessions on this
 architecture now (`SessionMode::Solo{variant}`); the global resources, the
 parallel pipeline, the sandbox plugin, and the ModelSelect/GameOver screens
-are deleted, and the five load-bearing properties re-pinned seat-native
+are deleted, and the five load-bearing properties re-pinned seat-native.
+With versus no longer a sibling but *the* pipeline, the module was renamed
+`src/versus/` → `src/session/` and the states to
+`SessionSetup`/`Session`/`SessionPhase`.
 
 `VersusPhase::Over` stays **inside** `Versus` — the final boards remain on
 screen under the result banner (reading the losing stack is half the fun), and
