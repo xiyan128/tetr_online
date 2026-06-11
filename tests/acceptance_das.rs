@@ -18,8 +18,10 @@
 //! silently fold DAS timing back into the engine.
 //!
 //! Reachability note: these integration tests reach the engine via
-//! `tetr_online::engine::*`, which requires `pub mod engine;` in src/lib.rs
-//! (`MoveDirection` is needed here and is not part of the flat re-export block).
+//! `tetr_online::engine::*`, which requires `pub mod engine;` in src/lib.rs.
+//!
+//! Movement is observed through snapshots (`snapshot().active.origin`), not
+//! events: the engine deliberately emits no per-cell movement events.
 
 use tetr_online::engine::*;
 
@@ -34,15 +36,29 @@ const SEED_FIRST_PIECE_T: u64 = 0;
 /// piece snapshot. After this the active piece is sitting at its post-drop
 /// origin in an otherwise empty well.
 fn spawn_first_piece(engine: &mut Engine) -> ActivePieceSnapshot {
+    assert!(
+        engine.snapshot().active.is_none(),
+        "no piece is active before the first step",
+    );
     let spawn_events = engine.step(InputFrame::default());
     assert!(
-        matches!(spawn_events.as_slice(), [EngineEvent::Spawned { .. }]),
-        "first zero-dt step should spawn exactly one piece, got {spawn_events:?}",
+        spawn_events.is_empty(),
+        "the first zero-dt step only spawns (snapshot state, no events), got {spawn_events:?}",
     );
     engine
         .snapshot()
         .active
         .expect("a piece is active after the first step")
+}
+
+/// The active piece's origin, read from a fresh snapshot. Movement is snapshot
+/// state, so per-step origin deltas are how these tests observe moves.
+fn active_origin(engine: &Engine) -> (isize, isize) {
+    engine
+        .snapshot()
+        .active
+        .expect("an active piece is present")
+        .origin
 }
 
 // -------------------------------------------------------------------------
@@ -60,24 +76,16 @@ fn tap_left_moves_one_cell() {
         ..InputFrame::default()
     });
 
-    // Exactly one effective move, Left, origin shifted by -1 in x.
-    assert_eq!(
-        events,
-        vec![EngineEvent::Moved {
-            piece_type: before.piece_type,
-            direction: MoveDirection::Left,
-            origin: expected_origin,
-        }],
-        "a single left tap must emit exactly one Left Moved event",
+    // Exactly one effective move: origin shifted by -1 in x, y untouched, and
+    // nothing else happened this step (no score, no lock, no rotation events).
+    assert!(
+        events.is_empty(),
+        "a left tap is pure movement and emits no events, got {events:?}",
     );
     assert_eq!(
-        engine
-            .snapshot()
-            .active
-            .expect("active piece after tap")
-            .origin,
+        active_origin(&engine),
         expected_origin,
-        "the active piece must end one cell to the left",
+        "a single left tap must move the piece exactly one cell to the left",
     );
 }
 
@@ -92,24 +100,15 @@ fn tap_right_moves_one_cell() {
         ..InputFrame::default()
     });
 
-    // Mirror of the left tap: exactly one Right move, origin shifted by +1 in x.
-    assert_eq!(
-        events,
-        vec![EngineEvent::Moved {
-            piece_type: before.piece_type,
-            direction: MoveDirection::Right,
-            origin: expected_origin,
-        }],
-        "a single right tap must emit exactly one Right Moved event",
+    // Mirror of the left tap: exactly one move right, origin shifted by +1 in x.
+    assert!(
+        events.is_empty(),
+        "a right tap is pure movement and emits no events, got {events:?}",
     );
     assert_eq!(
-        engine
-            .snapshot()
-            .active
-            .expect("active piece after tap")
-            .origin,
+        active_origin(&engine),
         expected_origin,
-        "the active piece must end one cell to the right",
+        "a single right tap must move the piece exactly one cell to the right",
     );
 }
 
@@ -213,27 +212,20 @@ fn caveat_engine_step_has_no_das_state_machine() {
     let mut engine = Engine::new(config, SEED_FIRST_PIECE_T);
     let before = spawn_first_piece(&mut engine);
 
-    // Frame 1: the initial tap moves exactly one cell left.
-    let first = engine.step(InputFrame {
+    // Frame 1: the initial tap moves exactly one cell left. We watch origin.x
+    // across the step: only lateral movement touches x (the concurrent gravity
+    // system only ever changes y), so a per-frame x-delta of exactly -1 IS the
+    // "one cell per frame" property.
+    let x_before = active_origin(&engine).0;
+    engine.step(InputFrame {
         left: true,
         dt_seconds: dt,
         ..InputFrame::default()
     });
-    let first_left_moves = first
-        .iter()
-        .filter(|event| {
-            matches!(
-                event,
-                EngineEvent::Moved {
-                    direction: MoveDirection::Left,
-                    ..
-                }
-            )
-        })
-        .count();
     assert_eq!(
-        first_left_moves, 1,
-        "the initial held frame moves exactly one cell left, got events {first:?}",
+        active_origin(&engine).0,
+        x_before - 1,
+        "the initial held frame moves exactly one cell left",
     );
 
     // Frames 2..=8: button still held, plenty of elapsed time per frame. Because
@@ -242,28 +234,17 @@ fn caveat_engine_step_has_no_das_state_machine() {
     // fresh pulse, so the absence of auto-repeat means "one cell per frame", never
     // an accelerating burst.)
     for frame in 2..=8 {
-        let events = engine.step(InputFrame {
+        let x_before = active_origin(&engine).0;
+        engine.step(InputFrame {
             left: true,
             dt_seconds: dt,
             ..InputFrame::default()
         });
-        let left_moves = events
-            .iter()
-            .filter(|event| {
-                matches!(
-                    event,
-                    EngineEvent::Moved {
-                        direction: MoveDirection::Left,
-                        ..
-                    }
-                )
-            })
-            .count();
         assert_eq!(
-            left_moves, 1,
+            active_origin(&engine).0,
+            x_before - 1,
             "frame {frame}: no auto-repeat means exactly one cell per held frame \
-             (the engine owns no DAS timing — that lives player-side), \
-             got events {events:?}",
+             (the engine owns no DAS timing — that lives player-side)",
         );
     }
 

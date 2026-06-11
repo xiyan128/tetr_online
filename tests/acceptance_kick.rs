@@ -52,8 +52,9 @@ fn spawn_first_piece(seed: u64) -> (Engine, ActivePieceSnapshot) {
     let mut engine = Engine::new(EngineConfig::default(), seed);
     let spawn_events = engine.step(InputFrame::default());
     assert!(
-        matches!(spawn_events.as_slice(), [EngineEvent::Spawned { .. }]),
-        "a zero-dt first step must only spawn the first piece, got {spawn_events:?}"
+        spawn_events.is_empty(),
+        "a zero-dt first step must only spawn the first piece (snapshot state, \
+         no events), got {spawn_events:?}"
     );
     let active = engine
         .snapshot()

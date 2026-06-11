@@ -43,12 +43,11 @@ fn hard_drop_frame() -> InputFrame {
     }
 }
 
-/// Extract the piece type from a `Spawned` event, if present.
-fn spawned_piece(events: &[EngineEvent]) -> Option<PieceType> {
-    events.iter().find_map(|event| match event {
-        EngineEvent::Spawned { piece_type } => Some(*piece_type),
-        _ => None,
-    })
+/// The active piece type right now, read from the snapshot. Spawning is
+/// snapshot state (not an event): after a step that spawns, this is the
+/// freshly spawned piece.
+fn active_piece(engine: &Engine) -> Option<PieceType> {
+    engine.snapshot().active.map(|active| active.piece_type)
 }
 
 #[test]
@@ -119,9 +118,14 @@ fn next_queue_shifts_after_each_spawn() {
     let first_piece = queue_before_first[0];
 
     // First step spawns the front piece and refills the queue from the back.
-    let first_events = engine.step(idle_frame());
     assert_eq!(
-        spawned_piece(&first_events),
+        active_piece(&engine),
+        None,
+        "nothing active before step one"
+    );
+    engine.step(idle_frame());
+    assert_eq!(
+        active_piece(&engine),
         Some(first_piece),
         "first spawn must consume the front of the Next Queue",
     );
@@ -143,14 +147,22 @@ fn next_queue_shifts_after_each_spawn() {
     let expected_second_piece = queue_after_first_spawn[0];
 
     // Hard-dropping locks piece 1 and, in the same step, spawns piece 2: the
-    // engine's Completion -> Generation transition emits `Locked` then `Spawned`
-    // within one `step()` (the same contract asserted by
+    // engine's Completion -> Generation transition happens within one `step()`
+    // (the same contract asserted by
     // `acceptance_drops_hold::hard_drop_lands_and_locks_immediately` and the
-    // lock-timer-expiry cases in `acceptance_lock_down`). So the second spawn is
-    // observed in the hard-drop step's events, not a following idle frame.
+    // lock-timer-expiry cases in `acceptance_lock_down`). So the step that
+    // emits `Locked` must also leave the NEW piece active in the snapshot —
+    // the second spawn is observed right after the hard-drop step, not after
+    // a following idle frame.
     let second_events = engine.step(hard_drop_frame());
+    assert!(
+        second_events
+            .iter()
+            .any(|event| matches!(event, EngineEvent::Locked { .. })),
+        "the hard-drop step locks piece 1 in-band, got {second_events:?}",
+    );
     assert_eq!(
-        spawned_piece(&second_events),
+        active_piece(&engine),
         Some(expected_second_piece),
         "second spawn must consume the new front of the Next Queue",
     );

@@ -67,6 +67,30 @@ fn sorted_active_cells(engine: &Engine) -> Vec<(isize, isize)> {
     cells
 }
 
+/// Step once with no inputs and assert it cleanly spawned `expected`: spawning
+/// is snapshot state (not an event), so the observation is `active` going from
+/// None to `Some(expected)` across a step that emits nothing.
+fn step_spawns(engine: &mut Engine, expected: PieceType) {
+    assert!(
+        engine.snapshot().active.is_none(),
+        "no piece is active before the spawning step"
+    );
+    let events = engine.step(InputFrame::default());
+    assert!(
+        events.is_empty(),
+        "a clean spawn step emits no events, got {events:?}"
+    );
+    assert_eq!(
+        engine
+            .snapshot()
+            .active
+            .expect("active piece after the spawning step")
+            .piece_type,
+        expected,
+        "the spawned piece must be the front of the next queue"
+    );
+}
+
 /// 1. §25.1 "I spawns at (4..7,21)".
 ///
 /// Guideline columns 4..7 (1-based) == engine x in 3..=6; guideline row 21 ==
@@ -104,13 +128,7 @@ fn i_spawns_across_columns_4_to_7_on_skyline_row() {
     // immediate gravity drop (row below is free). The observed active piece is
     // therefore exactly one row below the spawn row.
     let mut engine = engine_with_first_piece(PieceType::I);
-    let events = engine.step(InputFrame::default());
-    assert_eq!(
-        events,
-        vec![EngineEvent::Spawned {
-            piece_type: PieceType::I
-        }]
-    );
+    step_spawns(&mut engine, PieceType::I);
 
     let observed = sorted_active_cells(&engine);
     assert_eq!(
@@ -147,13 +165,7 @@ fn o_spawns_in_columns_5_6_rows_21_22() {
 
     // Real engine: spawn + one immediate drop -> 2x2 shifted down one row.
     let mut engine = engine_with_first_piece(PieceType::O);
-    let events = engine.step(InputFrame::default());
-    assert_eq!(
-        events,
-        vec![EngineEvent::Spawned {
-            piece_type: PieceType::O
-        }]
-    );
+    step_spawns(&mut engine, PieceType::O);
 
     let observed = sorted_active_cells(&engine);
     assert_eq!(
@@ -205,12 +217,7 @@ fn jlszt_spawn_within_columns_4_to_6_rows_21_22() {
 
         // Real engine: after spawn + one immediate drop, columns 3..=5, rows 19,20.
         let mut engine = engine_with_first_piece(piece_type);
-        let events = engine.step(InputFrame::default());
-        assert_eq!(
-            events,
-            vec![EngineEvent::Spawned { piece_type }],
-            "{piece_type:?} spawns with a single Spawned event"
-        );
+        step_spawns(&mut engine, piece_type);
 
         let observed = sorted_active_cells(&engine);
         assert_eq!(observed.len(), 4, "{piece_type:?} occupies four cells");
@@ -231,7 +238,7 @@ fn jlszt_spawn_within_columns_4_to_6_rows_21_22() {
 ///
 /// Pre-set a locked cell inside the next piece's spawn footprint via the test
 /// seam, then a default step. The engine must emit ONLY `GameOver{BlockOut}`
-/// (no Spawned, no Moved, no immediate drop), leave `active` empty and record
+/// (no spawn, no immediate drop), leave `active` empty and record
 /// `game_over == Some(BlockOut)`.
 #[test]
 fn spawn_overlap_causes_block_out_before_immediate_drop() {
@@ -273,8 +280,7 @@ fn free_row_below_drops_generated_piece_exactly_one_row() {
     let first = engine.snapshot().next_queue[0];
     let spawn_origin = Piece::from(first).spawn_coords(config.board_width, config.visible_height);
 
-    let events = engine.step(InputFrame::default());
-    assert_eq!(events, vec![EngineEvent::Spawned { piece_type: first }]);
+    step_spawns(&mut engine, first);
 
     let active = engine.snapshot().active.expect("active piece after spawn");
     assert_eq!(active.piece_type, first);
@@ -290,8 +296,8 @@ fn free_row_below_drops_generated_piece_exactly_one_row() {
 /// Stage a locked cell directly under the spawn footprint (but NOT inside it, so
 /// the spawn itself succeeds), seed the engine so the first piece is a known I,
 /// then place the active piece at its true spawn origin via the seam and advance
-/// a zero-dt frame. The grounded piece must stay put: origin == spawn origin and
-/// no `Moved` event.
+/// a zero-dt frame. The grounded piece must stay put: the origin is unchanged
+/// across the step (no immediate drop).
 #[test]
 fn blocked_row_below_keeps_piece_at_spawn() {
     let config = EngineConfig::default();
@@ -314,10 +320,8 @@ fn blocked_row_below_keeps_piece_at_spawn() {
 
     let events = engine.step(InputFrame::default());
     assert!(
-        !events
-            .iter()
-            .any(|e| matches!(e, EngineEvent::Moved { .. })),
-        "blocked row below must not emit a Moved (no immediate drop): {events:?}"
+        events.is_empty(),
+        "the zero-dt step over a blocked row must not drop or lock the piece: {events:?}"
     );
 
     let active = engine.snapshot().active.expect("active piece");

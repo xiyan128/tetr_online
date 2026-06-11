@@ -8,7 +8,6 @@
 //! kick tables, and `None` otherwise.
 
 use crate::engine::bit_board::Occupancy;
-use crate::engine::board::{Board, CellKind};
 use std::fmt::Debug;
 
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
@@ -326,6 +325,7 @@ impl From<PieceType> for Piece {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::engine::board::Board;
 
     fn global_cells(piece: &Piece, offset: (isize, isize)) -> Vec<(isize, isize)> {
         let mut cells = piece

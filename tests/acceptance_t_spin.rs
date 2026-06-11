@@ -196,8 +196,8 @@ fn zero_line_t_spin_scores_but_does_not_start_b2b() {
 
     let events = engine.lock_active_for_test(active);
 
-    // Lock with no clear, then a Full T-Spin (0 lines) scoring 400, then the
-    // next piece spawns.
+    // Lock with no clear, then a Full T-Spin (0 lines) scoring 400; the next
+    // piece's spawn is snapshot state, asserted below.
     assert!(
         matches!(
             events.as_slice(),
@@ -215,13 +215,16 @@ fn zero_line_t_spin_scores_but_does_not_start_b2b() {
                     total_score: 400,
                     back_to_back_bonus: false,
                 },
-                EngineEvent::Spawned { .. },
             ]
         ),
-        "expected Locked(0) + Full T-Spin 0-line scoring 400 + Spawned, got {events:?}",
+        "expected Locked(0) + Full T-Spin 0-line scoring 400, got {events:?}",
     );
 
     let snapshot = engine.snapshot();
+    assert!(
+        snapshot.active.is_some(),
+        "the lock spawned the next piece in the same step",
+    );
     assert_eq!(snapshot.score, 400);
     assert_eq!(snapshot.lines, 0);
     // The defining assertion: a zero-line T-Spin does NOT start back-to-back.
@@ -279,10 +282,13 @@ fn zero_line_t_spin_preserves_existing_b2b() {
                 // Tetris (4) + perfect clear (10): versus attack now reported
                 // in-band (nothing pending, so net == gross).
                 EngineEvent::AttackSent { lines: 14 },
-                EngineEvent::Spawned { .. },
             ]
         ),
         "expected Tetris establishing b2b, got {tetris_events:?}",
+    );
+    assert!(
+        engine.snapshot().active.is_some(),
+        "the lock spawned the next piece in the same step",
     );
     // Back-to-back is now armed by the Tetris.
     assert!(engine.snapshot().back_to_back_active);
@@ -325,13 +331,16 @@ fn zero_line_t_spin_preserves_existing_b2b() {
                     // Zero-line T-Spin earns no b2b bonus for itself...
                     back_to_back_bonus: false,
                 },
-                EngineEvent::Spawned { .. },
             ]
         ),
         "expected zero-line Full T-Spin preserving b2b, got {t_spin_events:?}",
     );
 
     let snapshot = engine.snapshot();
+    assert!(
+        snapshot.active.is_some(),
+        "the lock spawned the next piece in the same step",
+    );
     // 800 (Tetris) + 400 (zero-line Full T-Spin, no bonus) = 1200.
     assert_eq!(snapshot.score, 1200);
     // ...and crucially the existing back-to-back chain is NOT broken.
@@ -391,13 +400,16 @@ fn mini_t_spin_double_scores_400_and_starts_back_to_back() {
                 },
                 // Mini T-Spin Double base attack (1 line, the unified table).
                 EngineEvent::AttackSent { lines: 1 },
-                EngineEvent::Spawned { .. },
             ]
         ),
         "expected a Mini Double worth 400 starting a B2B chain, got {events:?}",
     );
 
     let snapshot = engine.snapshot();
+    assert!(
+        snapshot.active.is_some(),
+        "the lock spawned the next piece in the same step",
+    );
     assert_eq!(snapshot.score, 400);
     assert_eq!(snapshot.lines, 2);
     assert!(
