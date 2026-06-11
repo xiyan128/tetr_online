@@ -357,10 +357,10 @@ mod tests {
             };
             assert!(!rendered.is_empty(), "{} rendered empty", action.label());
         }
-        // Rotate CW is the one default with a secondary key (Up / X).
+        // Rotate CW carries the WASD-side secondary (Up / W).
         let (p, s) = binds.get(GameAction::RotateCw);
         assert_eq!(key_label(p), "Up");
-        assert_eq!(s.map(key_label).as_deref(), Some("X"));
+        assert_eq!(s.map(key_label).as_deref(), Some("W"));
     }
 
     #[test]
