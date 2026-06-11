@@ -202,8 +202,9 @@ fn rotation_has_no_auto_repeat() {
 #[test]
 fn caveat_engine_step_has_no_das_state_machine() {
     let config = EngineConfig {
-        // Wide well so horizontal room is never the limiting factor.
-        board_width: 40,
+        // The widest well the board envelope allows (16 columns), so horizontal
+        // room outlasts the held frames below.
+        board_width: 16,
         ..EngineConfig::default()
     };
     // A large per-frame dt: a (wrong) auto-shift engine would fire several repeats
@@ -228,12 +229,12 @@ fn caveat_engine_step_has_no_das_state_machine() {
         "the initial held frame moves exactly one cell left",
     );
 
-    // Frames 2..=8: button still held, plenty of elapsed time per frame. Because
+    // Frames 2..=6: button still held, plenty of elapsed time per frame. Because
     // the engine has no DAS state machine, each frame still moves exactly one cell.
     // (One-per-frame rather than zero: the engine treats every held frame as a
     // fresh pulse, so the absence of auto-repeat means "one cell per frame", never
     // an accelerating burst.)
-    for frame in 2..=8 {
+    for frame in 2..=6 {
         let x_before = active_origin(&engine).0;
         engine.step(InputFrame {
             left: true,
@@ -248,7 +249,7 @@ fn caveat_engine_step_has_no_das_state_machine() {
         );
     }
 
-    // Net effect after 8 held frames: the piece has shifted exactly 8 cells in x
+    // Net effect after 6 held frames: the piece has shifted exactly 6 cells in x
     // (one per frame), proving DAS acceleration is NOT applied. We assert only the
     // x-axis here: each frame also advances `dt` past the fall interval, so the
     // unrelated gravity system may legitimately drop the piece a row or two — that
@@ -259,7 +260,7 @@ fn caveat_engine_step_has_no_das_state_machine() {
         .expect("active piece after holding left");
     assert_eq!(
         after.origin.0,
-        before.origin.0 - 8,
-        "8 held frames shift exactly 8 cells in x (one per frame), with no auto-repeat burst",
+        before.origin.0 - 6,
+        "6 held frames shift exactly 6 cells in x (one per frame), with no auto-repeat burst",
     );
 }

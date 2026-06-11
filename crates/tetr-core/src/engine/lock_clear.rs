@@ -50,12 +50,10 @@ pub fn lock_and_clear(active: &ActivePiece, board: &mut Board) -> LockOutcome {
     }
 
     // Full-row detection and the post-lock skyline both come from the column
-    // bitboard: one cheap scan plus O(width) bit ops, rather than repeatedly
-    // materialising `board.cells()` (a whole-board scan that allocates a `Vec` of
-    // every occupied cell). The lock path is the search's hottest mutation — it runs
-    // once per candidate placement — so this is a large constant-factor win, and it
-    // is exactly equivalent: a row is full iff every column's bit is set there, and
-    // the skyline is the highest set bit across columns.
+    // bitboard (now a plane read, not a scan). Two snapshots on the clearing
+    // path is deliberate: the PRE-clear columns answer "which rows were full"
+    // (the report), the POST-clear columns answer "where is the skyline now" —
+    // different questions about different states.
     let cols = board.column_bits();
     let cleared_rows = full_rows(&cols);
     let top_y_after_lock = if cleared_rows.is_empty() {

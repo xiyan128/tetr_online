@@ -1,47 +1,87 @@
-//! The playfield grid and its cells.
+//! The playfield: ONE board, two planes.
 //!
-//! [`Board`] is a row-major matrix of [`Cell`]s addressed by signed `(x, y)`
-//! coordinates with the origin at the bottom-left. An optional top margin holds
-//! the hidden spawn rows above the visible field. Off-grid reads resolve to
-//! [`CellKind::Wall`] (sides/floor) so collision checks need no bounds special-
-//! casing.
+//! [`Board`] composes the [`BitBoard`] **occupancy plane** (the single home of
+//! every board rule: full rows, compaction, garbage insertion, overflow, the
+//! skyline) with a flat **colour plane** (`Vec<CellKind>`, row-major over the
+//! backing grid) carrying per-cell identity for snapshots and rendering.
+//! Mutations update both planes in lockstep; reads dispatch to whichever
+//! plane answers. The rules cannot disagree with the search's view by
+//! construction — the colour plane is *driven by* the bitboard's own results
+//! (its full-row list, its overflow verdict), never recomputed beside them.
+//! (Before the 2026-06-10 unification these were two complete board
+//! implementations kept aligned by randomized differential tests; see
+//! `docs/adr-board-unification.md`.)
+//!
+//! Addressing is signed `(x, y)` with the origin at the bottom-left; an
+//! optional top margin holds the hidden spawn rows. Off-grid reads resolve to
+//! [`CellKind::Wall`] (sides/floor) so collision checks need no bounds
+//! special-casing.
 
-use std::cmp::Ordering;
 use std::fmt::{Display, Write};
 
+use crate::engine::bit_board::{BitBoard, MAX_WIDTH};
 use crate::engine::pieces::PieceType;
-use array2d::Array2D;
-use smallvec::{smallvec, SmallVec};
+use smallvec::SmallVec;
 
 #[derive(Clone)]
 pub struct Board {
     width: usize,
     height: usize,
-    cells: Array2D<Cell>,
+    /// Total rows (visible + hidden buffer).
+    backing: usize,
+    /// Occupancy truth — the rules live here.
+    bits: BitBoard,
+    /// Identity truth — `colors[y * width + x]`, `None` where unoccupied.
+    colors: Vec<CellKind>,
 }
 
 impl Board {
     pub fn new(width: usize, height: usize) -> Self {
-        Self {
-            width,
-            height,
-            cells: Array2D::filled_with(Cell::default(), height, width),
-        }
+        Self::with_top_margin(width, height, 0)
     }
 
     pub fn with_top_margin(width: usize, height: usize, margin: usize) -> Self {
+        let backing = height + margin;
+        assert!(
+            width <= MAX_WIDTH && backing <= 64,
+            "Board envelope is {MAX_WIDTH}x64 (requested {width}x{backing}): the occupancy \
+             plane is a u64-column bitboard"
+        );
         Self {
             width,
             height,
-            cells: Array2D::filled_with(Cell::default(), height + margin, width),
+            backing,
+            bits: BitBoard::empty(width, height, backing),
+            colors: vec![CellKind::None; backing * width],
         }
     }
 
+    #[inline]
+    fn index(&self, x: usize, y: usize) -> usize {
+        y * self.width + x
+    }
+
+    /// Write `cell_kind` at `(x, y)`, keeping both planes in lockstep. Returns
+    /// `false` (a dropped write) outside the backing grid — a cell cannot
+    /// exist off the grid.
     pub fn set(&mut self, x: isize, y: isize, cell_kind: CellKind) -> bool {
-        if x < 0 || y < 0 || x >= self.width as isize || y >= self.cells.column_len() as isize {
+        // Wall is the off-grid sentinel, never a stored cell: writing it would
+        // silently diverge the planes (Wall.is_some() is false, so the bit
+        // would clear while the colour said Wall). Reject it loudly.
+        debug_assert!(
+            cell_kind != CellKind::Wall,
+            "CellKind::Wall is a boundary sentinel, not a storable cell"
+        );
+        if x < 0 || y < 0 || x >= self.width as isize || y >= self.backing as isize {
             return false;
         }
-        self.cells[(y as usize, x as usize)] = Cell::new(x, y, cell_kind);
+        let idx = self.index(x as usize, y as usize);
+        self.colors[idx] = cell_kind;
+        if cell_kind.is_some() {
+            self.bits.set(x, y);
+        } else {
+            self.bits.clear(x, y);
+        }
         true
     }
 
@@ -49,125 +89,92 @@ impl Board {
     /// occupy. A `set`/lock at or above this is dropped — a cell cannot exist off the
     /// top of the grid.
     pub fn backing_rows(&self) -> usize {
-        self.cells.column_len()
+        self.backing
     }
 
-    pub(crate) fn rows(&self) -> Vec<Vec<Cell>> {
-        self.cells.as_rows()[..self.height].to_vec()
-    }
-
-    pub(crate) fn cells(&self) -> Vec<&Cell> {
-        self.cells
-            .elements_row_major_iter()
-            .filter(|cell| cell.cell_kind.is_some())
-            .collect()
+    /// Every occupied cell as `(x, y, kind)`, row-major (bottom row first).
+    pub(crate) fn cells(&self) -> Vec<(isize, isize, CellKind)> {
+        let mut out = Vec::new();
+        for y in 0..self.backing {
+            for x in 0..self.width {
+                let kind = self.colors[self.index(x, y)];
+                if kind.is_some() {
+                    out.push((x as isize, y as isize, kind));
+                }
+            }
+        }
+        out
     }
 
     /// True iff no playfield cell (visible **or** buffer) is filled — i.e. a perfect
-    /// clear. Short-circuits on the first occupied cell and allocates nothing, unlike
-    /// [`cells`](Self::cells) or a full snapshot; called on the line-clear hot path.
+    /// clear. O(width) bit test; called on the line-clear hot path.
     pub fn is_empty(&self) -> bool {
-        !self
-            .cells
-            .elements_row_major_iter()
-            .any(|cell| cell.cell_kind.is_some())
+        self.bits.is_empty()
     }
 
     pub fn get_cell_kind(&self, x: isize, y: isize) -> CellKind {
         if x < 0 || y < 0 || x >= self.width as isize {
             return CellKind::Wall;
         }
-        // `x` is already in bounds, so index directly once `y` is on the backing grid —
-        // this skips `Array2D::get`'s redundant `x` bound-check and `Option` wrapping.
-        // Hot path: movegen collision + T-spin corners query this per cell per pose.
-        if (y as usize) < self.cells.column_len() {
-            self.cells[(y as usize, x as usize)].cell_kind
+        if (y as usize) < self.backing {
+            self.colors[y as usize * self.width + x as usize]
         } else {
             CellKind::None
         }
     }
 
     pub fn cell_coords(&self) -> Vec<(isize, isize)> {
-        self.cells().iter().map(|cell| (cell.x, cell.y)).collect()
+        self.cells().iter().map(|&(x, y, _)| (x, y)).collect()
     }
 
     /// The column bitboard: `result[x]` has bit `y` set iff `(x, y)` is occupied
-    /// (buffer rows included). Built in one pass over the backing grid — no
-    /// intermediate cell `Vec` — so it is cheaper than `cells()`. Shared by the
-    /// linear and CC2 evaluators so both pack the playfield identically; this runs
-    /// once per board evaluation (the search hot path), so it returns a stack
-    /// [`SmallVec`] — no heap allocation for the standard ≤16-wide board.
+    /// (buffer rows included). A direct copy out of the occupancy plane — no scan.
+    /// Shared by the evaluators and `lock_and_clear`'s full-row/skyline queries.
     pub fn column_bits(&self) -> SmallVec<[u64; 16]> {
-        let mut cols: SmallVec<[u64; 16]> = smallvec![0u64; self.width];
-        for cell in self.cells.elements_row_major_iter() {
-            if cell.cell_kind.is_some() {
-                let (x, y) = (cell.x, cell.y);
-                if x >= 0 && (x as usize) < self.width && (0..64).contains(&y) {
-                    cols[x as usize] |= 1u64 << y;
-                }
-            }
-        }
-        cols
+        SmallVec::from_slice(self.bits.columns())
     }
 
-    pub(crate) fn row_cells(&self, row: usize) -> impl Iterator<Item = &Cell> {
-        self.cells()
-            .into_iter()
-            .filter(move |cell| cell.y == row as isize)
-    }
-
-    pub(crate) fn clear_line(&mut self, y: usize) -> Vec<Cell> {
-        let mut cleared = Vec::new();
-
-        for x in 0..self.width {
-            let cell = self.cells[(y, x)];
-            self.set(x as isize, y as isize, CellKind::None);
-            cleared.push(cell);
-        }
-
-        // Move every cell above the cleared row down one. Bound by the full
-        // backing array (visible + buffer), not `self.height`: a piece can lock
-        // partly in the buffer zone above the skyline (§16.4), and those cells
-        // must fall too — otherwise they are left floating, unsupported (§11.3).
-        for y in (y + 1)..self.cells.column_len() {
-            for x in 0..self.width {
-                let cell = self.cells[(y, x)];
-                self.set(x as isize, y as isize, CellKind::None);
-                self.set(x as isize, y as isize - 1, cell.cell_kind);
-            }
-        }
-
-        cleared
+    /// The occupancy plane itself (`Copy`) — the search's fork currency. This
+    /// is what `SearchState::from_snapshot` seeds from; identical by
+    /// construction to the colours' occupancy (the lockstep invariant).
+    pub fn bits(&self) -> BitBoard {
+        self.bits
     }
 
     /// Remove every completely-filled row across the **full backing matrix** (visible
     /// field + hidden buffer) and compact the stack downward, returning the count
-    /// removed. Scanning the whole matrix — not just the visible field — is the
-    /// guideline rule: a row that fills entirely in the buffer zone clears like any
-    /// other. The scan re-examines the same index after each clear, so a row that drops
-    /// into a just-cleared slot is itself checked.
+    /// removed. The full-row list comes from the occupancy plane (the ONE rule
+    /// home); the colour plane compacts by that list, so the two planes cannot
+    /// diverge on what cleared.
     pub fn clear_lines(&mut self) -> usize {
-        let mut cleared = 0;
-        let mut y = 0;
-        let backing = self.backing_rows();
-
-        while y < backing {
-            if self.row_cells(y).count() == self.width {
-                self.clear_line(y);
-                cleared += 1;
-            } else {
-                y += 1;
+        let full = self.bits.full_rows();
+        if full.is_empty() {
+            return 0;
+        }
+        // Compact colours: keep non-full rows in order, pad the top with empties.
+        let mut compacted = Vec::with_capacity(self.colors.len());
+        let mut is_full = [false; 64];
+        for &y in &full {
+            is_full[y as usize] = true;
+        }
+        for (y, full) in is_full.iter().enumerate().take(self.backing) {
+            if !full {
+                let start = self.index(0, y);
+                compacted.extend_from_slice(&self.colors[start..start + self.width]);
             }
         }
-
-        cleared
+        compacted.resize(self.colors.len(), CellKind::None);
+        self.colors = compacted;
+        self.bits.clear_full_rows();
+        full.len()
     }
 
-    /// Insert `count` garbage rows at the bottom, shifting the whole stack up —
-    /// the inverse of [`clear_line`](Self::clear_line). Each new row is full except
-    /// `hole_col`, painted [`CellKind::Garbage`] so a renderer can tell attack
-    /// from the player's own stack. Returns `true` if any filled cell was forced
-    /// past the backing top (a garbage-induced top-out for the caller to act on).
+    /// Insert `count` garbage rows at the bottom, shifting the whole stack up.
+    /// Each new row is full except `hole_col`, painted [`CellKind::Garbage`] so
+    /// a renderer can tell attack from the player's own stack. Returns `true`
+    /// if any pre-existing cell was forced past the backing top (a
+    /// garbage-induced top-out for the caller to act on) — the verdict comes
+    /// from the occupancy plane's own insertion.
     pub fn insert_garbage_lines(&mut self, count: usize, hole_col: usize) -> bool {
         if count == 0 {
             return false;
@@ -175,36 +182,24 @@ impl Board {
         // A hole column past the right wall would fill the whole row (no gap); clamp
         // so out-of-range garbage always leaves a diggable hole rather than a free clear.
         let hole_col = hole_col.min(self.width.saturating_sub(1));
-        let backing = self.cells.column_len();
-        let mut overflow = false;
+        let overflow = self.bits.insert_garbage_lines(count, hole_col);
 
-        // Walk top row first so a cell is never overwritten before it has moved:
-        // destination `y + count` is always a row we have already vacated.
-        for y in (0..backing).rev() {
-            for x in 0..self.width {
-                let kind = self.cells[(y, x)].cell_kind;
-                self.set(x as isize, y as isize, CellKind::None);
-                // `is_some`, not a `Some(_)` pattern: rows risen by an earlier
-                // call are `Garbage` cells and must shift up like any others.
-                if kind.is_some() {
-                    let ny = y + count;
-                    if ny < backing {
-                        self.set(x as isize, ny as isize, kind);
-                    } else {
-                        overflow = true;
-                    }
-                }
-            }
+        // Shift colours up by `count` rows (rows pushed past the top drop), then
+        // paint the new bottom rows garbage-except-hole — mirroring the bit shift.
+        let mut shifted = vec![CellKind::None; self.colors.len()];
+        for y in 0..self.backing.saturating_sub(count) {
+            let src = self.index(0, y);
+            let dst = (y + count) * self.width;
+            shifted[dst..dst + self.width].copy_from_slice(&self.colors[src..src + self.width]);
         }
-
-        for y in 0..count {
+        for y in 0..count.min(self.backing) {
             for x in 0..self.width {
                 if x != hole_col {
-                    self.set(x as isize, y as isize, CellKind::Garbage);
+                    shifted[y * self.width + x] = CellKind::Garbage;
                 }
             }
         }
-
+        self.colors = shifted;
         overflow
     }
 
@@ -217,12 +212,21 @@ impl Board {
     }
 }
 
+impl crate::engine::bit_board::Occupancy for Board {
+    fn blocked(&self, x: isize, y: isize) -> bool {
+        // Collision is an occupancy question: answer from the bit plane (the
+        // colour plane would give the identical answer — the lockstep
+        // invariant — but the bits answer in two compares and a mask).
+        self.bits.blocked(x, y)
+    }
+}
+
 impl Display for Board {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         // Render top row first so the output reads like the on-screen board.
-        for row in self.rows().iter().rev() {
-            for cell in row {
-                f.write_str(match cell.cell_kind {
+        for y in (0..self.height as isize).rev() {
+            for x in 0..self.width as isize {
+                f.write_str(match self.get_cell_kind(x, y) {
                     CellKind::Some(_) => "X",
                     CellKind::Garbage => "G",
                     CellKind::None => "#",
@@ -231,7 +235,6 @@ impl Display for Board {
             }
             f.write_char('\n')?;
         }
-
         Ok(())
     }
 }
@@ -249,6 +252,19 @@ pub enum CellKind {
     Garbage,
 }
 
+impl CellKind {
+    /// A filled mino cell — a locked piece or a garbage cell. This is the
+    /// "counts toward a full row / collides / tops out" predicate; `Wall` is
+    /// not `some`.
+    pub fn is_some(&self) -> bool {
+        matches!(self, CellKind::Some(_) | CellKind::Garbage)
+    }
+
+    pub fn is_none(&self) -> bool {
+        matches!(self, CellKind::None)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -256,6 +272,55 @@ mod tests {
     fn fill_row(board: &mut Board, y: isize, piece_type: PieceType) {
         for x in 0..board.width {
             assert!(board.set(x as isize, y, CellKind::Some(piece_type)));
+        }
+    }
+
+    /// THE lockstep invariant: occupancy derived from the colour plane equals
+    /// the bit plane, under a randomized op sequence (sets, clears, garbage
+    /// inserts, line clears). This replaces the five cross-representation
+    /// differential tests the unification retired.
+    #[test]
+    fn planes_stay_in_lockstep_under_random_ops() {
+        let mut rng = 0x1234_5678_9ABC_DEFFu64;
+        let mut next = move || {
+            rng ^= rng << 13;
+            rng ^= rng >> 7;
+            rng ^= rng << 17;
+            rng
+        };
+        let mut board = Board::with_top_margin(10, 20, 20);
+        for _ in 0..5_000 {
+            match next() % 10 {
+                0..=5 => {
+                    let x = (next() % 10) as isize;
+                    let y = (next() % 40) as isize;
+                    let kind = match next() % 3 {
+                        0 => CellKind::Some(PieceType::T),
+                        1 => CellKind::Garbage,
+                        _ => CellKind::None,
+                    };
+                    board.set(x, y, kind);
+                }
+                6..=7 => {
+                    board.insert_garbage_lines((next() % 3) as usize + 1, (next() % 12) as usize);
+                }
+                _ => {
+                    // Fill a random row to make clears reachable, then clear.
+                    let y = (next() % 40) as isize;
+                    fill_row(&mut board, y, PieceType::O);
+                    board.clear_lines();
+                }
+            }
+            // Invariant: every cell agrees across the planes.
+            for y in 0..board.backing_rows() as isize {
+                for x in 0..board.width() as isize {
+                    assert_eq!(
+                        board.get_cell_kind(x, y).is_some(),
+                        board.bits().occupied(x, y),
+                        "plane disagreement at ({x},{y})"
+                    );
+                }
+            }
         }
     }
 
@@ -313,9 +378,9 @@ mod tests {
         fill_row(&mut board, 0, PieceType::I);
         assert!(board.set(1, 1, CellKind::Some(PieceType::T)));
 
-        let cleared = board.clear_line(0);
+        let cleared = board.clear_lines();
 
-        assert_eq!(cleared.len(), 4);
+        assert_eq!(cleared, 1);
         assert_eq!(board.get_cell_kind(1, 0), CellKind::Some(PieceType::T));
         assert_eq!(board.get_cell_kind(1, 1), CellKind::None);
     }
@@ -354,7 +419,7 @@ mod tests {
         assert!(board
             .cells()
             .iter()
-            .all(|c| c.cell_kind != CellKind::Some(PieceType::T)));
+            .all(|&(_, _, kind)| kind != CellKind::Some(PieceType::T)));
         assert_eq!(board.get_cell_kind(0, 0), CellKind::None);
         assert_eq!(board.get_cell_kind(1, 0), CellKind::Garbage);
         assert_eq!(board.get_cell_kind(1, 1), CellKind::Garbage);
@@ -362,135 +427,43 @@ mod tests {
 
     #[test]
     fn clear_line_drops_cells_in_the_buffer_zone_above_visible_height() {
-        // Regression: the shift-down must cover the full backing array, not just
+        // Regression: the compaction must cover the full backing array, not just
         // the visible height. A cell that locked in the buffer zone (y >= visible
         // height, legal per §16.4) above a cleared visible row has to fall like
         // any other — otherwise it is left floating above the skyline (§11.3).
-        // The plain `Board::new` clear test above hides this: with no buffer, the
-        // visible-height bound *is* the array bound.
-        let mut board = Board::with_top_margin(4, 4, 4); // visible 4, buffer 4 => 8 rows
-        fill_row(&mut board, 0, PieceType::I); // full visible row 0 -> clears
-        assert!(board.set(0, 2, CellKind::Some(PieceType::T))); // visible cell above
-        assert!(board.set(0, 4, CellKind::Some(PieceType::S))); // buffer-zone cell
+        let mut board = Board::with_top_margin(4, 4, 4);
+        fill_row(&mut board, 0, PieceType::I);
+        assert!(board.set(0, 5, CellKind::Some(PieceType::S))); // buffer-zone cell
 
         assert_eq!(board.clear_lines(), 1);
 
-        // Both cells dropped one row; nothing left floating in the buffer.
-        assert_eq!(board.get_cell_kind(0, 1), CellKind::Some(PieceType::T));
-        assert_eq!(board.get_cell_kind(0, 3), CellKind::Some(PieceType::S));
-        assert_eq!(board.get_cell_kind(0, 4), CellKind::None);
+        assert_eq!(board.get_cell_kind(0, 4), CellKind::Some(PieceType::S));
+        assert_eq!(board.get_cell_kind(0, 5), CellKind::None);
     }
 
     #[test]
-    fn clear_lines_handles_multiple_adjacent_full_rows() {
-        let mut board = Board::new(4, 4);
-        fill_row(&mut board, 0, PieceType::I);
-        fill_row(&mut board, 1, PieceType::O);
-        assert!(board.set(2, 2, CellKind::Some(PieceType::T)));
+    fn buffer_zone_rows_clear_like_visible_rows() {
+        // A row that fills entirely inside the hidden buffer clears like any
+        // other (the guideline full-matrix rule).
+        let mut board = Board::with_top_margin(4, 4, 4);
+        fill_row(&mut board, 5, PieceType::I); // entirely in the buffer
+        assert!(board.set(0, 6, CellKind::Some(PieceType::S)));
 
-        assert_eq!(board.clear_lines(), 2);
-        assert_eq!(board.get_cell_kind(2, 0), CellKind::Some(PieceType::T));
-        assert_eq!(board.cells().len(), 1);
-    }
-
-    #[test]
-    fn clear_lines_clears_a_full_buffer_row() {
-        // Guideline whole-matrix rule: a row that fills entirely in the buffer zone
-        // (y >= visible height) clears and counts like any visible row. Regression guard
-        // for the clear/score conflation — the physical clear must remove exactly what
-        // the scored count (full_rows) reports.
-        let mut board = Board::with_top_margin(4, 4, 4); // visible 4, buffer 4 => 8 backing
-        fill_row(&mut board, 5, PieceType::I); // a full row, entirely in the buffer
-        assert!(board.set(0, 6, CellKind::Some(PieceType::T))); // a lone sentinel above it
-
-        assert_eq!(
-            board.clear_lines(),
-            1,
-            "the full buffer row clears and is counted"
-        );
+        assert_eq!(board.clear_lines(), 1);
 
         assert_eq!(
             board.get_cell_kind(0, 5),
-            CellKind::Some(PieceType::T),
-            "sentinel fell one row"
+            CellKind::Some(PieceType::S),
+            "the cell above the cleared buffer row falls one row"
         );
         assert_eq!(board.get_cell_kind(0, 6), CellKind::None);
-        assert_eq!(board.cells().len(), 1, "only the sentinel remains");
-    }
-}
-
-impl CellKind {
-    /// A filled mino cell — a locked piece or a garbage cell. This is the
-    /// "counts toward a full row / collides / tops out" predicate; `Wall` is
-    /// not `some`.
-    pub fn is_some(&self) -> bool {
-        matches!(self, CellKind::Some(_) | CellKind::Garbage)
     }
 
-    pub fn is_none(&self) -> bool {
-        matches!(self, CellKind::None)
-    }
-
-    pub fn unwrap(self) -> PieceType {
-        match self {
-            CellKind::Some(piece_type) => piece_type,
-            _ => panic!("CellKind carries no piece type (None, Wall, or Garbage)"),
-        }
-    }
-}
-
-// `Copy`: all fields are `Copy` and there is no `Drop`, so a board (`Array2D<Cell>`,
-// i.e. a `Vec<Cell>`) clones via memcpy rather than per-element — this is on the
-// search's hot path, which clones a board per candidate placement.
-#[derive(Debug, Clone, Copy)]
-pub(crate) struct Cell {
-    // unique index
-    pub(crate) x: isize,
-    y: isize,
-    pub(crate) cell_kind: CellKind,
-}
-
-impl Eq for Cell {}
-
-impl PartialEq<Self> for Cell {
-    fn eq(&self, other: &Self) -> bool {
-        self.x == other.x && self.y == other.y
-    }
-}
-
-impl PartialOrd<Self> for Cell {
-    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Cell {
-    fn cmp(&self, other: &Self) -> Ordering {
-        // row and then column
-        self.y.cmp(&other.y).then(self.x.cmp(&other.x))
-    }
-}
-
-impl Default for Cell {
-    fn default() -> Self {
-        Self {
-            x: 0,
-            y: 0,
-            cell_kind: CellKind::None,
-        }
-    }
-}
-
-impl Cell {
-    pub fn new(x: isize, y: isize, cell_kind: CellKind) -> Self {
-        Self { x, y, cell_kind }
-    }
-
-    pub fn coords(&self) -> (isize, isize) {
-        (self.x, self.y)
-    }
-
-    pub fn cell_kind(&self) -> CellKind {
-        self.cell_kind
+    #[test]
+    fn oversize_boards_are_rejected() {
+        let r = std::panic::catch_unwind(|| Board::new(17, 20));
+        assert!(r.is_err(), "width beyond the bit plane must panic");
+        let r = std::panic::catch_unwind(|| Board::with_top_margin(10, 40, 30));
+        assert!(r.is_err(), "backing rows beyond 64 must panic");
     }
 }

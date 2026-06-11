@@ -46,12 +46,6 @@ pub trait Occupancy {
     fn blocked(&self, x: isize, y: isize) -> bool;
 }
 
-impl Occupancy for Board {
-    fn blocked(&self, x: isize, y: isize) -> bool {
-        !matches!(self.get_cell_kind(x, y), crate::engine::CellKind::None)
-    }
-}
-
 /// A fixed-size, `Copy` occupancy board: `cols[x]` has bit `y` set iff `(x, y)` is filled.
 ///
 /// Cloning is a flat copy — no heap, no allocator traffic — so the search's
@@ -92,11 +86,8 @@ impl BitBoard {
             board.width(),
             board.backing_rows(),
         );
-        let mut bb = Self::empty(board.width(), board.height(), board.backing_rows());
-        for (x, col) in board.column_bits().iter().enumerate().take(MAX_WIDTH) {
-            bb.cols[x] = *col;
-        }
-        bb
+        // The board IS bitboard-backed now: this is a plane read, not a scan.
+        board.bits()
     }
 
     /// Board width (number of active columns).
@@ -137,6 +128,15 @@ impl BitBoard {
             return false;
         }
         self.cols[x as usize] & (1u64 << y) != 0
+    }
+
+    /// Empty `(x, y)` (no-op if out of bounds) — [`set`](Self::set)'s inverse,
+    /// for the colour plane's lockstep writes.
+    pub(crate) fn clear(&mut self, x: isize, y: isize) {
+        if x < 0 || y < 0 || x as usize >= self.width || y as usize >= self.total_rows {
+            return;
+        }
+        self.cols[x as usize] &= !(1u64 << y);
     }
 
     /// Fill `(x, y)` (no-op if out of bounds).
