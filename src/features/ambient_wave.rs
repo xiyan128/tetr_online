@@ -69,29 +69,30 @@ const TAU_LEVEL: f32 = 1.5;
 const TAU_CALM: f32 = 0.8;
 const TAU_AMBER: f32 = 2.5;
 
-/// Wave shape — short-crested ocean texture. BOTH carrier octaves travel
-/// along the same diagonal (cross-angled carriers interfere into blobs);
-/// their different wavelengths and speeds roll a slow beat through the
-/// swells, so waves arrive in sets. The crest-breaking ENVELOPE runs along
-/// the crest axis: two deep, non-commensurate, counter-drifting modulators
-/// whose mix reaches zero — crests break into finite breathing segments of
-/// varying length instead of full-screen streaks, while every segment stays
-/// aligned to the travel diagonal. All cycles well past the 8 s floor.
+/// Wave shape — sinuous wavefronts, the ukiyo-e line-work read. Two carrier
+/// octaves travel along one diagonal (same direction: cross-angled carriers
+/// interfere into blobs) and beat against each other so swells arrive in
+/// sets. The art is in the GEOMETRY, not the amplitude: two slow transverse
+/// sways phase-displace the carriers, bending every crest into a meandering
+/// curve that writhes as the sways counter-drift. Amplitude along a crest is
+/// never gated, so a crest can neither break into clumps nor read as a
+/// straight ellipse — it is a continuous curved line, like grain in wood or
+/// swell drawn by hand. All cycles well past the 8 s floor.
 const CYCLE_PRIMARY_SECONDS: f32 = 19.0;
 const CYCLE_SECONDARY_SECONDS: f32 = 31.0;
-const WAVELENGTH_PRIMARY_TEXELS: f32 = 260.0;
-const WAVELENGTH_SECONDARY_TEXELS: f32 = 150.0;
-/// The crest-breaking envelope's two modulators (along `x - y`).
-const CYCLE_ENVELOPE_A_SECONDS: f32 = 23.0;
-const CYCLE_ENVELOPE_B_SECONDS: f32 = 37.0;
-const WAVELENGTH_ENVELOPE_A_TEXELS: f32 = 430.0;
-const WAVELENGTH_ENVELOPE_B_TEXELS: f32 = 250.0;
+const WAVELENGTH_PRIMARY_TEXELS: f32 = 210.0;
+const WAVELENGTH_SECONDARY_TEXELS: f32 = 130.0;
+/// The two transverse sways (along `x - y`) that bend the crests: amplitude
+/// and wavelength in texels, counter-drifting on slow cycles.
+const SWAY_A_AMPLITUDE_TEXELS: f32 = 45.0;
+const SWAY_A_WAVELENGTH_TEXELS: f32 = 520.0;
+const SWAY_A_CYCLE_SECONDS: f32 = 41.0;
+const SWAY_B_AMPLITUDE_TEXELS: f32 = 18.0;
+const SWAY_B_WAVELENGTH_TEXELS: f32 = 270.0;
+const SWAY_B_CYCLE_SECONDS: f32 = 61.0;
 /// Crest sharpening across the travel axis: holds the troughs near zero so
-/// there is calm water between swells.
-const CREST_GAMMA: f32 = 1.8;
-/// Envelope sharpening along the crest axis: deepens the breaks between
-/// segments so a crest genuinely ends rather than thinning forever.
-const ENVELOPE_GAMMA: f32 = 1.3;
+/// there is calm water between the curved crests.
+const CREST_GAMMA: f32 = 2.0;
 
 /// Grain ink: a dark warm neutral two steps under `bg` (#211E1B). Defined
 /// here, not in `theme` — it is this layer's only private color.
@@ -316,40 +317,42 @@ fn approach(current: f32, target: f32, dt: f32, tau: f32) -> f32 {
     current + (target - current) * (1.0 - (-dt / tau.max(f32::EPSILON)).exp())
 }
 
+/// How far the wavefronts are displaced along the travel diagonal at a
+/// given crest-axis position `cross` (texels). Two counter-drifting sways
+/// at non-commensurate wavelengths sum into a smooth, slowly writhing
+/// meander — this is what bends straight bands into hand-drawn curves.
+fn crest_displacement(cross: f32, phase: f32) -> f32 {
+    use std::f32::consts::TAU;
+    let sway_a = SWAY_A_AMPLITUDE_TEXELS
+        * (TAU * (cross / SWAY_A_WAVELENGTH_TEXELS + phase / SWAY_A_CYCLE_SECONDS)).sin();
+    let sway_b = SWAY_B_AMPLITUDE_TEXELS
+        * (TAU * (cross / SWAY_B_WAVELENGTH_TEXELS - phase / SWAY_B_CYCLE_SECONDS)).sin();
+    sway_a + sway_b
+}
+
 /// The wave intensity field at a lattice site, in 0..=1.
 ///
-/// `x + y` is the distance along the propagation diagonal: both carrier
-/// octaves ride it (same direction, different wavelength and speed, so a
-/// beat travels through the swells), sharpened by [`CREST_GAMMA`] so the
-/// troughs go genuinely calm. `x - y` runs along a crest: the deep two-part
-/// envelope there reaches zero, breaking each crest into finite segments
-/// that drift, lengthen, and dissolve — breathing, not streaking. Both
-/// factors stay in 0..=1, so intensity never exceeds the surface budget and
-/// the in-match cap stays exact.
+/// The travel coordinate is `x + y` BENT by [`crest_displacement`]: both
+/// carrier octaves ride the bent coordinate (same direction, different
+/// wavelength and speed, so a beat rolls through the sets), sharpened by
+/// [`CREST_GAMMA`] so the troughs go genuinely calm. Every crest is a
+/// continuous meandering curve — never amplitude-gated, so it cannot break
+/// into clumps; never straight, so it cannot read as an ellipse. Intensity
+/// never exceeds `level`, so the in-match cap stays exact.
 fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
     use std::f32::consts::TAU;
     let (x, y) = (
         site_x as f32 * SITE_STRIDE as f32,
         site_y as f32 * SITE_STRIDE as f32,
     );
-    let along = x + y;
-    let cross = x - y;
+    let along = (x + y) + crest_displacement(x - y, phase);
     let primary = 0.5
         + 0.5 * (TAU * (along / WAVELENGTH_PRIMARY_TEXELS - phase / CYCLE_PRIMARY_SECONDS)).sin();
     let secondary = 0.5
         + 0.5
             * (TAU * (along / WAVELENGTH_SECONDARY_TEXELS - phase / CYCLE_SECONDARY_SECONDS)).sin();
     let band = (0.6 * primary + 0.4 * secondary).powf(CREST_GAMMA);
-    let envelope_a = 0.5
-        + 0.5
-            * (TAU * (cross / WAVELENGTH_ENVELOPE_A_TEXELS + phase / CYCLE_ENVELOPE_A_SECONDS))
-                .sin();
-    let envelope_b = 0.5
-        + 0.5
-            * (TAU * (cross / WAVELENGTH_ENVELOPE_B_TEXELS - phase / CYCLE_ENVELOPE_B_SECONDS))
-                .sin();
-    let envelope = (0.55 * envelope_a + 0.45 * envelope_b).powf(ENVELOPE_GAMMA);
-    (level * band * envelope).clamp(0.0, 1.0)
+    (level * band).clamp(0.0, 1.0)
 }
 
 /// Ordered-dither threshold for a lattice site, in (0, 1).
@@ -513,19 +516,28 @@ mod tests {
     }
 
     #[test]
-    fn crests_break_into_finite_segments() {
-        // Walking ALONG a crest (x - y varying, x + y fixed) from its
-        // brightest point, the intensity must collapse to a genuine break —
-        // ocean texture is short-crested patches, never full-screen streaks.
-        let (cx, cy, peak) = brightest_site(3.7);
-        let span = cx.min(cy).min(110);
-        let along_crest: Vec<f32> = (0..2 * span)
-            .map(|i| wave_intensity(cx - span + i, cy + span - i, 3.7, 1.0))
+    fn crest_lines_meander_without_folding() {
+        // The displacement field is what bends straight bands into curves:
+        // across one screen-width of crest axis it must wander meaningfully
+        // (no straight ellipses) while its slope stays line-like (a crest
+        // that folds back on itself would read as turbulence, not swell).
+        let samples: Vec<f32> = (0..400)
+            .map(|i| crest_displacement(i as f32 * 4.0, 3.7))
             .collect();
-        let min = along_crest.iter().fold(f32::MAX, |a, &b| a.min(b));
+        let max = samples.iter().fold(f32::MIN, |a, &b| a.max(b));
+        let min = samples.iter().fold(f32::MAX, |a, &b| a.min(b));
         assert!(
-            min < 0.08 * peak,
-            "a crest must break along its length (min {min} vs peak {peak})"
+            max - min > 60.0,
+            "crests must visibly meander (wander {} texels)",
+            max - min
+        );
+        let max_slope = samples
+            .windows(2)
+            .map(|w| (w[1] - w[0]).abs() / 4.0)
+            .fold(0.0f32, f32::max);
+        assert!(
+            max_slope < 1.5,
+            "the meander must stay line-like, not fold (slope {max_slope})"
         );
     }
 
