@@ -2,13 +2,15 @@
 # size-optimized wasm bundles in particular are sensitive to rustc codegen, and a
 # reproducible build is what lets a consumer regenerate byte-stable artifacts.
 #
-# Pinned to the nightly this project is developed against. `wasm32-unknown-unknown`
-# is listed so `rustup` provisions the wasm target automatically on a fresh checkout.
+# Pinned to a concrete STABLE release (the audit found no nightly feature in the
+# workspace; the old nightly pin was historical). Bump deliberately, with gates.
+# `wasm32-unknown-unknown` is listed so `rustup` provisions the wasm target
+# automatically on a fresh checkout.
 [toolchain]
-channel = "nightly-2026-04-24"
+channel = "1.96.0"
 targets = ["wasm32-unknown-unknown"]
 # rustfmt + clippy are NOT implied: CI runners persist rustup's `minimal`
-# profile, so without listing them the pinned nightly installs bare and the
+# profile, so without listing them the pinned toolchain installs bare and the
 # fmt/clippy gates fail before compiling anything. Local rustup setups with the
 # `default` profile already have them; listing is a no-op there.
 components = ["rustfmt", "clippy"]

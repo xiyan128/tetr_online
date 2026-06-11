@@ -30,6 +30,7 @@ pub const SIM_DT_SECONDS: f32 = 1.0 / SIM_HZ;
 /// draw per-run entropy instead — the audit found every single-player game was
 /// dealing the identical bag sequence, which made Sprint's leaderboard a
 /// route-memorization contest.
+#[cfg(test)]
 pub const DEFAULT_SEED: u64 = 0;
 
 /// Optional seed override for the next gameplay session (the versus
