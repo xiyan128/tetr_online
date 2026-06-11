@@ -649,17 +649,24 @@ fn update_seat_timer_bars(
             if bar.seat != seat.index {
                 continue;
             }
-            let remaining = snapshot
-                .0
-                .active
-                .as_ref()
-                .map_or(1.0, |active| active.lock_timer_fraction);
-            let progress = 1.0 - remaining;
+            let progress = lock_bar_progress(&snapshot.0);
             let width = SessionLayout::BLOCK * SessionLayout::BOARD_W as f32 * progress;
             if let Some(size) = sprite.custom_size {
                 sprite.custom_size = Some(Vec2::new(width, size.y));
             }
         }
+    }
+}
+
+/// Lock-bar fill for a snapshot: only a GROUNDED piece shows progress. The
+/// engine reports `lock_timer_fraction` as the fraction REMAINING — but `0.0`
+/// also means "timer not running" (a falling piece), which without the
+/// `landed` gate rendered as a permanently full bar (the old pipeline hid the
+/// hazard by despawning the bar entirely outside its Locking sub-state).
+fn lock_bar_progress(snapshot: &crate::engine::EngineSnapshot) -> f32 {
+    match snapshot.active.as_ref() {
+        Some(active) if active.landed => 1.0 - active.lock_timer_fraction,
+        _ => 0.0,
     }
 }
 
@@ -701,5 +708,64 @@ fn update_atk_texts(
                 text.0 = line;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod timer_bar_tests {
+    use super::lock_bar_progress;
+    use crate::engine::{Engine, EngineConfig, InputFrame};
+
+    #[test]
+    fn a_falling_piece_shows_no_lock_progress() {
+        // The regression: lock_timer_fraction is 0.0 for an INACTIVE timer,
+        // which without the landed gate read as a full bar on every falling
+        // piece (user-reported: "the bar shows up by default").
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.step(InputFrame::default()); // spawn; piece is high and falling
+        let snapshot = engine.snapshot();
+        assert!(!snapshot.active.as_ref().unwrap().landed);
+        assert_eq!(lock_bar_progress(&snapshot), 0.0);
+    }
+
+    #[test]
+    fn a_grounded_piece_fills_the_bar_as_the_timer_drains() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        engine.step(InputFrame::default());
+        // Hard-drop-free grounding: step gravity until the piece lands.
+        for _ in 0..4000 {
+            engine.step(InputFrame {
+                dt_seconds: 1.0 / 60.0,
+                soft_drop: true,
+                ..Default::default()
+            });
+            let snap = engine.snapshot();
+            if snap.active.as_ref().is_some_and(|a| a.landed) {
+                // Just landed: full timer remaining ⇒ bar starts (near) empty.
+                assert!(lock_bar_progress(&snap) < 0.1);
+                // Drain half the lock-down; the bar fills accordingly.
+                engine.step(InputFrame {
+                    dt_seconds: 0.25,
+                    ..Default::default()
+                });
+                let drained = engine.snapshot();
+                if drained.active.as_ref().is_some_and(|a| a.landed) {
+                    assert!(
+                        lock_bar_progress(&drained) > 0.3,
+                        "a draining lock timer must fill the bar"
+                    );
+                }
+                return;
+            }
+        }
+        panic!("the piece never landed");
+    }
+
+    #[test]
+    fn no_active_piece_shows_no_lock_progress() {
+        let mut engine = Engine::new(EngineConfig::default(), 7);
+        let snapshot = engine.snapshot(); // pre-spawn: no active piece
+        assert!(snapshot.active.is_none());
+        assert_eq!(lock_bar_progress(&snapshot), 0.0);
     }
 }
