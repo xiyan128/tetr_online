@@ -580,14 +580,17 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
                 evaluate_downstack(&BotSpec::beam(16, 2).factory(), &seeds, garbage_rows, cap);
             let mut cc2_censored_sum = 0.0f64;
             let mut cc2_cleared = 0usize;
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
             for &seed in &seeds {
                 let (p, cleared) = run_downstack(&bin, seed, garbage_rows, cap, think)?;
-                eprintln!("  CC2 seed {seed:>20}: pieces={p:>3} cleared={cleared}");
+                pb.suspend(|| eprintln!("  CC2 seed {seed:>20}: pieces={p:>3} cleared={cleared}"));
+                pb.inc(1);
                 cc2_censored_sum += f64::from(if cleared { p } else { cap });
                 if cleared {
                     cc2_cleared += 1;
                 }
             }
+            pb.finish_and_clear();
             let cc2_mean_censored = cc2_censored_sum / seeds.len().max(1) as f64;
             println!(
                 "downstack {garbage_rows} rows — censored pieces (lower=better, cap {cap}): OURS {:.2} ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
@@ -603,6 +606,7 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
             let max_plies = spec.max_plies;
             let (mut ours_wins, mut cc2_wins, mut draws) = (0usize, 0usize, 0usize);
             let (mut ours_atk_sum, mut cc2_atk_sum) = (0u32, 0u32);
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
             for &seed in &seeds {
                 let (res, ours_atk, cc2_atk) = run_versus(&bin, seed, max_plies, think)?;
                 ours_atk_sum += ours_atk;
@@ -612,10 +616,14 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
                     VersusResult::BWins => cc2_wins += 1,
                     VersusResult::Draw => draws += 1,
                 }
-                eprintln!(
-                    "  seed {seed:>20}: {res:?} | ours atk {ours_atk:>3} | cc2 atk {cc2_atk:>3}"
-                );
+                pb.suspend(|| {
+                    eprintln!(
+                        "  seed {seed:>20}: {res:?} | ours atk {ours_atk:>3} | cc2 atk {cc2_atk:>3}"
+                    )
+                });
+                pb.inc(1);
             }
+            pb.finish_and_clear();
             let n = seeds.len().max(1) as f64;
             println!("versus_ours_win_rate {:.2}", ours_wins as f64 / n);
             eprintln!(
@@ -630,12 +638,15 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
         }
         Mode::App => {
             let mut total_app = 0.0f64;
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
             for &seed in &seeds {
                 let attack = run_one(&bin, seed, pieces, think)?;
                 let app = attack as f64 / pieces as f64;
                 total_app += app;
-                eprintln!("  seed {seed:>20}: attack={attack:>4}  APP={app:.4}");
+                pb.suspend(|| eprintln!("  seed {seed:>20}: attack={attack:>4}  APP={app:.4}"));
+                pb.inc(1);
             }
+            pb.finish_and_clear();
             let mean_app = total_app / spec.seeds.max(1) as f64;
             println!("cc2_attack_per_piece {mean_app:.4}");
         }

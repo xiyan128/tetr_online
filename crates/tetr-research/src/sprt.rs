@@ -86,8 +86,6 @@ pub struct SprtConfig {
     /// `Inconclusive` cuts of the same deterministic evidence stream. Bounds
     /// crossed before the deadline are machine-independent verdicts.
     pub deadline: Option<Instant>,
-    /// Per-block progress lines on stderr.
-    pub verbose: bool,
 }
 
 impl Default for SprtConfig {
@@ -101,7 +99,6 @@ impl Default for SprtConfig {
             max_matches: 2000,
             min_pairs: 8,
             deadline: None,
-            verbose: false,
         }
     }
 }
@@ -282,6 +279,13 @@ pub fn sprt_race(
     let mut state = SprtState::new(config.p1, config.alpha, config.beta, config.min_pairs);
     let (mut matches, mut margin_sum) = (0u32, 0.0f64);
     let mut block = 0usize;
+    // Live position between the bounds, stderr-only and auto-hidden off-TTY
+    // (the report is the record; the bar is just company for the silence).
+    let pb = if config.max_matches == u32::MAX {
+        crate::progress::spinner("race")
+    } else {
+        crate::progress::bar(u64::from(config.max_matches), "race")
+    };
 
     let verdict = loop {
         if let Some(verdict) = state.verdict() {
@@ -352,16 +356,16 @@ pub fn sprt_race(
             state.record_pair(wins, losses);
         }
 
-        if config.verbose {
-            let (wins, losses, ties) = state.counts();
-            eprintln!(
-                "  sprt block {block:>3} | decisive {wins}-{losses} (ties {ties}) | \
-                 LLR {:+.3} (trinomial {:+.3})",
-                state.llr(),
-                state.trinomial_llr()
-            );
-        }
+        let (wins, losses, _) = state.counts();
+        let (lower, upper) = state.bounds();
+        pb.set_position(u64::from(matches));
+        pb.set_message(format!(
+            "block {block} | {wins}-{losses} of {} pairs | LLR {:+.2} in [{lower:+.2}, {upper:+.2}]",
+            state.pairs(),
+            state.llr(),
+        ));
     };
+    pb.finish_and_clear();
 
     let (wins, losses, ties) = state.counts();
     SprtReport {

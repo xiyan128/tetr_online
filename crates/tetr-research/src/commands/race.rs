@@ -60,7 +60,6 @@ pub fn run(spec: &Spec, cand: &BotSpec, incumbent: &BotSpec, rt: &Runtime) -> st
         seed_base: spec.seed_base,
         max_matches: u32::MAX,
         deadline: Some(Instant::now() + budget),
-        verbose: true,
         ..SprtConfig::default()
     };
 

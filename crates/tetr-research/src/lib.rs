@@ -3,21 +3,22 @@
 //! Bevy-free: depends only on `tetr-core` (engine + AI seam), so everything
 //! here compiles and runs fast enough for iterative loops. The crate is the
 //! *instrument layer*: match harnesses, benchmark suites, statistics, and bot
-//! construction. Experiments are NAMED [`registry`] entries — typed spec
-//! literals — executed by the `tetr-research` binary (`run <name>`); the
-//! [`commands`] behind them stay thin: take the spec, compose library
-//! pieces, print a record.
+//! construction. An experiment is a NAMED eval ([`registry`]) run on NAMED
+//! bots ([`bots`]) — `run <eval> [bots…]`; the [`commands`] behind the evals
+//! stay thin: take the spec and the bots, compose library pieces, print a
+//! record.
 //!
 //! # The conventions (read before adding an experiment)
 //!
 //! - **Determinism.** A game is a pure function of `(bot spec, seed)`: the
 //!   engine's 7-bag and the policy RNG are both seeded. Every reported number
-//!   must be reproducible from `(commit, registry entry)`.
-//! - **The registry is the configuration** ([`registry`]). Everything that
-//!   can change a result lives in a named entry; command-line flags carry
-//!   only machine-local circumstance (budgets, paths, resume pointers).
-//!   Changing results means registering a new name — `resume` refuses a
-//!   drifted spec, and dirty-tree runs are stamped as such.
+//!   must be reproducible from `(commit, eval, bots…)` — all names.
+//! - **The registries are the configuration** ([`registry`], [`bots`]).
+//!   Everything that can change a result lives in a named eval spec or a
+//!   named bot; command-line flags carry only machine-local circumstance
+//!   (budgets, paths, resume pointers). Changing results means registering
+//!   a new name — `resume` refuses a drifted spec, and dirty-tree runs are
+//!   stamped as such.
 //! - **Seed-region discipline** ([`seeds`]). Suites draw seeds from disjoint
 //!   index regions (train / validation / rotation / SPRT / confirmation) so no
 //!   verdict is ever quoted on seeds that influenced a decision.
@@ -36,15 +37,16 @@
 //! - **Run records.** A command's doc header carries the durable results of
 //!   its runs (with settings and a [`ledger`] run id), so conclusions outlive
 //!   sessions and are never silently re-derived.
-//! - **Run manifests.** Every run writes its experiment name, typed spec,
-//!   runtime, provenance, per-seed outcomes, and a terminal summary through
-//!   [`ledger`].
+//! - **Run receipts.** The runner stamps every run's coordinates (eval,
+//!   bots, spec, runtime, git state) into one `spec.json` via [`ledger`];
+//!   results live on stdout as machine lines, and only climbs persist more
+//!   (their resume checkpoint).
 //!
 //! # Layout
 //!
 //! | module | role |
 //! |---|---|
-//! | [`registry`] | THE configuration surface: named experiment specs as code |
+//! | [`registry`] | named eval specs as code (one of the two configuration surfaces) |
 //! | [`commands`] | the experiment executors behind the CLI verbs |
 //! | [`marathon`] | solo scoring/APP suite (the original benchmark) |
 //! | [`downstack`] | cheese-clearing suite (digging skill, not gameable by combos) |
@@ -52,11 +54,12 @@
 //! | [`versus_legacy`] | the pre-engine harness scheduler, quarantined for the TBP referee + scripted scenarios |
 //! | [`behavior`] | APP / DS-P metrics across garbage scenarios |
 //! | [`sprt`] | pair-level GSPRT over death-decisive seed pairs |
-//! | [`bots`] | bot construction (one home for the strength conventions) |
+//! | [`bots`] | bot construction + the named bot registry (the other surface) |
 //! | [`seeds`] | deterministic seed sets + region discipline |
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
 //! | [`rng`] | the dependency-free deterministic PRNG (SplitMix64) |
-//! | [`ledger`] | machine-readable run specs, outcomes, checkpoints, and summaries |
+//! | [`progress`] | stderr progress bars (cosmetic only, hidden off-TTY) |
+//! | [`ledger`] | run receipts + resume checkpoints |
 
 pub mod behavior;
 pub mod bots;
@@ -65,6 +68,7 @@ pub mod commands;
 pub mod downstack;
 pub mod ledger;
 pub mod marathon;
+pub mod progress;
 pub mod registry;
 pub mod rng;
 pub mod seeds;
