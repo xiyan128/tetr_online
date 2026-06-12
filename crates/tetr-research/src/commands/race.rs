@@ -9,6 +9,14 @@
 //! accept costs ~5 minutes — the budget figure behind the climb's confirmer
 //! default. (Pre-pair-test, env-var-era invocation; verdict stands,
 //! trajectory reproduces only at the pre-pair commit.)
+//!
+//! RUN RECORD (2026-06-12, attack-tuned-d3): the first ship-grade strength
+//! gain on this platform — the v3 epilogue's "deeper search" lever pays.
+//! vs attack-tuned: **H1 in 4 s**, 53-8 of 64 (LLR +3.09, margin +13.0),
+//! run `20260612-070034-race-66828`. vs cc2-default: **H1 in 6 s**, 58-18 of 80 (LLR +3.16,
+//! margin +16.9), run `20260612-070056-race-67807`. Same-eval downstack also improves
+//! (censored 18.67 vs 21.50, attack-while-digging 11.0 vs 7.3). Cost: ~16×
+//! search nodes per move. attack-tuned-d3 is the incumbent to beat.
 
 use std::time::Instant;
 
