@@ -8,18 +8,21 @@
 //!   sides (where the neighbor is empty or a different kind). Cells of one
 //!   piece share a single perimeter, so a tetromino reads as one designed
 //!   object while two touching pieces keep a mortar seam between them.
-//! * **weave** — a fine 4 px-period grain of faintly darker texels across
-//!   the body. Its period divides the cell, so it tiles seamlessly over a
-//!   whole piece: cloth-like material, the same grain vocabulary as the
-//!   ambient background — texture, not ornament. Garbage is weave-LESS:
-//!   dead weight has no nap.
-//! * **rounded corners** — where two exposed sides meet, the outermost 2×2
-//!   texels are cut to transparent, pixel-rounding the SILHOUETTE of the
-//!   piece (interior cells of a merged piece keep their square corners).
+//! * **weave** — a fine 4 px-period grain of darker texels across the body.
+//!   Its period divides the cell, so it tiles seamlessly over a whole piece:
+//!   cloth-like material, the same grain vocabulary as the ambient
+//!   background — texture, not ornament. Garbage is weave-LESS: dead weight
+//!   has no nap.
+//! * **rounded corners** — where two sides open onto EMPTY board, the
+//!   outermost 2×2 texels are cut to transparent, pixel-rounding the
+//!   silhouette against air. A side facing ANY mino — same piece or not —
+//!   stays square, so touching pieces bind flush: mortar seams between
+//!   them, never pinholes of background.
 //!
-//! All 8 kinds × 16 neighbor masks are painted once at startup into a
-//! [`MinoSkin`] resource; a cell is then a single textured sprite. Hard
-//! pixels only (the global nearest sampler), no alpha edges, no glow.
+//! Every achievable (kind, same-kind mask, open-corner set) is painted once
+//! at startup into a [`MinoSkin`] resource; a cell is then a single textured
+//! sprite. Hard pixels only (the global nearest sampler), no alpha edges, no
+//! glow.
 
 use bevy::asset::RenderAssetUsages;
 use bevy::prelude::*;
@@ -37,9 +40,10 @@ const EDGE_PX: usize = 2;
 /// Tone offsets. The edge is deliberately SOFTER than the original tile's
 /// −22% border — at −12% it reads as shading on the tile itself, so the body
 /// fills its whole square instead of floating inside a dark recess. The
-/// weave is barely-there: material tooth, invisible as a shape.
+/// weave sits below the edge tone: quiet cloth tooth that registers at play
+/// scale without ever forming a shape.
 const EDGE_DARKEN: f32 = 0.12;
-const WEAVE_DARKEN: f32 = 0.05;
+const WEAVE_DARKEN: f32 = 0.09;
 
 /// Neighbor-mask bits: a set bit means "same kind continues that way", and
 /// that side is painted seamless instead of edged.
@@ -48,9 +52,28 @@ pub const MASK_E: u8 = 2;
 pub const MASK_S: u8 = 4;
 pub const MASK_W: u8 = 8;
 
-/// Silhouette corner rounding, in texels: where two exposed sides meet, this
-/// square at the outermost corner is cut to transparent.
+/// Silhouette corner rounding, in texels: where two sides open onto empty
+/// board, this square at the outermost corner is cut to transparent.
 const CORNER_CUT_PX: usize = 2;
+
+/// Corner bits (the second texture axis), named for the two sides that meet
+/// there in board space.
+const CORNER_NE: u8 = 1;
+const CORNER_SE: u8 = 2;
+const CORNER_SW: u8 = 4;
+const CORNER_NW: u8 = 8;
+
+/// The corners whose BOTH flanking sides are set in `sides`. Fed the
+/// empty-neighbor mask this is exactly "corners that open onto air" (and so
+/// get cut); the builder also feeds it the not-same-kind mask to enumerate
+/// which corner sets are achievable for a given connection mask.
+fn open_corners(sides: u8) -> u8 {
+    let open = |pair: u8, corner: u8| if sides & pair == pair { corner } else { 0 };
+    open(MASK_N | MASK_E, CORNER_NE)
+        | open(MASK_S | MASK_E, CORNER_SE)
+        | open(MASK_S | MASK_W, CORNER_SW)
+        | open(MASK_N | MASK_W, CORNER_NW)
+}
 
 /// A paintable cell kind: the seven pieces, or garbage.
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -98,15 +121,31 @@ impl MinoKind {
     }
 }
 
-/// Every painted mino texture: 8 kinds × 16 neighbor masks, built once.
+/// Slots per kind: 16 same-kind masks × 16 corner sets (unachievable corner
+/// sets alias their clamped neighbor, so every index resolves).
+const SLOTS_PER_KIND: usize = 16 * 16;
+
+/// Every painted mino texture, keyed by kind, same-kind connection mask, and
+/// the set of corners opening onto empty board. Built once at startup.
 #[derive(Resource)]
 pub struct MinoSkin {
     handles: Vec<Handle<Image>>,
 }
 
 impl MinoSkin {
-    pub fn handle(&self, kind: MinoKind, mask: u8) -> Handle<Image> {
-        self.handles[kind.index() * 16 + (mask & 0xF) as usize].clone()
+    /// The texture for a cell: `kind_mask` marks sides where the SAME kind
+    /// continues (seamless), `empty_mask` marks sides with no mino at all.
+    /// Sides in neither mask hold a different kind: edged like air, but the
+    /// corners there stay square so the stack binds without pinholes.
+    pub fn handle(&self, kind: MinoKind, kind_mask: u8, empty_mask: u8) -> Handle<Image> {
+        debug_assert_eq!(
+            kind_mask & empty_mask,
+            0,
+            "a same-kind side cannot be empty"
+        );
+        let corners = open_corners(empty_mask & !kind_mask & 0xF);
+        let slot = (kind_mask & 0xF) as usize * 16 + corners as usize;
+        self.handles[kind.index() * SLOTS_PER_KIND + slot].clone()
     }
 }
 
@@ -115,22 +154,32 @@ impl MinoSkin {
 pub fn build_mino_skin(mut commands: Commands, images: Option<ResMut<Assets<Image>>>) {
     let Some(mut images) = images else {
         commands.insert_resource(MinoSkin {
-            handles: vec![Handle::default(); MinoKind::ALL.len() * 16],
+            handles: vec![Handle::default(); MinoKind::ALL.len() * SLOTS_PER_KIND],
         });
         return;
     };
-    let mut handles = Vec::with_capacity(MinoKind::ALL.len() * 16);
+    let mut handles = Vec::with_capacity(MinoKind::ALL.len() * SLOTS_PER_KIND);
     for kind in MinoKind::ALL {
         for mask in 0..16u8 {
-            handles.push(images.add(paint_mino(kind, mask)));
+            // A corner can only open onto air where neither flanking side
+            // continues the piece; paint each achievable corner set once and
+            // alias the rest onto their clamped set.
+            let free = open_corners(!mask & 0xF);
+            let mut painted: [Option<Handle<Image>>; 16] = std::array::from_fn(|_| None);
+            for corners in 0..16u8 {
+                let clamped = (corners & free) as usize;
+                let handle = painted[clamped]
+                    .get_or_insert_with(|| images.add(paint_mino(kind, mask, clamped as u8)));
+                handles.push(handle.clone());
+            }
         }
     }
     commands.insert_resource(MinoSkin { handles });
 }
 
-/// One mino texture for a kind + neighbor mask, as an RGBA image.
-fn paint_mino(kind: MinoKind, mask: u8) -> Image {
-    let pixels = paint_mino_pixels(kind.base_color(), mask, kind != MinoKind::Garbage);
+/// One mino texture for a kind + connection mask + open-corner set.
+fn paint_mino(kind: MinoKind, mask: u8, corners: u8) -> Image {
+    let pixels = paint_mino_pixels(kind.base_color(), mask, corners, kind != MinoKind::Garbage);
     debug_assert_eq!(pixels.len(), MINO_TEXTURE_SIZE * MINO_TEXTURE_SIZE * 4);
     Image::new(
         Extent3d {
@@ -146,11 +195,11 @@ fn paint_mino(kind: MinoKind, mask: u8) -> Image {
 }
 
 /// The pure painter: edge tone on exposed sides, a seamless 4 px weave over
-/// the body (live pieces only), and transparent corner cuts where two
-/// exposed sides meet. Returns RGBA bytes, row 0 at the TOP of the texture
-/// (sprite v axis) — callers pass a mask in board space, so north
-/// (`MASK_N`, y+1 on the board) is the top edge here.
-fn paint_mino_pixels(base: [u8; 3], mask: u8, woven: bool) -> Vec<u8> {
+/// the body (live pieces only), and transparent cuts at the given open
+/// corners. Returns RGBA bytes, row 0 at the TOP of the texture (sprite v
+/// axis) — callers pass masks in board space, so north (`MASK_N`, y+1 on the
+/// board) is the top edge here.
+fn paint_mino_pixels(base: [u8; 3], mask: u8, corners: u8, woven: bool) -> Vec<u8> {
     let size = MINO_TEXTURE_SIZE;
     let edge = shade(base, -EDGE_DARKEN);
     let weave = shade(base, -WEAVE_DARKEN);
@@ -161,16 +210,16 @@ fn paint_mino_pixels(base: [u8; 3], mask: u8, woven: bool) -> Vec<u8> {
     let mut pixels = Vec::with_capacity(size * size * 4);
     for y in 0..size {
         for x in 0..size {
-            // Silhouette rounding: cut the outermost corner block wherever
-            // two exposed sides meet.
+            // Silhouette rounding: cut the outermost corner block at every
+            // corner that opens onto empty board.
             let near_n = y < CORNER_CUT_PX;
             let near_s = y >= size - CORNER_CUT_PX;
             let near_w = x < CORNER_CUT_PX;
             let near_e = x >= size - CORNER_CUT_PX;
-            let cut = (exposed_n && exposed_w && near_n && near_w)
-                || (exposed_n && exposed_e && near_n && near_e)
-                || (exposed_s && exposed_w && near_s && near_w)
-                || (exposed_s && exposed_e && near_s && near_e);
+            let cut = (corners & CORNER_NW != 0 && near_n && near_w)
+                || (corners & CORNER_NE != 0 && near_n && near_e)
+                || (corners & CORNER_SW != 0 && near_s && near_w)
+                || (corners & CORNER_SE != 0 && near_s && near_e);
             if cut {
                 pixels.extend_from_slice(&[0, 0, 0, 0]);
                 continue;
@@ -263,8 +312,8 @@ mod tests {
     #[test]
     fn exposed_edges_are_darker_and_connected_edges_are_seamless() {
         let base = [200, 150, 100];
-        let isolated = paint_mino_pixels(base, 0, true);
-        let connected_north = paint_mino_pixels(base, MASK_N, true);
+        let isolated = paint_mino_pixels(base, 0, 0, true);
+        let connected_north = paint_mino_pixels(base, MASK_N, 0, true);
         // Isolated: the top row is the edge tone, darker than the body.
         assert_eq!(texel(&isolated, 16, 0), shade(base, -EDGE_DARKEN));
         // Connected to the north: the top row continues the body seamlessly
@@ -281,7 +330,7 @@ mod tests {
     fn the_weave_is_seamless_across_cells_and_garbage_has_none() {
         let base = [120, 120, 120];
         // Fully connected cell: pure body + weave, no edges, no cuts.
-        let pixels = paint_mino_pixels(base, 0xF, true);
+        let pixels = paint_mino_pixels(base, 0xF, 0, true);
         let weave = shade(base, -WEAVE_DARKEN);
         assert_eq!(texel(&pixels, 8, 8), weave);
         assert_eq!(texel(&pixels, 10, 10), weave);
@@ -291,28 +340,49 @@ mod tests {
         // pattern is purely position-mod-4, identical across the boundary.
         assert_eq!(texel(&pixels, 0, 0), texel(&pixels, 28, 28));
         // Garbage has no nap.
-        let garbage = paint_mino_pixels(base, 0xF, false);
+        let garbage = paint_mino_pixels(base, 0xF, 0, false);
         assert_eq!(texel(&garbage, 8, 8), base);
     }
 
     #[test]
-    fn silhouette_corners_round_only_where_two_exposed_sides_meet() {
+    fn corners_open_only_where_both_flanking_sides_are_open() {
+        assert_eq!(open_corners(0), 0);
+        // One open side alone opens no corner.
+        assert_eq!(open_corners(MASK_N), 0);
+        assert_eq!(open_corners(MASK_N | MASK_E), CORNER_NE);
+        assert_eq!(open_corners(MASK_S | MASK_W), CORNER_SW);
+        assert_eq!(
+            open_corners(0xF),
+            CORNER_NE | CORNER_SE | CORNER_SW | CORNER_NW
+        );
+    }
+
+    #[test]
+    fn corners_cut_against_air_but_bind_to_neighboring_pieces() {
         let base = [120, 120, 120];
         let alpha = |pixels: &[u8], x: usize, y: usize| pixels[(y * MINO_TEXTURE_SIZE + x) * 4 + 3];
-        // Isolated cell: all four corners cut.
-        let isolated = paint_mino_pixels(base, 0, true);
-        assert_eq!(alpha(&isolated, 0, 0), 0);
-        assert_eq!(
-            alpha(&isolated, MINO_TEXTURE_SIZE - 1, MINO_TEXTURE_SIZE - 1),
-            0
-        );
-        // Connected to the east: the two right corners stay square (opaque).
-        let joined = paint_mino_pixels(base, MASK_E, true);
-        assert_eq!(alpha(&joined, MINO_TEXTURE_SIZE - 1, 0), 0xFF);
-        assert_eq!(alpha(&joined, 0, 0), 0);
+        let top = 0;
+        let bottom = MINO_TEXTURE_SIZE - 1;
+        // A lone cell in open air: every corner rounds.
+        let lone = paint_mino_pixels(base, 0, open_corners(0xF), true);
+        assert_eq!(alpha(&lone, 0, top), 0);
+        assert_eq!(alpha(&lone, bottom, bottom), 0);
+        // A DIFFERENT piece sits to the north (not same-kind, not empty):
+        // both top corners square off and bind flush; the airy bottom still
+        // rounds, and the seam side keeps its mortar edge.
+        let bound = paint_mino_pixels(base, 0, open_corners(MASK_E | MASK_S | MASK_W), true);
+        assert_eq!(alpha(&bound, 0, top), 0xFF);
+        assert_eq!(alpha(&bound, bottom, top), 0xFF);
+        assert_eq!(alpha(&bound, 0, bottom), 0);
+        assert_eq!(texel(&bound, 16, top), shade(base, -EDGE_DARKEN));
+        // Same kind continuing east: the shared side is seamless and its two
+        // corners stay square; the far (western) corners round into the air.
+        let joined = paint_mino_pixels(base, MASK_E, open_corners(MASK_N | MASK_S | MASK_W), true);
+        assert_eq!(alpha(&joined, bottom, top), 0xFF);
+        assert_eq!(alpha(&joined, 0, top), 0);
         // Interior cell of a piece: no cuts anywhere.
-        let interior = paint_mino_pixels(base, 0xF, true);
-        assert_eq!(alpha(&interior, 0, 0), 0xFF);
+        let interior = paint_mino_pixels(base, 0xF, 0, true);
+        assert_eq!(alpha(&interior, 0, top), 0xFF);
     }
 
     #[test]

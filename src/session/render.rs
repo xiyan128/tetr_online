@@ -492,7 +492,9 @@ fn reconcile_locked_boards(
         commands.entity(layer).despawn_related::<Children>();
         // Connectedness: a cell merges (seamless side) with same-kind
         // neighbors, so a piece shares one perimeter and garbage reads as a
-        // slab; different kinds keep the mortar seam between them.
+        // slab; different kinds keep the mortar seam between them. Corners
+        // round only against truly empty board, so touching pieces pack
+        // flush — no pinholes of background inside the stack.
         let kinds: HashMap<(isize, isize), MinoKind> = cells
             .iter()
             .map(|cell| ((cell.x, cell.y), cell_kind(cell)))
@@ -501,12 +503,16 @@ fn reconcile_locked_boards(
             .iter()
             .map(|cell| {
                 let kind = cell_kind(cell);
-                let mask = skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
+                let kind_mask = skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
                     kinds.get(&(x, y)) == Some(&kind)
                 });
+                let empty_mask = 0xF
+                    & !skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
+                        kinds.contains_key(&(x, y))
+                    });
                 commands
                     .spawn(block_sprite(
-                        minos.handle(kind, mask),
+                        minos.handle(kind, kind_mask, empty_mask),
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
@@ -536,7 +542,9 @@ fn reconcile_active_pieces(
             continue;
         };
         // The four cells are one piece by definition: they merge into a
-        // single connected object with one shared perimeter.
+        // single connected object with one shared perimeter. In flight the
+        // piece is wrapped in air — every exposed corner rounds; it binds to
+        // the stack only once it locks.
         let occupied: HashSet<(isize, isize)> = active.cells.iter().map(|c| (c.x, c.y)).collect();
         let ids: Vec<Entity> = active
             .cells
@@ -545,7 +553,7 @@ fn reconcile_active_pieces(
                 let mask = skin::neighbor_mask(cell.x, cell.y, &occupied);
                 commands
                     .spawn(block_sprite(
-                        minos.handle(cell_kind(cell), mask),
+                        minos.handle(cell_kind(cell), mask, 0xF & !mask),
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
@@ -721,7 +729,8 @@ fn spawn_avatar(
             Visibility::default(),
         ))
         .id();
-    // The avatar is one piece: connected, one shared perimeter.
+    // The avatar is one piece: connected, one shared perimeter, air all
+    // around (every exposed corner rounds).
     let occupied: HashSet<(isize, isize)> = piece.avatar_cells().iter().copied().collect();
     let ids: Vec<Entity> = piece
         .avatar_cells()
@@ -730,7 +739,7 @@ fn spawn_avatar(
             let mask = skin::neighbor_mask(x, y, &occupied);
             commands
                 .spawn(block_sprite(
-                    minos.handle(MinoKind::Piece(piece_type), mask),
+                    minos.handle(MinoKind::Piece(piece_type), mask, 0xF & !mask),
                     block,
                     x,
                     y,
