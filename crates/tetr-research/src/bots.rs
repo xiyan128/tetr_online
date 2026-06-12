@@ -187,6 +187,25 @@ fn full_strength(
     ))
 }
 
+/// Reward = exactly `λ ×` attack sent (the engine's guideline table, chain-exact
+/// via `EvalContext`) on top of the attack-tuned board Value: CC2's shaped clear
+/// tables are zeroed so the search optimizes the APP objective itself within its
+/// horizon. `wasted_t` / `has_back_to_back` stay at CC2's values — they are setup
+/// priors encoding beyond-horizon value a single placement's attack can't see.
+fn attack_true(lambda: f32) -> Cc2Weights {
+    Cc2Weights {
+        attack: lambda,
+        normal_clears: [0.0; 5],
+        mini_spin_clears: [0.0; 3],
+        spin_clears: [0.0; 4],
+        back_to_back_clear: 0.0,
+        combo_attack: 0.0,
+        perfect_clear: 0.0,
+        perfect_clear_override: false,
+        ..Cc2Weights::attack_tuned()
+    }
+}
+
 /// The climb's v3 accept (see the climb command's RUN RECORD v3) — judged and
 /// REJECTED by the race run record; registered so the records stay runnable.
 pub const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
@@ -235,6 +254,31 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             // the "deeper search" lever from the v3 epilogue.
             "attack-tuned-d3",
             BotSpec::beam(16, 3).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The APP depth/width ladder (post-bitboard re-map: the old d6w32 ≈ 0.67
+        // plateau was measured pre-perf-strike, and its d8 point was width-16).
+        (
+            "attack-tuned-d4",
+            BotSpec::beam(16, 4).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d6",
+            BotSpec::beam(16, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d8w32",
+            BotSpec::beam(32, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Engine-true attack reward (λ = 1), shaped tables zeroed — the
+        // objective-in-the-search hypothesis, at matched configs for clean A/Bs.
+        ("attack-true-d3", BotSpec::beam(16, 3).cc2(attack_true(1.0))),
+        (
+            "attack-true-d6w32",
+            BotSpec::beam(32, 6).cc2(attack_true(1.0)),
         ),
         // Toy-sized twins for the smoke gate (seconds, not minutes).
         (
