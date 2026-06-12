@@ -95,6 +95,27 @@ pub fn entries() -> Vec<Entry> {
             "pair-GSPRT survival verdict (`run race <candidate> attack-tuned`)",
             Race(race::Spec::default()),
         ),
+        // --- holdout verdicts (one read per candidate at promotion time; ---
+        // --- looping on these makes them training data) ----------------------
+        e(
+            "marathon-holdout",
+            "marathon APP on held-out VALIDATION seeds — the promotion headline",
+            Marathon(marathon::Spec {
+                seeds: 16,
+                seed_start: crate::seeds::regions::VALIDATION,
+                ..marathon::Spec::default()
+            }),
+        ),
+        e(
+            "marathon-holdout-long",
+            "held-out steady-state APP (cap 600 amortizes the opening)",
+            Marathon(marathon::Spec {
+                seeds: 12,
+                max_pieces: 600,
+                // Disjoint from marathon-holdout's 16 by a 64-index offset.
+                seed_start: crate::seeds::regions::VALIDATION + 64,
+            }),
+        ),
         // --- optimizers (wrap the primitives; promotion stays manual) --------
         e(
             "app-climb",

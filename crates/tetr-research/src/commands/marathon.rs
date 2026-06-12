@@ -10,13 +10,17 @@ use crate::bots::Bot;
 use crate::commands::Runtime;
 use crate::events;
 use crate::marathon::{DEFAULT_MAX_FRAMES, evaluate_capped};
-use crate::seeds::seed_set;
+use crate::seeds::seed_set_from;
 
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct Spec {
     pub seeds: usize,
     /// Iteration piece cap — part of the metric definition.
     pub max_pieces: u32,
+    /// First seed index ([`crate::seeds::seed_set_from`]): 0 is the TRAIN
+    /// region (the tight-loop default); holdout entries point into
+    /// [`crate::seeds::regions::VALIDATION`] with disjoint offsets.
+    pub seed_start: usize,
 }
 
 impl Default for Spec {
@@ -24,12 +28,13 @@ impl Default for Spec {
         Self {
             seeds: 6,
             max_pieces: 150,
+            seed_start: 0,
         }
     }
 }
 
 pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<serde_json::Value> {
-    let seeds = seed_set(spec.seeds);
+    let seeds = seed_set_from(spec.seed_start, spec.seeds);
     let stats = evaluate_capped(
         &bot.spec.factory(),
         &seeds,

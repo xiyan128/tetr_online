@@ -82,17 +82,29 @@ duckdb -init scripts/research.sql      # analyze every run ever recorded
 A recorded result reproduces from `(commit, eval, bots…)` — all names, all
 stamped into the run receipt. Want different parameters or a new candidate?
 Register a new name — a climbed candidate is ONE bot registration, after
-which it is raceable, panelable, and benchmarkable at the prompt. Never
-mutate a name with recorded runs; `resume` refuses a drifted spec and
-dirty-tree runs are stamped in the receipt. The search side
-(climbs, promotion panels) was removed pending a first-principles redesign;
-its history and run records live in git (`aa7bda9` and earlier). The only
+which it is raceable and benchmarkable at the prompt. Never
+mutate a name with recorded runs; dirty-tree runs are stamped in the
+receipt. The only
 flags are machine-local: `--budget-secs`, `--cc2-bin`, `--runs-root`, and
 `--allow-dirty` — runs REFUSE a dirty tree (or no git checkout) by default,
 because such runs are not re-runnable from `(commit, eval, bots…)`; the
 bypass records an exploratory run, stamped `git.dirty` in its receipt.
 Tracking is not a participant: the runner writes the receipt and installs
 the event sink before dispatch; commands never see either.
+
+Optimizers wrap the same primitives and run by name like everything else:
+**`app-climb`** is a (1+1)-ES over a subject bot's full Cc2 weight surface
+(board + reward params, 26 dims) on **censored APP** — `total_attack /
+max_pieces` per game, so a top-out dilutes by the pieces it forfeited and
+survival is priced into the objective. Accepts pass a paired
+common-random-numbers t-gate; screening seeds rotate through the campaign's
+private slab; every run ends by self-validating origin-vs-final weights on
+the campaign's held-out region (the `app.origin_val` / `app.best_val` fields
+of its JSON line). The walk is a pure function of `(commit, spec, subject)` —
+budgets only truncate it, so re-running with a larger `--budget-secs`
+extends the SAME walk. Promotion stays manual: register the printed params
+as a new bot, then judge it on `marathon-holdout` (held-out VALIDATION
+seeds; read it once per candidate, not in a loop) and a `race`.
 
 **The stdout contract**: every run prints exactly ONE self-describing JSON
 line — `{"run": <dir>, "eval": …, "bots": […], …headline metrics}` — and

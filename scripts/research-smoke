@@ -26,6 +26,12 @@ RUN_DIR2=$(ls -td runs/*-smoke-downstack-* | head -1)
 diff -q "$RUN_DIR/games.jsonl" "$RUN_DIR2/games.jsonl" >/dev/null ||
     fail "replays are not byte-identical"
 
+echo "== optimizer contract (smoke-app-climb)"
+CLIMB_LOG=$(tr_run run smoke-app-climb attack-tuned-tiny 2>/dev/null) || fail "climb errored"
+[[ $(wc -l <<<"$CLIMB_LOG") -eq 1 ]] || fail "climb stdout must be exactly one JSON line"
+grep -q '"board_params":' <<<"$CLIMB_LOG" || fail "climbed params missing"
+grep -q '"origin_val":' <<<"$CLIMB_LOG" || fail "self-validation readout missing"
+
 echo "== unknown names are refused (exit 2, never a silent default)"
 set +e
 tr_run run no-such-experiment dt20 >/dev/null 2>&1
