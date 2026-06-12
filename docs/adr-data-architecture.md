@@ -32,7 +32,12 @@ artifact must lose nothing.
    determines. The one ordinal `n` survives because row order is semantic
    and JSON line numbers are not portably queryable. Consequence: fact
    files are byte-identical across replays — `diff` is a replay witness
-   (smoke-asserted).
+   (smoke-asserted). Scope: byte-identity holds for fixed-work runs;
+   budget-truncated optimizer runs stop at a wall-clock-dependent point and
+   reproduce as a prefix relation instead (the walk is deterministic, the
+   stopping iteration is machine-local). Fields whose derivation a
+   truncated tail would make ambiguous (an optimizer row's `arm`/`iter`)
+   survive normalization by the same rule as `n`.
 4. **Rows are self-describing JSON; fields are add-only.** Never rename or
    repurpose a field — a semantic change gets a new name (the same
    immutability rule as registry names). Identifiers (seeds, ids) travel as

@@ -24,8 +24,11 @@
 //! The walk is a pure function of `(commit, eval spec, subject)`: the ES RNG
 //! seeds from the campaign slot, game seeds come from the campaign slab, and
 //! budgets only truncate the walk (a budget-cut run is a prefix of the
-//! unbounded one). Promotion stays manual by design: register the printed
-//! params as a new named bot, then race it.
+//! unbounded one — the stopping ITERATION is wall-clock-dependent, so two
+//! budgeted invocations agree byte-for-byte on their common prefix, not on
+//! length; pin `iters` instead of the budget to reproduce a full stream).
+//! Promotion stays manual by design: register the printed params as a new
+//! named bot, then race it.
 //!
 //! # RUN RECORD (2026-06-12, campaign `app-1p0`, subject attack-tuned-d4)
 //!
@@ -106,16 +109,17 @@ impl Default for Spec {
     }
 }
 
-/// The subject's climbable surface: its search config (carried verbatim —
-/// beam, tp-beam, or best-first) + its Cc2 weights. Greedy subjects are
-/// rejected with the rest: greedy ignores custom evaluators by design.
-fn subject_surface(subject: &Bot) -> io::Result<(SearchSpec, Cc2Weights)> {
+/// The subject's climbable surface: its full spec (search config AND
+/// blindness, carried verbatim — beam, tp-beam, or best-first) + its Cc2
+/// weights. Greedy subjects are rejected: greedy ignores custom evaluators
+/// by design.
+fn subject_surface(subject: &Bot) -> io::Result<(BotSpec, Cc2Weights)> {
     match (subject.spec.search, subject.spec.eval) {
         (SearchSpec::Greedy, _) | (_, EvalSpec::Linear(_)) => Err(io::Error::other(format!(
             "app-climb needs a Cc2 search subject (beam / tp-beam / best-first); {} is {:?}",
             subject.name, subject.spec
         ))),
-        (search, EvalSpec::Cc2(w)) => Ok((search, w)),
+        (_, EvalSpec::Cc2(w)) => Ok((subject.spec, w)),
     }
 }
 
@@ -171,15 +175,16 @@ fn perturb(
 /// One fitness evaluation: the subject's search over `weights`, censored APP
 /// per seed (`total_attack / max_pieces` — a top-out keeps its denominator).
 fn evaluate(
-    search: SearchSpec,
+    subject: BotSpec,
     weights: &Cc2Weights,
     seeds: &[u64],
     max_pieces: u32,
 ) -> (Vec<f64>, Vec<MarathonOutcome>) {
+    // The subject's spec verbatim (search class AND blindness), only the
+    // eval's weights swapped — the climb tunes weights, never the bot shape.
     let bot = BotSpec {
-        search,
         eval: EvalSpec::Cc2(*weights),
-        blind: false,
+        ..subject
     };
     let stats = evaluate_capped(&bot.factory(), seeds, DEFAULT_MAX_FRAMES, max_pieces);
     let fits = stats
@@ -191,7 +196,10 @@ fn evaluate(
 }
 
 /// Emit one `games.jsonl` row per game: which arm played (`inc`/`cand`/`val-*`),
-/// at which iteration, plus the raw outcome facts.
+/// at which iteration, plus the raw outcome facts. `arm`/`iter` survive
+/// normalization by the same rule as the ordinal `n`: a budget-truncated run
+/// stops at a wall-clock-dependent iteration, so row position alone cannot
+/// distinguish the tail (e.g. val rows) without them.
 fn emit_games(arm: &str, iter: u32, outcomes: &[MarathonOutcome]) {
     for o in outcomes {
         events::game(json!({
@@ -210,7 +218,19 @@ fn mean(xs: &[f64]) -> f64 {
 }
 
 pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
-    let (search, origin) = subject_surface(subject)?;
+    let (subject_spec, origin) = subject_surface(subject)?;
+    if spec.seeds_per_block < 2
+        || spec.block_iters == 0
+        || spec.max_pieces == 0
+        || spec.iters == 0
+        || spec.val_seeds == 0
+    {
+        return Err(io::Error::other(format!(
+            "degenerate app-climb spec {spec:?}: the paired t-gate needs seeds_per_block >= 2 \
+             (one seed makes SE 0 and accepts any positive noise), and zero block_iters / \
+             max_pieces / iters / val_seeds starve the walk"
+        )));
+    }
     let campaign = Campaign::derive(spec.campaign);
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
     let start = Instant::now();
@@ -241,7 +261,7 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
                 spec.seeds_per_block,
             );
             let (fits, outcomes) = evaluate(
-                search,
+                subject_spec,
                 &to_weights(&origin, &cur),
                 &block_seeds,
                 spec.max_pieces,
@@ -252,7 +272,7 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
         let cand = perturb(&cur, &scales, sigma, &mut rng);
         let (cand_fits, outcomes) = evaluate(
-            search,
+            subject_spec,
             &to_weights(&origin, &cand),
             &block_seeds,
             spec.max_pieces,
@@ -291,10 +311,10 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
     // Self-validation on the campaign's held-out region: the honest readout.
     let val_seeds = seed_set_from(campaign.validation(spec.val_seeds), spec.val_seeds);
-    let (val_origin, o1) = evaluate(search, &origin, &val_seeds, spec.max_pieces);
+    let (val_origin, o1) = evaluate(subject_spec, &origin, &val_seeds, spec.max_pieces);
     emit_games("val-origin", iter, &o1);
     let (val_best, o2) = evaluate(
-        search,
+        subject_spec,
         &to_weights(&origin, &cur),
         &val_seeds,
         spec.max_pieces,
@@ -303,9 +323,10 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
     let final_weights = to_weights(&origin, &cur);
     eprintln!(
-        "app-climb {} @ {search:?} cap={} | {iter} iters {accepts} accepts | \
+        "app-climb {} @ {:?} cap={} | {iter} iters {accepts} accepts | \
          validation APP {:.4} -> {:.4} ({} held-out seeds){}",
         subject.name,
+        subject_spec.search,
         spec.max_pieces,
         mean(&val_origin),
         mean(&val_best),

@@ -11,7 +11,11 @@
 //!
 //! Consequence worth its weight: with nothing observational in the rows,
 //! `games.jsonl` is BYTE-IDENTICAL across replays of the same run — `diff`
-//! is a replay witness (the smoke asserts it).
+//! is a replay witness (the smoke asserts it). Scope: that holds for
+//! fixed-work runs (every eval). A budget-truncated optimizer run stops at a
+//! wall-clock-dependent iteration, so two invocations reproduce as a PREFIX
+//! relation, byte-identical only up to the shorter stream (the walk itself
+//! is deterministic; only the stopping point is machine-local).
 //!
 //! Emission is a no-op until the RUNNER installs the sink (commands stay
 //! tracking-blind; tests and library use stay silent), never fails a run,
