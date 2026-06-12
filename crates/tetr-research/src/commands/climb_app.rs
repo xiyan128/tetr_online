@@ -67,6 +67,15 @@ pub struct Spec {
     pub iters: u32,
     /// Initial relative step size.
     pub sigma0: f32,
+    /// Per-reject step decay and the step floor. RUN RECORD (the first 600s
+    /// d4 climb, run `20260612-075448-app-climb-80407`): decay 0.92 with
+    /// floor 0.01 collapsed σ to the floor within ~40 iters under the ~6%
+    /// accept rate the t-gate produces — a reject mostly means "no detectable
+    /// improvement", not "step too big", so the 1/5th-rule assumption fails
+    /// and the walk explored a ±1% ball (held-out Δ +0.006 ≈ noise). Keep the
+    /// floor high enough that proposals stay meaningful.
+    pub sigma_decay: f32,
+    pub sigma_floor: f32,
     /// Accept gate: paired mean Δ must exceed `accept_k × SE`.
     pub accept_k: f64,
     /// Held-out games per arm for the end-of-run self-validation.
@@ -82,6 +91,8 @@ impl Default for Spec {
             max_pieces: 150,
             iters: 1000,
             sigma0: 0.15,
+            sigma_decay: 0.97,
+            sigma_floor: 0.05,
             accept_k: 1.0,
             val_seeds: 16,
         }
@@ -256,9 +267,9 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
             accepts += 1;
             sigma *= 1.3;
         } else {
-            sigma *= 0.92;
+            sigma *= spec.sigma_decay;
         }
-        sigma = sigma.clamp(0.01, 1.0);
+        sigma = sigma.clamp(spec.sigma_floor, 1.0);
         iter += 1;
         bar.set_message(format!(
             "iter {iter} acc {accepts} σ{sigma:.2} train {:.3}",

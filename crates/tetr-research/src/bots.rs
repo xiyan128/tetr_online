@@ -275,10 +275,74 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
         ),
         // Engine-true attack reward (λ = 1), shaped tables zeroed — the
         // objective-in-the-search hypothesis, at matched configs for clean A/Bs.
+        // RESULT 2026-06-12: LOSES at both configs (0.434 vs 0.572 @ d3, 0.618
+        // vs 0.721 @ d6w32) — CC2's shaping carries beyond-horizon value.
         ("attack-true-d3", BotSpec::beam(16, 3).cc2(attack_true(1.0))),
         (
             "attack-true-d6w32",
             BotSpec::beam(32, 6).cc2(attack_true(1.0)),
+        ),
+        // --- probe-* : single-lever APP hypotheses at the d6w32 incumbent ----
+        // The exploratory tier (screened on TRAIN marathon; most will lose —
+        // they are the lab notebook, immutable like every cited name).
+        // Mixture: engine-true attack ADDED to the intact shaped tables, so
+        // chain continuation (combo staircase, B2B +1) is valued at true scale.
+        (
+            "probe-mix05-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                attack: 0.5,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        (
+            "probe-mix1-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                attack: 1.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Combo emphasis beyond CC2's 1.5 (the engine resumes real combos now).
+        (
+            "probe-combo4-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                combo_attack: 4.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Deeper tetris well (the recorded offense↔survival trade-off knob).
+        (
+            "probe-well1-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                tetris_well_depth: 1.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Perfect-clear hunter (PC = +10 attack, the table's biggest prize).
+        (
+            "probe-pc40-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                perfect_clear: 40.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Spin emphasis: clear rewards and slot Value both doubled.
+        (
+            "probe-spin2x-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                spin_clears: [0.0, 2.0, 8.0, 12.0],
+                tslot: [0.2, 3.0, 8.93, 8.0],
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Best-first at research budgets (never re-tested post-bitboard; the
+        // recorded result: beats the beam per node and scales with budget).
+        (
+            "probe-bf1k-d8",
+            BotSpec::best_first(1000, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-d8",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights::attack_tuned()),
         ),
         // Toy-sized twins for the smoke gate (seconds, not minutes).
         (
