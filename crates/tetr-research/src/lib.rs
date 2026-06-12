@@ -23,8 +23,10 @@
 //!   nothing), so survival verdicts must come from death-decisive matches —
 //!   see [`sprt`] — never from bare capped win rates.
 //! - **Run records.** A bin's doc header carries the durable results of its
-//!   runs (with settings), so conclusions outlive sessions and are never
-//!   silently re-derived.
+//!   runs (with settings and a [`ledger`] run id), so conclusions outlive
+//!   sessions and are never silently re-derived.
+//! - **Run manifests.** Every bin writes resolved config, provenance, per-seed
+//!   outcomes, and a terminal summary through [`ledger`].
 //!
 //! # Layout
 //!
@@ -40,12 +42,14 @@
 //! | [`seeds`] | deterministic seed sets + region discipline |
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
 //! | [`cli`] | env-config + deterministic-RNG helpers for the bins |
+//! | [`ledger`] | machine-readable run specs, outcomes, checkpoints, and summaries |
 
 pub mod behavior;
 pub mod bots;
 pub mod cc2;
 pub mod cli;
 pub mod downstack;
+pub mod ledger;
 pub mod marathon;
 pub mod seeds;
 pub mod sprt;

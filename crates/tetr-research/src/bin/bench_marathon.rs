@@ -9,6 +9,7 @@
 //! ```
 
 use tetr_research::bots::BotSpec;
+use tetr_research::ledger::RunLedger;
 use tetr_research::marathon::{DEFAULT_MAX_FRAMES, MarathonStats, evaluate};
 use tetr_research::seeds::seed_set;
 
@@ -48,15 +49,36 @@ fn print_delta(label: &str, s: &MarathonStats, baseline: &MarathonStats) {
     println!("\n{label} vs baseline score/sec: {delta:+.2} ({pct:+.1}%) — {verdict}");
 }
 
-fn main() {
+fn append_stats(ledger: &mut RunLedger, arm: &str, stats: &MarathonStats) -> std::io::Result<()> {
+    for outcome in &stats.outcomes {
+        ledger.append_outcome(&serde_json::json!({ "arm": arm, "outcome": outcome }))?;
+    }
+    Ok(())
+}
+
+fn main() -> std::io::Result<()> {
     let num_seeds = tetr_research::cli::env_usize("BENCH_SEEDS", DEFAULT_NUM_SEEDS);
     let seeds = seed_set(num_seeds);
+    let mut ledger = RunLedger::create(
+        "bench-marathon",
+        serde_json::json!({
+            "seeds": seeds,
+            "max_frames": DEFAULT_MAX_FRAMES,
+            "arms": [
+                { "name": "greedy", "search": "greedy" },
+                { "name": "beam-depth1", "search": "beam", "width": BEAM_WIDTH, "depth": 1 },
+                { "name": "beam-depth2", "search": "beam", "width": BEAM_WIDTH, "depth": 2 },
+                { "name": "beam-depth3", "search": "beam", "width": BEAM_WIDTH, "depth": 3 },
+            ],
+        }),
+    )?;
     println!(
         "Marathon scoring-speed benchmark — {} seeds, perfect handicap, deterministic",
         seeds.len()
     );
 
     let baseline = evaluate(&BotSpec::greedy().factory(), &seeds, DEFAULT_MAX_FRAMES);
+    append_stats(&mut ledger, "greedy", &baseline)?;
     print_stats("baseline: greedy (linear DT20 / SURVIVAL)", &baseline);
 
     // --- BeamPlanner head-to-head (same linear eval, perfect handicap) -----------
@@ -67,6 +89,7 @@ fn main() {
         &seeds,
         DEFAULT_MAX_FRAMES,
     );
+    append_stats(&mut ledger, "beam-depth1", &beam1)?;
     print_stats("beam @depth1 (== greedy check)", &beam1);
     print_delta("beam @depth1", &beam1, &baseline);
 
@@ -75,6 +98,7 @@ fn main() {
         &seeds,
         DEFAULT_MAX_FRAMES,
     );
+    append_stats(&mut ledger, "beam-depth2", &beam2)?;
     print_stats("beam @depth2 (linear DT20 / SURVIVAL)", &beam2);
     print_delta("beam @depth2", &beam2, &baseline);
 
@@ -83,6 +107,7 @@ fn main() {
         &seeds,
         DEFAULT_MAX_FRAMES,
     );
+    append_stats(&mut ledger, "beam-depth3", &beam3)?;
     print_stats("beam @depth3 (linear DT20 / SURVIVAL)", &beam3);
     print_delta("beam @depth3", &beam3, &baseline);
 
@@ -96,4 +121,28 @@ fn main() {
         "  beam   @depth3 (linear)         : {:.2}",
         beam3.mean_score_per_second
     );
+    ledger.write_summary(serde_json::json!({
+        "exit_reason": "complete",
+        "arms": {
+            "greedy": summary(&baseline),
+            "beam-depth1": summary(&beam1),
+            "beam-depth2": summary(&beam2),
+            "beam-depth3": summary(&beam3),
+        },
+    }))?;
+    Ok(())
+}
+
+fn summary(stats: &MarathonStats) -> serde_json::Value {
+    serde_json::json!({
+        "games": stats.games,
+        "mean_score_per_second": stats.mean_score_per_second,
+        "mean_score": stats.mean_score,
+        "mean_level": stats.mean_level,
+        "mean_pieces": stats.mean_pieces,
+        "completion_rate": stats.completion_rate,
+        "topout_rate": stats.topout_rate,
+        "mean_attack_per_piece": stats.mean_attack_per_piece,
+        "mean_attack": stats.mean_attack,
+    })
 }

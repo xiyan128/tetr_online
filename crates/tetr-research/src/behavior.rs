@@ -22,7 +22,7 @@ use crate::versus::MAX_PIECE_FRAMES;
 use crate::versus_legacy::{GarbageQueue, versus_hole};
 
 /// A garbage scenario to measure the bot in.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
 pub enum Scenario {
     /// Empty board, `max_pieces` budget — the offense ceiling. NOTE: combo-gameable;
     /// read it alongside the pressured scenarios, never alone.
@@ -85,7 +85,7 @@ pub fn standard_suite() -> Vec<Scenario> {
 }
 
 /// Per-game behavior + attack breakdown.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct BehaviorStats {
     pub pieces: u32,
     /// Attack SENT (offense). In a Faucet this is post-cancellation (lines that
@@ -266,6 +266,8 @@ pub struct ScenarioReport {
     pub mean_ms_per_piece: f32,
     /// Summed clear-type counts across all games (the behavior histogram).
     pub totals: BehaviorStats,
+    /// Per-seed outcomes in the same order as the input seed set.
+    pub outcomes: Vec<BehaviorStats>,
 }
 
 /// Run `scenario` over `seeds` and aggregate.
@@ -315,5 +317,6 @@ pub fn evaluate_scenario(
         mean_garbage_received: games.iter().map(|g| g.garbage_received as f32).sum::<f32>() / n,
         mean_ms_per_piece: elapsed_ms / total_pieces.max(1) as f32,
         totals,
+        outcomes: games,
     }
 }

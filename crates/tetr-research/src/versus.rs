@@ -55,7 +55,7 @@ pub(crate) fn versus_step_piece(
 }
 
 /// Result of a single versus match (A = first bot, B = second).
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
 pub enum VersusResult {
     AWins,
     BWins,
@@ -81,7 +81,7 @@ pub fn decide_versus(a_topped: bool, b_topped: bool, a_attack: u32, b_attack: u3
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct VersusOutcome {
     pub seed: u64,
     pub result: VersusResult,

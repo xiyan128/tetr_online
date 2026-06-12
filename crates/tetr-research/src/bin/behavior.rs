@@ -8,45 +8,27 @@ use tetr_core::ai::Cc2Weights;
 use tetr_core::ai::eval::{BoardWeights, RewardWeights, Weights};
 use tetr_research::behavior::{ScenarioReport, evaluate_scenario, standard_suite};
 use tetr_research::bots::BotSpec;
-use tetr_research::cli::env_usize;
+use tetr_research::cli::{env_choice, env_f32_array, env_usize};
+use tetr_research::ledger::RunLedger;
 use tetr_research::seeds::seed_set;
 
-/// Parse a comma-separated `f32` list from env var `key` (empty if unset/malformed).
-fn parse_f32_list(key: &str) -> Vec<f32> {
-    std::env::var(key)
-        .ok()
-        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
-        .unwrap_or_default()
-}
-
 /// Custom linear [`Weights`] from `BOARD_PARAMS` (10) + `REWARD_PARAMS` (11) — for
-/// validating an `app-climb` result at any depth/width. Each group falls back to its
-/// shipped default when the env list is absent or the wrong length.
+/// validating an `app-climb` result at any depth/width. Each group uses its shipped
+/// default only when the corresponding environment variable is unset.
 fn linear_custom_weights() -> Weights {
-    let bp = parse_f32_list("BOARD_PARAMS");
-    let rp = parse_f32_list("REWARD_PARAMS");
-    let board = <[f32; BoardWeights::PARAM_COUNT]>::try_from(bp.as_slice())
-        .map_or(BoardWeights::DT20, |a| BoardWeights::from_params(&a));
-    let reward = <[f32; RewardWeights::PARAM_COUNT]>::try_from(rp.as_slice())
-        .map_or(RewardWeights::SURVIVAL, |a| RewardWeights::from_params(&a));
+    let bp = env_f32_array("BOARD_PARAMS", BoardWeights::DT20.params());
+    let rp = env_f32_array("REWARD_PARAMS", RewardWeights::SURVIVAL.params());
+    let board = BoardWeights::from_params(&bp);
+    let reward = RewardWeights::from_params(&rp);
     Weights { board, reward }
 }
 
 /// Parse `CC2_PARAMS` (11 comma-separated `board_params` floats) into a `Cc2Weights`,
-/// for validating a `cc2-app-climb` result on the full behavior suite. Falls back to
-/// CC2's defaults when unset or malformed.
+/// for validating a `cc2-app-climb` result on the full behavior suite. Uses CC2's
+/// defaults only when the variable is unset.
 fn cc2_custom_weights() -> Cc2Weights {
-    let parsed: Vec<f32> = std::env::var("CC2_PARAMS")
-        .ok()
-        .map(|s| s.split(',').filter_map(|t| t.trim().parse().ok()).collect())
-        .unwrap_or_default();
-    if parsed.len() == Cc2Weights::BOARD_PARAM_COUNT {
-        let mut p = [0f32; Cc2Weights::BOARD_PARAM_COUNT];
-        p.copy_from_slice(&parsed);
-        Cc2Weights::DEFAULT.with_board_params(&p)
-    } else {
-        Cc2Weights::DEFAULT
-    }
+    let params = env_f32_array("CC2_PARAMS", Cc2Weights::DEFAULT.board_params());
+    Cc2Weights::DEFAULT.with_board_params(&params)
 }
 
 fn print_report(r: &ScenarioReport) {
@@ -80,12 +62,24 @@ fn print_report(r: &ScenarioReport) {
     println!("APP[{}] {:.3}", r.scenario.label(), r.mean_app);
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let seeds = seed_set(env_usize("SEEDS", 24));
     let depth = env_usize("BEAM_DEPTH", 2) as u8;
     let width = env_usize("BEAM_WIDTH", 16);
     let node_budget = env_usize("NODE_BUDGET", 4000) as u32; // best-first total expansions
-    let bot = std::env::var("BOT").unwrap_or_else(|_| "dt20".to_string());
+    let bot = env_choice(
+        "BOT",
+        "dt20",
+        &[
+            "dt20",
+            "cc2",
+            "cc2custom",
+            "lincustom",
+            "bf",
+            "bfcustom",
+            "bflin",
+        ],
+    );
 
     eprintln!(
         "Behavior + APP suite | bot={bot} beam(depth={depth}, width={width}) | {} seeds",
@@ -103,10 +97,47 @@ fn main() {
         "bf" => BotSpec::best_first(node_budget, depth).cc2(Cc2Weights::DEFAULT),
         "bfcustom" => BotSpec::best_first(node_budget, depth).cc2(cc2_custom_weights()),
         "bflin" => BotSpec::best_first(node_budget, depth).linear(linear_custom_weights()),
-        _ => BotSpec::beam(width, depth),
+        "dt20" => BotSpec::beam(width, depth),
+        _ => unreachable!("env_choice returned an unregistered value"),
     };
 
+    let mut ledger = RunLedger::create(
+        "behavior",
+        serde_json::json!({
+            "bot": bot,
+            "bot_spec": format!("{spec:?}"),
+            "seeds": seeds,
+            "suite": standard_suite(),
+        }),
+    )?;
+    let mut summaries = Vec::new();
+
     for scenario in standard_suite() {
-        print_report(&evaluate_scenario(&spec.factory(), &seeds, scenario));
+        let report = evaluate_scenario(&spec.factory(), &seeds, scenario);
+        for (&seed, outcome) in seeds.iter().zip(&report.outcomes) {
+            ledger.append_outcome(&serde_json::json!({
+                "seed": seed,
+                "scenario": scenario,
+                "outcome": outcome,
+            }))?;
+        }
+        summaries.push(serde_json::json!({
+            "scenario": scenario,
+            "games": report.games,
+            "survival_rate": report.survival_rate,
+            "mean_app": report.mean_app,
+            "mean_dsp": report.mean_dsp,
+            "mean_attack_per_line": report.mean_attack_per_line,
+            "mean_pieces": report.mean_pieces,
+            "mean_garbage_received": report.mean_garbage_received,
+            "mean_ms_per_piece": report.mean_ms_per_piece,
+            "totals": report.totals,
+        }));
+        print_report(&report);
     }
+    ledger.write_summary(serde_json::json!({
+        "exit_reason": "complete",
+        "scenarios": summaries,
+    }))?;
+    Ok(())
 }

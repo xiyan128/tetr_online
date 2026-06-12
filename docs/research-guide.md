@@ -21,7 +21,7 @@ This guide is task-oriented; the *rules* live in the crate docs
    SPRT), never bare capped win rates.
 
 Results worth keeping go into the bin's doc header as a **RUN RECORD** (date,
-settings, numbers, verdict). Records are conclusions, not pending reruns.
+run ID, settings, numbers, verdict). Records are conclusions, not pending reruns.
 Note it in the header if a later change breaks trajectory reproduction.
 
 ## Building a bot: `BotSpec`
@@ -51,7 +51,7 @@ evaluate_versus_format(&aware.factory(), &blind.factory(), &seeds, format);
 | call | suite | measures |
 |---|---|---|
 | `marathon::evaluate[_capped]` | solo Marathon | score/sec, APP |
-| `downstack::evaluate_downstack` | seeded cheese | pieces-to-clear (digging), attack-while-digging |
+| `downstack::evaluate_downstack` | seeded cheese | censored pieces (optimization), clear rate, cleared-only pieces and attack (context) |
 | `versus::evaluate_versus[_format]` | head-to-head, engine garbage rules | wins, deaths, net attack |
 | `behavior::evaluate_scenario` | scripted pressure scenarios | APP, DS/P, survival, clear histogram |
 | `sprt::sprt_race` | sequential survival test | H1 / H0 / inconclusive + LLR |
@@ -73,9 +73,10 @@ before running.
 
 **Daily drivers**
 
-- **`metric`**: one number, fast, for iteration loops. Default: capped
-  marathon score/sec. `DOWNSTACK=1` → pieces-to-clear; `VERSUS=1` → win rate
-  vs the greedy baseline. Knobs: `BENCH_SEEDS`, `BEAM_DEPTH`, `BEAM_WIDTH`.
+- **`metric`**: fast headline metrics for iteration loops. Default: capped
+  marathon score/sec and APP. `DOWNSTACK=1` → censored pieces plus clear rate;
+  `VERSUS=1` → win rate vs the greedy baseline. Knobs: `BENCH_SEEDS`,
+  `BEAM_DEPTH`, `BEAM_WIDTH`.
 - **`behavior`**: the APP/DS-P suite across the standard scenarios.
   `BOT=dt20|cc2|cc2custom|lincustom|bf|bfcustom|bflin` picks the spec;
   custom weights via `BOARD_PARAMS`/`REWARD_PARAMS`/`CC2_PARAMS` (CSV).
@@ -105,7 +106,24 @@ before running.
   `SEEDS`, `PIECES`, `THINK_MS`. Uses legacy garbage rules by design; its
   win rates are NOT comparable with `play_versus` numbers.
 - **`cc2-native`**: CC2's *ported evaluator* vs ours on our engine with real
-  mutual garbage. The fair comparison, and the baseline to climb past.
+  mutual garbage. The fair comparison, and the baseline to climb past. Its
+  downstack output reports censored pieces and clear rate for both evaluators.
+
+## Run manifests
+
+Every owned experiment creates `runs/<run-id>/`, where the run ID is
+`<UTC timestamp>-<bin>-<pid>`. The directory contains:
+
+- `spec.json`: schema version, run ID, bin, UTC creation time, git commit and
+  dirty state, host metadata, every resolved env value with its raw value and
+  source, and the bin's bot/seed/format specification.
+- `outcomes.jsonl`: one JSON object per game or seed result.
+- `summary.json`: UTC finish time, exit reason, and headline aggregate fields.
+- `checkpoint.json`: optional atomically replaced resume state for experiments
+  that checkpoint.
+
+`runs/` is ignored by git. A doc-header RUN RECORD cites its run ID so the
+durable conclusion can be traced to the machine-readable manifest.
 
 ## Seed regions
 
@@ -123,15 +141,22 @@ an offset inline. `seed_set(n)` = train; `seed_set_from(region, n)` = anywhere.
 ## Adding an experiment (checklist)
 
 1. Compose arms as `BotSpec`s; pick or claim a seed region.
-2. Thin bin: env via `cli::{env_usize, env_f64}`, library calls, one
+2. Thin bin: env via strict `cli` helpers, library calls, one
    machine-readable `println!` per headline number, context on stderr.
 3. Bound it: `TIME_BUDGET_SECS` with an honest partial verdict.
-4. Doc header: purpose, env table, and a RUN RECORD after each real run.
+4. Create a `RunLedger` after all env reads, append one outcome per game, and
+   write the terminal summary. Cite the run ID in each doc-header RUN RECORD.
 5. If it judges survival, race it (`sprt_race`). Don't eyeball block means;
    they pass noise at every size we've measured (σ ≈ ±90 at 48 matches).
 
 ## Reading results / gotchas
 
+- Environment defaults apply only when a variable is unset. A set value that
+  cannot be parsed, has the wrong CSV length, or is not an allowed choice prints
+  `config error: ...` and exits 2; it never silently falls back.
+- The downstack optimization target is `mean_pieces_censored`: failures count as
+  `max_pieces`. Compare it only between runs with the same recorded cap, and read
+  clear rate beside it. Cleared-only mean pieces remains descriptive context.
 - **Win rate without deaths is a cap-game artifact.** Check the deaths split
   (`garbage_ab` prints it; `VersusOutcome.a_topped/b_topped` carry it).
 - **Mirror matches are bland** (≤6% decisive); asymmetric-style matches are

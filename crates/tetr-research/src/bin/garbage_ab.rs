@@ -23,7 +23,8 @@
 
 use tetr_core::ai::Cc2Weights;
 use tetr_research::bots::BotSpec;
-use tetr_research::cli::env_usize;
+use tetr_research::cli::{env_choice, env_usize};
+use tetr_research::ledger::RunLedger;
 use tetr_research::seeds::seed_set;
 use tetr_research::versus::{VersusFormat, VersusResult, VersusStats, evaluate_versus_format};
 
@@ -56,9 +57,9 @@ fn tally(stats: &VersusStats, aware_is_a: bool) -> (u32, u32, u32, u32) {
     (aware_deaths, blind_deaths, aware_cap_wins, blind_cap_wins)
 }
 
-fn main() {
+fn main() -> std::io::Result<()> {
     let seeds = seed_set(env_usize("SEEDS", 48));
-    let bot = std::env::var("BOT").unwrap_or_else(|_| "beam".to_string());
+    let bot = env_choice("BOT", "beam", &["beam", "bf"]);
     let depth = env_usize("BEAM_DEPTH", 2) as u8;
     let width = env_usize("BEAM_WIDTH", 16);
     let nodes = env_usize("NODE_BUDGET", 192) as u32;
@@ -76,9 +77,10 @@ fn main() {
             // WEIGHTS=attack raises the duel to the shipped operating point's
             // attack output — the pressure regime where deaths (the verdict
             // awareness exists for) actually occur.
-            let weights = match std::env::var("WEIGHTS").as_deref() {
-                Ok("attack") => Cc2Weights::attack_tuned(),
-                _ => Cc2Weights::DEFAULT,
+            let weights = match env_choice("WEIGHTS", "default", &["default", "attack"]).as_str() {
+                "attack" => Cc2Weights::attack_tuned(),
+                "default" => Cc2Weights::DEFAULT,
+                _ => unreachable!("env_choice returned an unregistered value"),
             };
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies, rain {}",
@@ -87,7 +89,7 @@ fn main() {
             );
             BotSpec::best_first(nodes, depth).cc2(weights)
         }
-        _ => {
+        "beam" => {
             eprintln!(
                 "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies, rain {}",
                 seeds.len(),
@@ -95,12 +97,36 @@ fn main() {
             );
             BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT)
         }
+        _ => unreachable!("env_choice returned an unregistered value"),
     };
+
+    let mut ledger = RunLedger::create(
+        "garbage_ab",
+        serde_json::json!({
+            "bot": bot,
+            "bot_spec": format!("{make:?}"),
+            "seeds": seeds,
+            "format": { "max_plies": format.max_plies, "rain_period": format.rain_period },
+            "arm_swap": true,
+        }),
+    )?;
 
     // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds; the
     // blind arm is the same spec with the pending queue hidden.
     let fwd = evaluate_versus_format(&make.factory(), &make.blind().factory(), &seeds, format);
     let rev = evaluate_versus_format(&make.blind().factory(), &make.factory(), &seeds, format);
+    for outcome in &fwd.outcomes {
+        ledger.append_outcome(&serde_json::json!({
+            "orientation": "aware_a",
+            "outcome": outcome,
+        }))?;
+    }
+    for outcome in &rev.outcomes {
+        ledger.append_outcome(&serde_json::json!({
+            "orientation": "aware_b",
+            "outcome": outcome,
+        }))?;
+    }
 
     let (fd_a, fd_b, fc_a, fc_b) = tally(&fwd, true);
     let (rd_a, rd_b, rc_a, rc_b) = tally(&rev, false);
@@ -127,4 +153,22 @@ fn main() {
         "mean net attack: fwd A(aware) {:.1} B(blind) {:.1} | rev A(blind) {:.1} B(aware) {:.1}",
         fwd.mean_attack_a, fwd.mean_attack_b, rev.mean_attack_a, rev.mean_attack_b
     );
+    ledger.write_summary(serde_json::json!({
+        "exit_reason": "complete",
+        "games": games,
+        "aware_deaths": aware_deaths,
+        "blind_deaths": blind_deaths,
+        "aware_death_rate": f64::from(aware_deaths) / f64::from(games),
+        "blind_death_rate": f64::from(blind_deaths) / f64::from(games),
+        "aware_cap_wins": aware_cap_wins,
+        "blind_cap_wins": blind_cap_wins,
+        "death_decisive_games": deaths,
+        "mean_attack": {
+            "forward_aware": fwd.mean_attack_a,
+            "forward_blind": fwd.mean_attack_b,
+            "reverse_blind": rev.mean_attack_a,
+            "reverse_aware": rev.mean_attack_b,
+        },
+    }))?;
+    Ok(())
 }
