@@ -30,7 +30,7 @@ impl Default for Spec {
     }
 }
 
-pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<serde_json::Value> {
     let seeds = seed_set(spec.seeds);
     let ds = evaluate_downstack(
         &bot.spec.factory(),
@@ -47,8 +47,6 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
             "attack": o.attack,
         }));
     }
-    println!("downstack_pieces_censored {:.2}", ds.mean_pieces_censored);
-    println!("downstack_clear_rate {:.2}", ds.clear_rate);
     eprintln!(
         "{} | {} seeds | {} garbage rows, cap {} | clear_rate={:.0}% cleared-only mean={:.2} attack={:.1}",
         bot.name,
@@ -59,5 +57,8 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
         ds.mean_pieces_to_clear,
         ds.mean_attack,
     );
-    Ok(())
+    Ok(json!({
+        "pieces_censored": ds.mean_pieces_censored,
+        "clear_rate": ds.clear_rate,
+    }))
 }

@@ -94,12 +94,19 @@ bypass records an exploratory run, stamped `git.dirty` in its receipt.
 Tracking is not a participant: the runner writes the receipt and installs
 the event sink before dispatch; commands never see either.
 
+**The stdout contract**: every run prints exactly ONE self-describing JSON
+line — `{"run": <dir>, "eval": …, "bots": […], …headline metrics}` — and
+nothing else (humans read stderr; bars are stderr and TTY-only). Pipe it to
+`jq`, or follow `run` to the receipt and game stream; analysis beyond the
+headline belongs to duckdb.
+
 **Daily drivers**
 
 - **`marathon` / `downstack` / `versus`**: fast headline metrics — score/sec
   + APP, censored cheese pieces + clear rate, win/death/attack head-to-head
   (arm-swapped; deaths first-class). `run marathon dt20` and
-  `run downstack dt20` are the /autoresearch parse contracts. Awareness A/Bs
+  `run downstack dt20` are the /autoresearch loops (parse the JSON line's
+  `score_per_second` / `pieces_censored` fields). Awareness A/Bs
   are versus with a blinded twin: `run versus cc2-default cc2-default-blind`
   (mirrors are bland without rain — the decisiveness dial).
 

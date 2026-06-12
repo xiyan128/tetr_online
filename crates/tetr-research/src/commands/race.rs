@@ -58,7 +58,12 @@ impl Default for Spec {
 /// Default wall-clock budget (`--budget-secs` overrides).
 const DEFAULT_BUDGET_SECS: u64 = 3600;
 
-pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::Result<()> {
+pub fn run(
+    spec: &Spec,
+    cand: &Bot,
+    incumbent: &Bot,
+    rt: &Runtime,
+) -> std::io::Result<serde_json::Value> {
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
     let config = SprtConfig {
         p1: spec.p1,
@@ -71,7 +76,7 @@ pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::R
         ..SprtConfig::default()
     };
 
-    println!(
+    eprintln!(
         "pair-GSPRT: {} vs {} | H0 p=0.5, H1 p={} | rain {}, {} plies, \
          blocks of {} seeds (x2 orientations = paired) | budget {}s",
         cand.name,
@@ -98,7 +103,7 @@ pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::R
         SprtVerdict::H0Accepted => "H0 ACCEPTED — no survival edge at this effect size",
         SprtVerdict::Inconclusive => "INCONCLUSIVE (budget)",
     };
-    println!(
+    eprintln!(
         "\nVERDICT: {verdict}\n\
          decisive {}-{} of {} matches / {} pairs ({} ties/caps) | pair scores [-2..+2] {:?} | \
          LLR {:+.3} (trinomial cross-check {:+.3}) | within-pair corr {} | \
@@ -117,10 +122,15 @@ pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::R
         report.mean_margin,
         start.elapsed().as_secs()
     );
-    println!("sprt_llr {:.4}", report.llr);
-    println!("sprt_trinomial_llr {:.4}", report.trinomial_llr);
-    println!("sprt_pairs {}", report.pairs);
-    println!("sprt_wins {}", report.wins);
-    println!("sprt_losses {}", report.losses);
-    Ok(())
+    Ok(serde_json::json!({
+        "verdict": format!("{:?}", report.verdict),
+        "llr": report.llr,
+        "trinomial_llr": report.trinomial_llr,
+        "pairs": report.pairs,
+        "wins": report.wins,
+        "losses": report.losses,
+        "ties": report.ties,
+        "mean_margin": report.mean_margin,
+        "pair_correlation": report.pair_correlation,
+    }))
 }

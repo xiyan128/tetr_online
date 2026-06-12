@@ -38,7 +38,7 @@ impl Default for Spec {
     }
 }
 
-pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<serde_json::Value> {
     let seeds = seed_set(spec.seeds);
     let fwd = evaluate_versus_format(&a.spec.factory(), &b.spec.factory(), &seeds, spec.format);
     let rev = evaluate_versus_format(&b.spec.factory(), &a.spec.factory(), &seeds, spec.format);
@@ -70,12 +70,6 @@ pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<()> 
     let games = seeds.len() * 2;
     let draws = games - a_wins - b_wins;
 
-    println!(
-        "versus_a_win_rate {:.2}",
-        a_wins as f64 / games.max(1) as f64
-    );
-    println!("versus_a_deaths {a_deaths}");
-    println!("versus_b_deaths {b_deaths}");
     eprintln!(
         "{} vs {} | {} {a_wins} / {} {b_wins} / draw {draws} | deaths {} {a_deaths}, {} {b_deaths} \
          (of {games} games) | {} seeds x2, {} plies, rain {}",
@@ -95,5 +89,9 @@ pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<()> 
         "mean net attack: {} {:.1}/{:.1} (fwd/rev) | {} {:.1}/{:.1}",
         a.name, fwd.mean_attack_a, rev.mean_attack_b, b.name, fwd.mean_attack_b, rev.mean_attack_a,
     );
-    Ok(())
+    Ok(json!({
+        "a_win_rate": a_wins as f64 / games.max(1) as f64,
+        "a_wins": a_wins, "b_wins": b_wins, "draws": draws,
+        "a_deaths": a_deaths, "b_deaths": b_deaths,
+    }))
 }

@@ -556,7 +556,7 @@ impl Spec {
 /// The historical CC2 build location — `--cc2-bin` overrides (machine-local).
 const DEFAULT_CC2_BIN: &str = "/tmp/cold-clear-2/target/release/cold-clear-2";
 
-pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<serde_json::Value> {
     let bin = rt
         .cc2_bin
         .as_ref()
@@ -571,7 +571,7 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
         spec.seeds
     );
 
-    match spec.mode {
+    let result = match spec.mode {
         // Downstack comparison: head-to-head cheese-clear efficiency.
         Mode::Downstack => {
             let garbage_rows = spec.garbage_rows;
@@ -592,14 +592,20 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
             }
             pb.finish_and_clear();
             let cc2_mean_censored = cc2_censored_sum / seeds.len().max(1) as f64;
-            println!(
-                "downstack {garbage_rows} rows — censored pieces (lower=better, cap {cap}): OURS {:.2} ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
+            eprintln!(
+                "downstack {garbage_rows} rows | OURS {:.2} censored ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
                 ours.mean_pieces_censored,
                 ours.clear_rate * 100.0,
                 cc2_mean_censored,
                 cc2_cleared,
                 seeds.len()
             );
+            serde_json::json!({
+                "ours_pieces_censored": ours.mean_pieces_censored,
+                "ours_clear_rate": ours.clear_rate,
+                "cc2_pieces_censored": cc2_mean_censored,
+                "cc2_clear_rate": cc2_cleared as f64 / seeds.len().max(1) as f64,
+            })
         }
         // Versus head-to-head — see [`Mode::Versus`] for why this is not fair.
         Mode::Versus => {
@@ -625,7 +631,6 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
             }
             pb.finish_and_clear();
             let n = seeds.len().max(1) as f64;
-            println!("versus_ours_win_rate {:.2}", ours_wins as f64 / n);
             eprintln!(
                 "  !! NOT FAIR: CC2 is crippled by TBP re-sync (see source); treat as infra only."
             );
@@ -635,6 +640,10 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
                 cc2_atk_sum as f64 / n,
                 seeds.len(),
             );
+            serde_json::json!({
+                "ours_win_rate": ours_wins as f64 / n,
+                "ours_wins": ours_wins, "cc2_wins": cc2_wins, "draws": draws,
+            })
         }
         Mode::App => {
             let mut total_app = 0.0f64;
@@ -648,8 +657,8 @@ pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
             }
             pb.finish_and_clear();
             let mean_app = total_app / spec.seeds.max(1) as f64;
-            println!("cc2_attack_per_piece {mean_app:.4}");
+            serde_json::json!({ "attack_per_piece": mean_app })
         }
-    }
-    Ok(())
+    };
+    Ok(result)
 }

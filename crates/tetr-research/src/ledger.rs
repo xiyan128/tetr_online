@@ -4,8 +4,8 @@
 //! see this module. The runner writes one `spec.json` RECEIPT per run (the
 //! reproducibility coordinates: experiment name, typed spec, runtime, git
 //! state) before dispatch. Anything richer — metrics sinks,
-//! wandb-style dashboards — belongs in an observer that reads receipts and
-//! the commands' stdout machine lines, not in here.
+//! wandb-style dashboards — belongs in an observer that reads receipts,
+//! game streams, and the one-JSON-line stdout, not in here.
 
 use std::fs::{self, File};
 use std::io;

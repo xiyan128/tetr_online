@@ -5,8 +5,9 @@
 //! - **Bots** ([`crate::bots`]) say WHO plays — named `BotSpec` instances.
 //! - **Evals** (these modules) say WHAT is measured — serde-serialized
 //!   `Spec`s with bot SLOTS, bound to bot names by a [`crate::registry`]
-//!   entry. A command is `run(spec, bots…, rt)`: measurement in, machine
-//!   lines on stdout, context on stderr, nothing else.
+//!   entry. A command is `run(spec, bots…, rt) -> Value`: measurement in,
+//!   human context on stderr, the result RETURNED — the runner prints the
+//!   one-JSON-line stdout contract ({run, eval, bots, …metrics}).
 //! - **Tracking** is not a participant: the runner writes the receipt
 //!   ([`crate::ledger`]) before dispatch; commands never see it.
 //!

@@ -131,13 +131,27 @@ fn execute(
 
     use Experiment::*;
     let bot = |i: usize| bots[i];
-    match &entry.experiment {
+    let result = match &entry.experiment {
         Marathon(spec) => commands::marathon::run(spec, &bot(0), &rt),
         Downstack(spec) => commands::downstack::run(spec, &bot(0), &rt),
         Versus(spec) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
         Race(spec) => commands::race::run(spec, &bot(0), &bot(1), &rt),
         Cc2Baseline(spec) => commands::cc2_baseline::run(spec, &rt),
+    }?;
+    // The entire stdout contract: ONE self-describing JSON line per run
+    // (humans read stderr; pipelines read this).
+    let mut line = json!({
+        "run": run_dir.dir().display().to_string(),
+        "eval": entry.name,
+        "bots": bot_names,
+    });
+    if let (serde_json::Value::Object(line), serde_json::Value::Object(result)) =
+        (&mut line, result)
+    {
+        line.extend(result);
     }
+    println!("{line}");
+    Ok(())
 }
 
 fn main() -> std::io::Result<()> {

@@ -11,8 +11,9 @@ fail() { echo "research-smoke: FAIL — $*" >&2; exit 1; }
 
 echo "== metric parse contract (smoke-downstack)"
 METRIC_LOG=$(tr_run run smoke-downstack dt20 2>/dev/null) || fail "metric errored"
-grep -q '^downstack_pieces_censored ' <<<"$METRIC_LOG" || fail "censored line missing"
-grep -q '^downstack_clear_rate ' <<<"$METRIC_LOG" || fail "clear-rate line missing"
+[[ $(wc -l <<<"$METRIC_LOG") -eq 1 ]] || fail "stdout must be exactly one JSON line"
+grep -q '"pieces_censored":' <<<"$METRIC_LOG" || fail "censored field missing"
+grep -q '"run":' <<<"$METRIC_LOG" || fail "run path missing"
 
 echo "== receipt + game stream (normalized facts, byte-deterministic)"
 RUN_DIR=$(ls -td runs/*-smoke-downstack-* | head -1)

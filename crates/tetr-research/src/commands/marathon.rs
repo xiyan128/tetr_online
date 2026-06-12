@@ -28,7 +28,7 @@ impl Default for Spec {
     }
 }
 
-pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<serde_json::Value> {
     let seeds = seed_set(spec.seeds);
     let stats = evaluate_capped(
         &bot.spec.factory(),
@@ -49,8 +49,6 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
             "attack": o.total_attack,
         }));
     }
-    println!("score_per_second {:.2}", stats.mean_score_per_second);
-    println!("attack_per_piece {:.4}", stats.mean_attack_per_piece);
     eprintln!(
         "{} cap={} | {} seeds | APP={:.4} attack/game={:.1} | score={:.0} level={:.2} pieces={:.0} completion={:.0}%",
         bot.name,
@@ -63,5 +61,8 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
         stats.mean_pieces,
         stats.completion_rate * 100.0,
     );
-    Ok(())
+    Ok(json!({
+        "score_per_second": stats.mean_score_per_second,
+        "attack_per_piece": stats.mean_attack_per_piece,
+    }))
 }
