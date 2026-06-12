@@ -42,10 +42,31 @@ impl SessionLayout {
     pub const BOARD_W: usize = 10;
     pub const BOARD_H: usize = 20;
     /// Cells between the two boards — wide enough for seat 0's preview column
-    /// and seat 1's hold column to meet without touching.
+    /// and seat 1's hold column (each beyond its garbage-meter channel) to
+    /// meet without touching.
     pub const GUTTER_CELLS: f32 = 10.0;
+    /// Air on each side of the garbage meter, in cells: the bar floats in
+    /// its own channel between the board frame and the inner hold/preview
+    /// column, touching neither.
+    pub const METER_AIR_CELLS: f32 = 0.5;
     /// Avatar scale for hold/preview minos (matches the single-player feel).
     pub const PREVIEW_SCALE: f32 = 0.8;
+    /// Vertical breathing room between the board frame and the run readout
+    /// beneath it ("ATK n" / the solo stat line), in cells. Generous on
+    /// purpose: the readout is its own quiet row, not a caption glued to the
+    /// frame.
+    pub const READOUT_GAP_CELLS: f32 = 1.2;
+
+    /// Offset from a board edge to its hold/preview column anchor, in cells.
+    /// On a versus board's INNER edge (`beyond_meter`) the column steps out
+    /// to clear the garbage-meter channel: air, the meter track, air again.
+    pub fn column_gap_cells(beyond_meter: bool) -> f32 {
+        if beyond_meter {
+            2.0 * Self::METER_AIR_CELLS + METER_WIDTH / Self::BLOCK
+        } else {
+            0.5
+        }
+    }
 
     /// World-space origin (bottom-left cell) of a seat's board.
     pub fn board_origin(seat: usize) -> Vec3 {
@@ -75,7 +96,10 @@ impl SessionLayout {
             // each outer flank.
             _ => 45.0,
         };
-        (width_cells * Self::BLOCK, 25.0 * Self::BLOCK)
+        // Height: the 20-cell board plus headroom for the seat label and,
+        // below, the readout at its READOUT_GAP_CELLS offset with clear air
+        // to the screen edge.
+        (width_cells * Self::BLOCK, 26.0 * Self::BLOCK)
     }
 }
 
@@ -276,14 +300,18 @@ fn setup_scene(
         // seat 0's on its right, seat 1's on its left. A full-height track in
         // `GRID` reads as a quiet groove at rest; the fill segments (children
         // of the meter root, one per pending batch) arrive in `ATTACK` and
-        // stack upward from the board floor. Versus only — solo has no
+        // stack upward from the board floor. The bar floats with
+        // `METER_AIR_CELLS` of air on BOTH sides — frame · air · meter ·
+        // air · column — never glued to either. Versus only — solo has no
         // garbage channel, and an always-empty groove would read as a stuck
         // UI element (the meter reconciler tolerates the missing root).
-        if matches!(config.mode, super::SessionMode::Versus) {
+        let versus = matches!(config.mode, super::SessionMode::Versus);
+        if versus {
+            let air = SessionLayout::METER_AIR_CELLS * block;
             let meter_x = if seat == 0 {
-                SessionLayout::BOARD_W as f32 * block + 0.25 * block
+                SessionLayout::BOARD_W as f32 * block + air
             } else {
-                -0.5 * block
+                -air - METER_WIDTH
             };
             let track = commands
                 .spawn((
@@ -320,12 +348,16 @@ fn setup_scene(
         commands.entity(root).add_child(bar);
 
         // Hold column (top-left of the board) and preview column (top-right) —
-        // the single-player arrangement, duplicated per seat.
+        // the single-player arrangement, duplicated per seat. On a versus
+        // board's inner edge the column steps outboard past the garbage-meter
+        // channel so the bar keeps clear air on both sides.
+        let hold_gap = SessionLayout::column_gap_cells(versus && seat == 1);
+        let preview_gap = SessionLayout::column_gap_cells(versus && seat == 0);
         let hold = commands
             .spawn((
                 SeatHoldView { seat },
                 Transform::from_translation(Vec3::new(
-                    -0.5 * block,
+                    -hold_gap * block,
                     SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
@@ -336,7 +368,7 @@ fn setup_scene(
             .spawn((
                 SeatPreviewView { seat, cache: None },
                 Transform::from_translation(Vec3::new(
-                    (SessionLayout::BOARD_W as f32 + 0.5) * block,
+                    (SessionLayout::BOARD_W as f32 + preview_gap) * block,
                     SessionLayout::BOARD_H as f32 * block,
                     0.0,
                 )),
@@ -356,7 +388,7 @@ fn setup_scene(
                 TextColor(theme::TEXT_DIM),
                 Anchor::BOTTOM_RIGHT,
                 Transform::from_translation(Vec3::new(
-                    -0.5 * block,
+                    -hold_gap * block,
                     (SessionLayout::BOARD_H as f32 + 0.15) * block,
                     0.0,
                 )),
@@ -373,7 +405,7 @@ fn setup_scene(
                 TextColor(theme::TEXT_DIM),
                 Anchor::BOTTOM_LEFT,
                 Transform::from_translation(Vec3::new(
-                    (SessionLayout::BOARD_W as f32 + 0.5) * block,
+                    (SessionLayout::BOARD_W as f32 + preview_gap) * block,
                     (SessionLayout::BOARD_H as f32 + 0.15) * block,
                     0.0,
                 )),
@@ -426,7 +458,7 @@ fn setup_scene(
                 Anchor::TOP_CENTER,
                 Transform::from_translation(Vec3::new(
                     SessionLayout::BOARD_W as f32 * block / 2.0,
-                    -0.6 * block,
+                    -SessionLayout::READOUT_GAP_CELLS * block,
                     0.0,
                 )),
             ))
@@ -914,6 +946,33 @@ fn update_atk_texts(
                 text.0 = line;
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn the_garbage_meter_floats_with_equal_air_on_both_sides() {
+        let block = SessionLayout::BLOCK;
+        let air = SessionLayout::METER_AIR_CELLS * block;
+        // Seat 0's inner edge, left to right: frame → air → meter → air →
+        // preview column (the same x math as spawn_session_scene).
+        let board_right = SessionLayout::BOARD_W as f32 * block;
+        let meter_left = board_right + air;
+        let column_x =
+            (SessionLayout::BOARD_W as f32 + SessionLayout::column_gap_cells(true)) * block;
+        assert_eq!(meter_left - board_right, air);
+        assert_eq!(column_x - (meter_left + METER_WIDTH), air);
+        // Seat 1 mirrors: hold column → air → meter → air → frame.
+        let meter_left = -air - METER_WIDTH;
+        let hold_x = -SessionLayout::column_gap_cells(true) * block;
+        assert_eq!(meter_left - hold_x, air);
+        assert_eq!(0.0 - (meter_left + METER_WIDTH), air);
+        // Without a meter (solo, outer flanks) the column keeps its snug
+        // half-cell offset.
+        assert_eq!(SessionLayout::column_gap_cells(false), 0.5);
     }
 }
 
