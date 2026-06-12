@@ -32,7 +32,8 @@ use std::time::Duration;
 
 use tetr_core::ai::eval::{Cc2Evaluator, Cc2Weights, Evaluator, LinearEvaluator, Weights};
 use tetr_core::ai::{
-    AiController, BeamPlanner, BestFirstPlanner, Handicap, Policy, SearchBudget, SearchPolicy,
+    AiController, BeamPlanner, BestFirstPlanner, Handicap, PcCoverageConfig, PcCoveragePlanner,
+    PcCoverageUnit, Policy, SearchBudget, SearchPolicy,
 };
 use tetr_core::player::PlayerController;
 
@@ -59,6 +60,9 @@ pub enum SearchSpec {
     /// Best-first graph search with transposition: `budget` node expansions
     /// per decision, lookahead capped at `depth` plies.
     BestFirst { budget: u32, depth: u8 },
+    /// Perfect-clear coverage search with a TP-beam fallback
+    /// ([`PcCoveragePlanner`]); the config literal IS the arm's identity.
+    PcCoverage { config: PcCoverageConfig, depth: u8 },
 }
 
 /// The board evaluator and its weights.
@@ -128,6 +132,15 @@ impl BotSpec {
         }
     }
 
+    /// A PC-coverage bot (see [`SearchSpec::PcCoverage`]).
+    pub fn pc_coverage(config: PcCoverageConfig, depth: u8) -> Self {
+        Self {
+            search: SearchSpec::PcCoverage { config, depth },
+            eval: EvalSpec::Linear(Weights::default()),
+            blind: false,
+        }
+    }
+
     /// Swap the evaluator to CC2 with `weights`.
     pub fn cc2(mut self, weights: Cc2Weights) -> Self {
         self.eval = EvalSpec::Cc2(weights);
@@ -176,6 +189,12 @@ impl BotSpec {
                 Box::new(BestFirstPlanner::new()),
                 self.eval.build(),
                 SearchBudget::best_first(budget, depth),
+                seed,
+            ),
+            SearchSpec::PcCoverage { config, depth } => full_strength(
+                Box::new(PcCoveragePlanner::new(config)),
+                self.eval.build(),
+                SearchBudget::beam(depth),
                 seed,
             ),
         };
@@ -428,7 +447,64 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
                 ..Cc2Weights::attack_tuned()
             }),
         ),
+        // --- the PC campaign (ported from the codex worktree, 2026-06-12; ---
+        // --- the pc command's RUN RECORD carries the screen numbers) --------
+        // The structural-prior-free control: can a full 10-piece-horizon
+        // general beam plus a dominating terminal reward find PCs without a
+        // specialized planner? (Worktree answer: no — 0.0100 PPC.)
+        (
+            "probe-pc-tp256d12",
+            BotSpec::tp_beam(256, 12).cc2(Cc2Weights {
+                perfect_clear: 1_000.0,
+                perfect_clear_override: true,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Scenario coverage: each sampled continuation counts once.
+        (
+            "pc-scenario-s8w2",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 8,
+                    width_per_root: 2,
+                    min_coverage_percent: 25,
+                    fallback_width: 64,
+                    unit: PcCoverageUnit::Scenarios,
+                },
+                10,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Reveal coverage at the worktree screen winner's operating point.
+        (
+            "pc-reveal-s28w8",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 28,
+                    width_per_root: 8,
+                    min_coverage_percent: 25,
+                    fallback_width: 64,
+                    unit: PcCoverageUnit::Reveals,
+                },
+                10,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
         // Toy-sized twins for the smoke gate (seconds, not minutes).
+        (
+            "pc-reveal-tiny",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 8,
+                    width_per_root: 1,
+                    min_coverage_percent: 25,
+                    fallback_width: 4,
+                    unit: PcCoverageUnit::Reveals,
+                },
+                3,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
         (
             "attack-tuned-tiny",
             BotSpec::beam(4, 1).cc2(Cc2Weights::attack_tuned()),

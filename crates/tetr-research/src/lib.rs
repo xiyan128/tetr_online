@@ -51,6 +51,7 @@
 //! | [`commands`] | the eval executors behind `tetr-research run` |
 //! | [`marathon`] | solo scoring/APP suite (the original benchmark) |
 //! | [`downstack`] | cheese-clearing suite (digging skill, not gameable by combos) |
+//! | [`pc`] | clean-board perfect-clear suite (PPC + per-PC lock indices) |
 //! | [`versus`] | head-to-head under the **engine's** garbage rules |
 //! | [`versus_legacy`] | the pre-engine harness scheduler, quarantined for the TBP referee + scripted scenarios |
 //! | [`sprt`] | pair-level GSPRT over death-decisive seed pairs |
@@ -69,6 +70,7 @@ pub mod downstack;
 pub mod events;
 pub mod ledger;
 pub mod marathon;
+pub mod pc;
 pub mod progress;
 pub mod registry;
 pub mod rng;

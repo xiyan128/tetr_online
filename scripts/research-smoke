@@ -26,6 +26,12 @@ RUN_DIR2=$(ls -td runs/*-smoke-downstack-* | head -1)
 diff -q "$RUN_DIR/games.jsonl" "$RUN_DIR2/games.jsonl" >/dev/null ||
     fail "replays are not byte-identical"
 
+echo "== pc parse contract (smoke-pc)"
+PC_LOG=$(tr_run run smoke-pc pc-reveal-tiny 2>/dev/null) || fail "pc errored"
+[[ $(wc -l <<<"$PC_LOG") -eq 1 ]] || fail "pc stdout must be exactly one JSON line"
+grep -q '"pc_per_piece":' <<<"$PC_LOG" || fail "ppc field missing"
+grep -q '"complete":' <<<"$PC_LOG" || fail "budget-honesty field missing"
+
 echo "== optimizer contract (smoke-app-climb)"
 CLIMB_LOG=$(tr_run run smoke-app-climb attack-tuned-tiny 2>/dev/null) || fail "climb errored"
 [[ $(wc -l <<<"$CLIMB_LOG") -eq 1 ]] || fail "climb stdout must be exactly one JSON line"

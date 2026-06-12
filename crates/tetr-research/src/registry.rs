@@ -17,7 +17,7 @@
 //! Optimizers are not evals: the search side was removed pending a
 //! first-principles redesign (history in git, `aa7bda9` and earlier).
 
-use crate::commands::{cc2_baseline, climb_app, downstack, marathon, race, versus};
+use crate::commands::{cc2_baseline, climb_app, downstack, marathon, pc, race, versus};
 
 /// One runnable eval: a name, a one-line description, and its spec.
 #[derive(Clone, Debug)]
@@ -33,6 +33,7 @@ pub struct Entry {
 #[serde(tag = "kind", rename_all = "kebab-case")]
 pub enum Experiment {
     Marathon(marathon::Spec),
+    Pc(pc::Spec),
     Downstack(downstack::Spec),
     Versus(versus::Spec),
     Race(race::Spec),
@@ -86,6 +87,26 @@ pub fn entries() -> Vec<Entry> {
             Downstack(downstack::Spec::default()),
         ),
         e(
+            "pc-screen-v1",
+            "clean-board PPC on TRAIN seeds (`run pc-screen-v1 pc-reveal-s28w8`)",
+            Pc(pc::Spec {
+                seeds: 8,
+                max_pieces: 100,
+                seed_start: crate::seeds::regions::TRAIN,
+                default_budget_secs: 300,
+            }),
+        ),
+        e(
+            "pc-opener-screen-v1",
+            "20-piece PC opener screen on TRAIN seeds (PC indices in the game stream)",
+            Pc(pc::Spec {
+                seeds: 4,
+                max_pieces: 20,
+                seed_start: crate::seeds::regions::TRAIN,
+                default_budget_secs: 180,
+            }),
+        ),
+        e(
             "versus",
             "head-to-head win/death/attack report (`run versus cc2-default dt20`)",
             Versus(versus::Spec::default()),
@@ -116,6 +137,19 @@ pub fn entries() -> Vec<Entry> {
                 seed_start: crate::seeds::regions::VALIDATION + 64,
             }),
         ),
+        e(
+            "pc-validation-v1",
+            "held-out clean-board PPC — one read per promoted PC candidate",
+            Pc(pc::Spec {
+                seeds: 32,
+                max_pieces: 200,
+                // +256 keeps PC verdicts on virgin VALIDATION indices: the
+                // marathon holdouts read +0..16 and +64..76, and the gap
+                // leaves them room to grow without ever sharing a seed.
+                seed_start: crate::seeds::regions::VALIDATION + 256,
+                default_budget_secs: 1800,
+            }),
+        ),
         // --- optimizers (wrap the primitives; promotion stays manual) --------
         e(
             "app-climb",
@@ -140,6 +174,16 @@ pub fn entries() -> Vec<Entry> {
             Downstack(downstack::Spec {
                 seeds: 4,
                 ..downstack::Spec::default()
+            }),
+        ),
+        e(
+            "smoke-pc",
+            "pc at toy size (the PC parse-contract canary; run it on pc-reveal-tiny)",
+            Pc(pc::Spec {
+                seeds: 2,
+                max_pieces: 15,
+                seed_start: crate::seeds::regions::TRAIN,
+                default_budget_secs: 60,
             }),
         ),
         e(
@@ -223,9 +267,12 @@ mod tests {
         for name in [
             "smoke-downstack",
             "smoke-app-climb",
+            "smoke-pc",
             "marathon",
             "marathon-holdout",
             "downstack",
+            "pc-screen-v1",
+            "pc-validation-v1",
             "versus",
             "race",
             "app-climb",

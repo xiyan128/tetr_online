@@ -133,6 +133,7 @@ fn execute(
     let bot = |i: usize| bots[i];
     let result = match &entry.experiment {
         Marathon(spec) => commands::marathon::run(spec, &bot(0), &rt),
+        Pc(spec) => commands::pc::run(spec, &bot(0), &rt),
         Downstack(spec) => commands::downstack::run(spec, &bot(0), &rt),
         Versus(spec) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
         Race(spec) => commands::race::run(spec, &bot(0), &bot(1), &rt),

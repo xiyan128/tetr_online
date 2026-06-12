@@ -22,6 +22,7 @@ pub mod cc2_baseline;
 pub mod climb_app;
 pub mod downstack;
 pub mod marathon;
+pub mod pc;
 pub mod race;
 pub mod versus;
 

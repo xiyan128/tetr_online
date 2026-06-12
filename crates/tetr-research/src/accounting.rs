@@ -35,6 +35,9 @@ pub(crate) fn action_clear_lines(action: EngineScoreAction) -> usize {
 
 /// One line clear's accounting, produced by [`fold_combo`].
 pub(crate) struct ClearInfo {
+    /// Whether the post-clear board is empty — the engine-true perfect clear
+    /// (the PC suite counts these; attack already includes the PC bonus).
+    pub perfect_clear: bool,
     /// Garbage lines this clear sends ([`attack_lines`] with the pre-clear combo).
     pub attack: u32,
 }
@@ -66,7 +69,10 @@ pub(crate) fn fold_combo(
             let index = *combo;
             let attack = attack_lines(*action, *back_to_back_bonus, index, perfect_clear);
             *combo += 1;
-            Some(ClearInfo { attack })
+            Some(ClearInfo {
+                perfect_clear,
+                attack,
+            })
         }
         _ => None,
     }
