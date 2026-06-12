@@ -1,61 +1,63 @@
 # tetr-research
 
-Headless metrics, benchmarks, and autoresearch tooling for the Tetris AI. Everything
-here is **deterministic** (seeded RNG, no clock in decisions) and **Bevy-free**: it
-drives `tetr-core`'s engine + AI directly so results are reproducible and drop straight
-into tuning loops. The lib (`lib.rs`) holds the bot specs, the versus/marathon
-harnesses, and `decide_versus`; `behavior.rs` is the attack-metrics suite.
-
-## Primary metric
-
-**APP** (attack per piece), measured across garbage **scenarios** (`standard_suite()`):
-`clean`, `cheese9`, `faucet1/4`, `faucet1/2`. Also reported: DS/P (downstack/piece),
-survival, attack/line, and **`ms/piece`**, the compute axis of the compute/quality
-frontier. `ms/piece` is only meaningful on an **unloaded machine** (no concurrent jobs).
-
-## Bin catalog
-
-| bin | what |
-|---|---|
-| `behavior` | **The APP/behavior suite.** Run any bot across the garbage scenarios. Start here. |
-| `metric` | Fast single-config metric (one number out) for quick iteration loops. |
-| `bench-marathon` | Marathon scoring speed for the greedy baseline vs the multi-ply beam (depths 1-3). |
-| `cc2-baseline` | Cold Clear 2's APP via the **TBP referee** (needs `CC2_BIN`). Its `VERSUS=1` mode is **NOT a fair fight**: TBP has no garbage message, so every garbage dump forces a `stop`+`start` re-sync that cripples CC2 (the bin prints the same warning). Use it for infrastructure checks, never for publishable win-rates; the fair comparison is `cc2-native`. |
-| `cc2-native` | CC2's **ported** evaluator head-to-head in our fair native arena. |
-
-## Key env knobs (the `behavior` bin)
-
-| var | default | meaning |
-|---|---|---|
-| `BOT` | `dt20` | `dt20` \| `cc2` \| `cc2custom` (uses `CC2_PARAMS`) \| `bf` \| `bfcustom` (best-first + `CC2_PARAMS`) \| `bflin` \| `lincustom` (`BOARD_PARAMS`+`REWARD_PARAMS`) |
-| `SEEDS` | 24 | number of seeds (cut to 2-3 when benchmarking best-first; it's slow) |
-| `BEAM_DEPTH` / `BEAM_WIDTH` | 2 / 16 | beam search params; `BEAM_DEPTH` also caps best-first depth |
-| `NODE_BUDGET` | 4000 | best-first total node-expansion budget per decision |
-| `CC2_PARAMS` | (none) | 11 comma-separated CC2 board-weight floats (for `cc2custom`/`bfcustom`) |
-
-## Current SOTA snapshot (2026-06)
-
-- **Best-first (`BestFirstPlanner`) is the strongest search**, dominating the beam on the tuned
-  attack eval with the gap **growing in garbage** (faucet1/2 best-first ≫ beam). But the
-  **eval ≫ the search**: swapping linear→CC2 moves APP far more than any search change. The
-  weight ablation shows `holes` and `row_transitions` carry the eval; the `height_upper_*`
-  penalties are survival insurance that slightly *cost* APP.
-- **Clean APP caps ~0.68**: the *eval's* ceiling (both searches reach it). Going past it needs
-  a better policy (RL / value-net), not more search.
-- **Latency**: `SearchState` holds a `Copy` `BitBoard` (bit-AND collision, alloc-free forks);
-  best-first runs at ~25 ms/piece clean, at **bit-identical** APP versus the dense-board
-  search it replaced (which ran ~115 ms/piece). The remaining gap to a 10× is an
-  architecture/hardware call, not tuning.
-
-## Reproduce the headline comparison
+The deterministic experiment platform behind the versus bot. **Bevy-free**: it
+drives `tetr-core`'s engine + AI directly, so every result is a pure function
+of `(commit, eval, bots…)` — three names, all stamped into a run receipt.
+Always run `--release` (a debug match is ~20× slower).
 
 ```sh
-cargo build --release -p tetr-research --bin behavior
-P="-0.003447473,-1.5,-0.2,-0.36203036,-1.5,-5.0,0.3472633,0.1,1.5,4.4650807,4.0"  # == Cc2Weights::attack_tuned()'s board params
-# beam vs best-first on the same tuned attack eval, same seeds:
-BOT=cc2custom CC2_PARAMS="$P" BEAM_DEPTH=6 BEAM_WIDTH=16 SEEDS=3 ./target/release/behavior
-BOT=bfcustom  CC2_PARAMS="$P" BEAM_DEPTH=6 NODE_BUDGET=400 SEEDS=3 ./target/release/behavior
+cargo run --release -p tetr-research -- run marathon dt20
+cargo run --release -p tetr-research -- run versus cc2-default dt20
+cargo run --release -p tetr-research -- run race probe-tp128d9 attack-tuned-d3
+duckdb -init scripts/research.sql      # analyze every run ever recorded
 ```
 
-> **Long jobs:** best-first sweeps are slow; bound every run (`SEEDS` small, monitor wall-clock).
-> There is no GNU `timeout` on macOS; self-bound and watch.
+## How it fits together
+
+- **Two registries, read as code** (there is no `list`): bots in
+  [`src/bots.rs`](src/bots.rs) (named `BotSpec`s — search × eval × sight),
+  evals in [`src/registry.rs`](src/registry.rs) (named, typed measurement
+  specs). The binary pairs them at the prompt: `run <eval> [bots…]`. Anything
+  result-affecting is a new registered name, never a flag; the only flags are
+  machine-local (`--budget-secs`, `--cc2-bin`, `--runs-root`, `--allow-dirty`).
+- **Runs refuse a dirty tree** by default (such runs aren't re-runnable from
+  names); `--allow-dirty` records an exploratory run, stamped in its receipt.
+- **One JSON line on stdout** per run (`{run, eval, bots, …headline metrics}`);
+  humans read stderr. Each run directory holds `spec.json` (the reproducibility
+  receipt) and `games.jsonl` (normalized per-game facts) — analysis happens in
+  duckdb, never in the platform. The invariants are an ADR:
+  [`docs/adr-data-architecture.md`](../../docs/adr-data-architecture.md).
+- **Evals**: `marathon` (score/sec + APP), `downstack` (censored cheese
+  pieces), `versus` (arm-swapped head-to-head, deaths first-class), `race`
+  (pair-GSPRT survival verdict), `marathon-holdout[-long]` (one read per
+  candidate), `cc2-baseline-*` (real Cold Clear 2 over TBP), and the
+  optimizer `app-climb` (a (1+1)-ES over a subject's Cc2 weight surface,
+  campaign-seeded, self-validating).
+- **Long jobs self-bound**: optimizers and races honour `--budget-secs` and
+  exit with an honest partial verdict. A budget-cut climb is a prefix of the
+  unbounded walk; pin its `iters` to reproduce a full stream byte-for-byte.
+
+The task-oriented guide is [`docs/research-guide.md`](../../docs/research-guide.md);
+the binding rules (determinism, seed regions, arm-swap + CRN, death decides)
+live in the crate docs ([`src/lib.rs`](src/lib.rs)). Results worth keeping are
+RUN RECORDs in the command doc headers, citing run ids.
+
+## Current SOTA snapshot (2026-06-12)
+
+The APP campaign's champion is **`probe-tp128d9`** — a transposition-pruned
+beam (width 128, depth 9, opt-in `BeamPlanner::transposing`; plain beams stay
+byte-identical to their recorded baselines) over the unchanged `attack_tuned`
+CC2 evaluator:
+
+- **0.8225 APP held-out** (0.8178 at cap 600 — no opening artifact), versus
+  the shipped depth-2 bot's 0.46 and the old ~0.67 era ceiling;
+- **downstack 17.17** censored pieces (beats attack-tuned-d3's 18.67);
+- **race vs attack-tuned-d3: H1, 63-0-1** (LLR +3.34).
+
+Every gain came from **search class** (depth → width → best-first → TP-beam);
+every eval-side lever was null — the `app-climb` run record and the `probe-*`
+registrations in `bots.rs` carry the receipts. Attack per line rises with
+search quality (1.55 → 2.05 at flat lines/game): concentrated B2B/T-spin
+attack, not the combo-farm that the empty-board APP metric can be gamed by.
+Past ~0.83 the recorded map says RL/self-play, not tuning. None of this is
+shipped into the game yet — that is a separate latency decision.
