@@ -285,6 +285,12 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
         // --- probe-* : single-lever APP hypotheses at the d6w32 incumbent ----
         // The exploratory tier (screened on TRAIN marathon; most will lose —
         // they are the lab notebook, immutable like every cited name).
+        // RESULTS (TRAIN, incumbent 0.7211): every eval-side lever loses or
+        // ties — mix05 0.7000, mix1 0.6800, combo4 0.7033, well1 0.6878,
+        // pc40 0.7211 (identical games: the PC branch never decides at this
+        // depth), spin2x 0.6678. Consistent with the d4 climb's null verdict:
+        // attack_tuned is locally optimal for this metric; search class is
+        // the lever that moves (see the bf probes below).
         // Mixture: engine-true attack ADDED to the intact shaped tables, so
         // chain continuation (combo staircase, B2B +1) is valued at true scale.
         (
@@ -346,6 +352,11 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
         ),
         // The bf axis fired (1k: 0.7433, 2k: 0.7822 vs beam d6w32's 0.7211 on
         // TRAIN) — scale budget, depth, and the eval interaction.
+        // ROUND-2 RESULTS (TRAIN): bf4k 0.7278 — budget scaling is
+        // NON-monotone (more search converges to the EVAL's optimum, not
+        // APP's); bf2k-d10 byte-identical to bf2k-d8 (the depth cap never
+        // binds at 2k nodes — identical floats); combo4 0.7600 (the eval is
+        // locally optimal, third confirmation).
         (
             "probe-bf4k-d8",
             BotSpec::best_first(4000, 8).cc2(Cc2Weights::attack_tuned()),
@@ -358,6 +369,20 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             "probe-bf2k-combo4",
             BotSpec::best_first(2000, 8).cc2(Cc2Weights {
                 combo_attack: 4.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
+        // saturates" lesson predates this engine), and PC-hunting where the
+        // search can actually see 7-piece PC lines.
+        (
+            "probe-w64d6",
+            BotSpec::beam(64, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-pc40",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights {
+                perfect_clear: 40.0,
                 ..Cc2Weights::attack_tuned()
             }),
         ),
