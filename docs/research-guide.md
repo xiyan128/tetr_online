@@ -8,19 +8,20 @@ This guide is task-oriented; the *rules* live in the crate docs
 ## The five rules (short form)
 
 1. **Determinism.** A game is a pure function of `(BotSpec, seed)`. Every
-   reported number must reproduce from code + env.
+   reported number must reproduce from `(commit, registry name)`.
 2. **Seed regions.** Seeds come from disjoint index regions
    (`seeds::regions`): train selects, validation checks, confirmation proves.
    Never quote a number on seeds that influenced a decision that produced it.
-3. **Self-bounding.** Long bins honour `TIME_BUDGET_SECS` and exit with an
-   honest partial verdict. Never start an unbounded run.
+3. **Self-bounding.** Long commands honour their wall-clock budget
+   (`--budget-secs`) and exit with an honest partial verdict. Never start an
+   unbounded run.
 4. **Arm-swap + CRN.** Paired comparisons play each seed from both chairs on
    common random numbers.
 5. **Death decides.** The capped-game net-attack tiebreak is structurally
    anti-defensive; survival verdicts come from death-decisive matches (the
    SPRT), never bare capped win rates.
 
-Results worth keeping go into the bin's doc header as a **RUN RECORD** (date,
+Results worth keeping go into the command's doc header as a **RUN RECORD** (date,
 run ID, settings, numbers, verdict). Records are conclusions, not pending reruns.
 Note it in the header if a later change breaks trajectory reproduction.
 
@@ -65,72 +66,90 @@ SPRT run rayon-parallel (~6×), bit-identical to sequential by gate.
 kept ONLY for the TBP referee and the behavior faucet. Its rules diverge from
 the engine's; never use it for a new experiment.
 
-## The bins (experiments)
+## The CLI and the registry
 
-Run as `ENVVARS cargo run --release -p tetr-research --bin <name>`. Every bin
-documents its env knobs and run records in its doc header. Read the header
-before running.
+ONE binary runs NAMED experiments; the names live in `src/registry.rs` as
+typed Rust literals — the crate's entire configuration surface:
+
+```text
+cargo run --release -p tetr-research -- list            # the catalog
+cargo run --release -p tetr-research -- show <name>     # the spec, as recorded
+cargo run --release -p tetr-research -- run  <name>     # execute
+cargo run --release -p tetr-research -- resume <run-dir>
+cargo run --release -p tetr-research -- runs            # the ledger index
+```
+
+A recorded result reproduces from `(commit, name)`. Want different
+parameters? Register a new name (one literal) — never mutate a name with
+recorded runs; `resume` refuses a drifted spec and dirty-tree runs are
+stamped in the manifest. The only flags are machine-local: `--budget-secs`,
+`--max-iters` (how much of the deterministic walk this invocation
+materializes), `--cc2-bin`, `--runs-root`. Each command module documents its
+method and run records in its doc header; read it before running.
 
 **Daily drivers**
 
-- **`metric`**: fast headline metrics for iteration loops. Default: capped
-  marathon score/sec and APP. `DOWNSTACK=1` → censored pieces plus clear rate;
-  `VERSUS=1` → win rate vs the greedy baseline. Knobs: `BENCH_SEEDS`,
-  `BEAM_DEPTH`, `BEAM_WIDTH`.
-- **`behavior`**: the APP/DS-P suite across the standard scenarios.
-  `BOT=dt20|cc2|cc2custom|lincustom|bf|bfcustom|bflin` picks the spec;
-  custom weights via `BOARD_PARAMS`/`REWARD_PARAMS`/`CC2_PARAMS` (CSV).
-- **`bench-marathon`**: the full greedy-vs-beam sweep (depths 1-3).
+- **`app-metric` / `downstack-metric` / `versus-metric`**: fast headline
+  metrics for iteration loops — capped-marathon score/sec + APP, censored
+  cheese pieces + clear rate, and win rate vs greedy. These names are the
+  /autoresearch parse contracts.
+- **`behavior-dt20` / `behavior-cc2`**: the APP/DS-P suite across the
+  standard scenarios; custom-weight arms get their own registry entries.
+- **`marathon-sweep`**: the full greedy-vs-beam sweep (depths 1-3).
 
 **Versus science**
 
-- **`garbage_ab`**: the awareness A/B. A spec vs its `.blind()` twin,
-  arm-swapped, deaths split from cap tiebreaks. `BOT=beam|bf`,
-  `WEIGHTS=attack`, `RAIN_PERIOD`, `SEEDS`.
-- **`versus_climb`**: the (1+1)-ES weight climb with the three-stage gate
-  chain — a fresh-block screen (`ACCEPT_MARGIN`, calibrate to ~2σ ≈ 150 at
-  48 matches), a per-accept SPRT confirmation race (`CONFIRM_MATCHES`, 0
-  disables; `CONFIRM_ALPHA` 0.02), and every `ANCHOR_EVERY` confirmed
-  accepts an anchor race against the last *verified* point that re-anchors
-  on H1 and ROLLS BACK on H0 — so confirmation-alpha accumulation buys noise
-  for at most one anchor window, never the campaign. Runs under a `CAMPAIGN`,
-  checkpoints every iteration, and `RESUME=<run-dir>` continues the walk
-  bit-identically. Read the run records in its header before climbing; each
+- **`awareness-ab` / `awareness-ab-bf`**: the awareness A/B. A spec vs its
+  `.blind()` twin, arm-swapped, deaths split from cap tiebreaks.
+- **`cc2-board-climb`** (and your campaign's entries): the (1+1)-ES weight
+  climb with the three-stage gate chain — a fresh-block screen
+  (`accept_margin`, calibrate to ~2σ ≈ 150 at 48 matches), a per-accept SPRT
+  confirmation race (`confirm_matches`, 0 disables; `confirm_alpha` 0.02),
+  and every `anchor_every` confirmed accepts an anchor race against the last
+  *verified* point that re-anchors on H1 and ROLLS BACK on H0 — so
+  confirmation-alpha accumulation buys noise for at most one anchor window,
+  never the campaign. Each spec names its campaign, checkpoints every
+  iteration, and `resume <run-dir>` continues the walk bit-identically. Read
+  the run records in the climb command's header before climbing; each
   documents a failure mode (seed overfit, noise acceptance, …) the current
   design retires.
-- **`versus_sprt`**: the standalone racer, a ship-grade verdict on one
-  candidate vs the incumbent. The unit of evidence is the chair-swapped seed
-  PAIR (pair-level GSPRT — per-game Bernoulli walks void their α under
-  within-pair correlation; the `sprt` module header carries the simulation
-  receipts). `P1` (effect size, default 0.55), `ALPHA`, `BLOCK_SEEDS` (24),
-  `RAIN_PERIOD` (8). ~5 min to resolve a true 0.5/0.55 at default settings;
-  an in-budget inconclusive means the effect is small. That *is* the answer.
-- **`promote`**: the promotion panel — the only gate from "my climb accepted
-  it" to "it is the better bot". Candidate vs {greedy, origin, incumbent} ×
-  rain {0, 8}, one pair-GSPRT per cell on fresh campaign seeds: greedy and
-  origin cells demand H1, incumbent cells demand non-regression, H0 or
-  starved evidence anywhere rejects. `CAND_PARAMS` / `INCUMBENT_PARAMS`
-  (CSV), `CELL_MATCHES`. `FINAL_VALIDATION=1` spends the never-iterated
-  FINAL region — exactly once per external claim.
+- **`race-v3-candidate`** (and per-candidate entries): the standalone racer,
+  a ship-grade verdict on one candidate vs the incumbent. The unit of
+  evidence is the chair-swapped seed PAIR (pair-level GSPRT — per-game
+  Bernoulli walks void their α under within-pair correlation; the `sprt`
+  module header carries the simulation receipts). ~5 min to resolve a true
+  0.5/0.55 at default settings; an in-budget inconclusive means the effect
+  is small. That *is* the answer.
+- **`promote-null-check`** (and per-candidate entries): the promotion panel
+  — the only gate from "my climb accepted it" to "it is the better bot".
+  Candidate vs {greedy, origin, incumbent} × rain {0, 8}, one pair-GSPRT per
+  cell on fresh campaign seeds: greedy and origin cells demand H1, incumbent
+  cells demand non-regression, H0 or starved evidence anywhere rejects. A
+  promotion is a configuration: paste the climb's `best_params` into a new
+  entry. A spec with `final_validation: true` spends the never-iterated
+  FINAL region — register it as its own name, run it exactly once per
+  external claim.
 
 **External baseline**
 
-- **`cc2-baseline`**: the real Cold Clear 2 binary as a TBP subprocess,
-  refereed on our seeded bag and attack table. Needs `CC2_BIN=/path/to/cc2`;
-  `SEEDS`, `PIECES`, `THINK_MS`. Uses legacy garbage rules by design; its
-  win rates are NOT comparable with `play_versus` numbers.
-- **`cc2-native`**: CC2's *ported evaluator* vs ours on our engine with real
-  mutual garbage. The fair comparison, and the baseline to climb past. Its
-  downstack output reports censored pieces and clear rate for both evaluators.
+- **`cc2-baseline-app` / `cc2-baseline-downstack`**: the real Cold Clear 2
+  binary as a TBP subprocess, refereed on our seeded bag and attack table
+  (`--cc2-bin /path/to/cc2`). Uses legacy garbage rules by design; its win
+  rates are NOT comparable with `play_versus` numbers.
+- **`cc2-native-baseline`**: CC2's *ported evaluator* vs ours on our engine
+  with real mutual garbage. The fair comparison, and the baseline to climb
+  past. Its downstack output reports censored pieces and clear rate for both
+  evaluators.
 
 ## Run manifests
 
-Every owned experiment creates `runs/<run-id>/`, where the run ID is
-`<UTC timestamp>-<bin>-<pid>`. The directory contains:
+Every run creates `runs/<run-id>/`, where the run ID is
+`<UTC timestamp>-<experiment>-<pid>`. The directory contains:
 
-- `spec.json`: schema version, run ID, bin, UTC creation time, git commit and
-  dirty state, host metadata, every resolved env value with its raw value and
-  source, and the bin's bot/seed/format specification.
+- `spec.json`: schema version, run ID, UTC creation time, git commit and
+  dirty state, host metadata, and `extra` — the experiment NAME, its full
+  typed spec exactly as `show <name>` prints it, and the invocation's
+  runtime flags.
 - `outcomes.jsonl`: one JSON object per game or seed result.
 - `summary.json`: UTC finish time, exit reason, and headline aggregate fields.
 - `checkpoint.json`: optional atomically replaced resume state for experiments
@@ -171,20 +190,25 @@ one unrecoverable mistake this map cannot prevent.
 
 ## Adding an experiment (checklist)
 
-1. Compose arms as `BotSpec`s; pick or claim a seed region.
-2. Thin bin: env via strict `cli` helpers, library calls, one
-   machine-readable `println!` per headline number, context on stderr.
-3. Bound it: `TIME_BUDGET_SECS` with an honest partial verdict.
-4. Create a `RunLedger` after all env reads, append one outcome per game, and
-   write the terminal summary. Cite the run ID in each doc-header RUN RECORD.
+1. Compose arms as `BotSpec`s; pick or claim a seed region (or run under a
+   campaign).
+2. A serde-serialized `Spec` + thin `run(spec, rt, ledger)` in a
+   `commands/` module: library calls, one machine-readable `println!` per
+   headline number, context on stderr, one outcome per game in the ledger,
+   a terminal summary. Cite run IDs in doc-header RUN RECORDs.
+3. Register named entries in `src/registry.rs` (including a tiny `smoke-*`
+   variant if the smoke gate should cover it) and wire the kind in
+   `main.rs`'s dispatch.
+4. Bound it: honour `rt.budget(...)` with an honest partial verdict.
 5. If it judges survival, race it (`sprt_race`). Don't eyeball block means;
    they pass noise at every size we've measured (σ ≈ ±90 at 48 matches).
 
 ## Reading results / gotchas
 
-- Environment defaults apply only when a variable is unset. A set value that
-  cannot be parsed, has the wrong CSV length, or is not an allowed choice prints
-  `config error: ...` and exits 2; it never silently falls back.
+- There is nothing to misspell: experiments run by registry name (unknown
+  names exit 2 listing nothing silently), specs are typed Rust, and the only
+  flags are machine-local. If a knob would change results, it belongs in a
+  NEW registry entry, not on the command line.
 - The downstack optimization target is `mean_pieces_censored`: failures count as
   `max_pieces`. Compare it only between runs with the same recorded cap, and read
   clear rate beside it. Cleared-only mean pieces remains descriptive context.
