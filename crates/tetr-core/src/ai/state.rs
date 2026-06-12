@@ -49,7 +49,7 @@ use crate::engine::{
 /// [`PieceType::all`](crate::engine::PieceType::all) order). A bag that is empty
 /// is *full* again on the next draw — the seven-bag invariant — so [`BagState`]
 /// refills itself transparently in [`BagState::deal`].
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Hash)]
 pub struct BagState {
     /// Bit `i` set ⇔ `PieceType::all()[i]` is still available in this bag.
     remaining: u8,

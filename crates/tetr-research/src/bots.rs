@@ -51,6 +51,11 @@ pub enum SearchSpec {
     /// bag speculation past the visible queue is ON (the `BeamPlanner`
     /// default) — every recorded beam number includes it.
     Beam { width: usize, depth: u8 },
+    /// Transposition-pruned beam ([`BeamPlanner::transposing`]): equal per-root
+    /// future states collapse to their best derivation before truncation, so
+    /// width buys distinct futures. A separate variant — never a flag on
+    /// `Beam` — because recorded plain-beam baselines must stay byte-stable.
+    TpBeam { width: usize, depth: u8 },
     /// Best-first graph search with transposition: `budget` node expansions
     /// per decision, lookahead capped at `depth` plies.
     BestFirst { budget: u32, depth: u8 },
@@ -105,6 +110,15 @@ impl BotSpec {
         }
     }
 
+    /// A transposition-pruned beam bot (see [`SearchSpec::TpBeam`]).
+    pub fn tp_beam(width: usize, depth: u8) -> Self {
+        Self {
+            search: SearchSpec::TpBeam { width, depth },
+            eval: EvalSpec::Linear(Weights::default()),
+            blind: false,
+        }
+    }
+
     /// A best-first bot over the default linear evaluator.
     pub fn best_first(budget: u32, depth: u8) -> Self {
         Self {
@@ -148,6 +162,12 @@ impl BotSpec {
             }
             SearchSpec::Beam { width, depth } => full_strength(
                 Box::new(BeamPlanner::new(width)),
+                self.eval.build(),
+                SearchBudget::beam(depth),
+                seed,
+            ),
+            SearchSpec::TpBeam { width, depth } => full_strength(
+                Box::new(BeamPlanner::transposing(width)),
                 self.eval.build(),
                 SearchBudget::beam(depth),
                 seed,
@@ -372,6 +392,23 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
                 ..Cc2Weights::attack_tuned()
             }),
         ),
+        // Transposition-pruned beam (ported from the codex-agent worktree,
+        // 2026-06-12; its claim: w128/d9 = 0.8289 APP on its own 24-seed
+        // holdout — receipt-less, so reproduced here under full discipline).
+        // tp32d6 isolates the dedup delta at the beam incumbent's config;
+        // tp128d6 isolates width-under-dedup; tp128d9 is the claimed config.
+        (
+            "probe-tp32d6",
+            BotSpec::tp_beam(32, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp128d6",
+            BotSpec::tp_beam(128, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp128d9",
+            BotSpec::tp_beam(128, 9).cc2(Cc2Weights::attack_tuned()),
+        ),
         // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
         // saturates" lesson predates this engine), and PC-hunting where the
         // search can actually see 7-piece PC lines.
@@ -425,6 +462,21 @@ mod tests {
             (o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped)
         };
         assert_eq!(outcome(&spec.factory()), outcome(&spec.factory()));
+    }
+
+    /// At depth 1 every frontier node is its own ply-1 root, so transposition
+    /// pruning has nothing to collapse: the TP beam must reproduce the plain
+    /// beam exactly (the no-op edge of header pin 5, witnessed end-to-end).
+    #[test]
+    fn tp_beam_depth1_matches_plain_beam() {
+        let plain = BotSpec::beam(4, 1).cc2(Cc2Weights::attack_tuned());
+        let tp = BotSpec::tp_beam(4, 1).cc2(Cc2Weights::attack_tuned());
+        let o1 = crate::marathon::play_marathon_capped(&plain.factory(), 3, 50_000, 30);
+        let o2 = crate::marathon::play_marathon_capped(&tp.factory(), 3, 50_000, 30);
+        assert_eq!(
+            (o1.score, o1.pieces, o1.lines, o1.total_attack),
+            (o2.score, o2.pieces, o2.lines, o2.total_attack)
+        );
     }
 
     /// `.blind()` wraps the same brain: with nothing queued the play is

@@ -20,12 +20,23 @@
 //!    placement as a one-ply search does (clone, classify pre-lock, lock,
 //!    `value + reward`), so a `max_depth == 1` beam reproduces the greedy
 //!    decision (pinned against `SearchBudget::single_ply` best-first).
+//! 5. **Transposition pruning (opt-in, [`BeamPlanner::transposing`]).** Before
+//!    width truncation, nodes that reach the SAME future state under the same
+//!    ply-1 root collapse to their highest-scoring derivation — a sound
+//!    max-merge (identical states share identical futures; only accumulated
+//!    reward differs), so the width is spent on distinct futures. The dedup
+//!    key includes the bag remainder (different bags ⇒ different speculative
+//!    futures) and never crosses roots (each root needs its own backed-up
+//!    value). `BeamPlanner::new` beams are byte-for-byte unchanged — every
+//!    recorded beam baseline stays reproducible.
 //!
 //! As a session the beam is **batch-grain**: [`Mind::think`] expands exactly one
 //! generation per call regardless of the quantum (a generation is scored
 //! whole, indivisible by design — pin 3) and reports
 //! [`ThinkProgress::Exhausted`] once it reaches the run's depth cap or the
 //! frontier empties. [`Mind::best`] is the backed-up ply-1 argmax at any point.
+
+use rustc_hash::FxHashSet;
 
 use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
 use crate::ai::movegen::Placement;
@@ -112,6 +123,10 @@ pub struct BeamPlanner {
     /// Whether to speculate past the visible queue over the 7-bag remainder
     /// (BEAM.md §5). On by default; the bench can toggle it.
     speculate: bool,
+    /// Transposition pruning before truncation (header pin 5). Off by default:
+    /// recorded `new()` baselines stay byte-identical; TP variants are new
+    /// registered names.
+    transpose: bool,
     /// In-flight search, `None` between decisions. Reset on a new root state.
     run: Option<BeamRun>,
 }
@@ -122,7 +137,19 @@ impl BeamPlanner {
         Self {
             beam_width: beam_width.max(1),
             speculate: true,
+            transpose: false,
             run: None,
+        }
+    }
+
+    /// A transposition-pruned beam (header pin 5): equal per-root future states
+    /// collapse to their best derivation before truncation, so width buys
+    /// distinct futures. Ported from the 2026-06-12 codex-agent worktree
+    /// (design verified: per-root max-merge with the bag in the key).
+    pub fn transposing(beam_width: usize) -> Self {
+        Self {
+            transpose: true,
+            ..Self::new(beam_width)
         }
     }
 
@@ -174,7 +201,7 @@ impl BeamPlanner {
             max_depth,
             expanded: 0,
         };
-        Self::score_into_frontier(&mut run, pending, eval, self.beam_width);
+        Self::score_into_frontier(&mut run, pending, eval, self.beam_width, self.transpose);
         run
     }
 
@@ -187,6 +214,7 @@ impl BeamPlanner {
         eval: &dyn Evaluator,
         beam_width: usize,
         speculate: bool,
+        transpose: bool,
     ) {
         let mut pending: Vec<PendingChild> = Vec::new();
         run.expanded += run.frontier.len() as u32;
@@ -230,7 +258,7 @@ impl BeamPlanner {
             }
         }
 
-        Self::score_into_frontier(run, pending, eval, beam_width);
+        Self::score_into_frontier(run, pending, eval, beam_width, transpose);
         run.depth += 1;
     }
 
@@ -245,6 +273,7 @@ impl BeamPlanner {
         pending: Vec<PendingChild>,
         eval: &dyn Evaluator,
         beam_width: usize,
+        transpose: bool,
     ) {
         // Score each child on the hot path directly. (No batch seam here on
         // purpose: a batched value-net backend belongs AT the Evaluator trait,
@@ -288,7 +317,17 @@ impl BeamPlanner {
         }
 
         // Stable sort descending by score, then truncate: ties keep canonical order.
+        // With transposition pruning, equal (root, future-state, bag) nodes first
+        // collapse to their best (therefore first-seen) derivation — a sound
+        // max-merge, since identical states share identical futures and only the
+        // accumulated reward differs (header pin 5).
         sort_desc_by_score(&mut next);
+        if transpose {
+            let mut seen = FxHashSet::default();
+            next.retain(|node| {
+                seen.insert((node.root_index, RootKey::of(&node.state), node.state.bag))
+            });
+        }
         next.truncate(beam_width);
         run.frontier = next;
     }
@@ -366,14 +405,14 @@ impl Mind for BeamPlanner {
     /// a generation is scored as one indivisible whole (BEAM.md §7, the grain a
     /// neural value net needs).
     fn think(&mut self, _quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
-        let (beam_width, speculate) = (self.beam_width, self.speculate);
+        let (beam_width, speculate, transpose) = (self.beam_width, self.speculate, self.transpose);
         let Some(run) = self.run.as_mut() else {
             return ThinkProgress::Exhausted; // never rooted: nothing to think about
         };
         if exhausted(run) {
             return ThinkProgress::Exhausted;
         }
-        Self::expand_generation(run, eval, beam_width, speculate);
+        Self::expand_generation(run, eval, beam_width, speculate, transpose);
         if exhausted(run) {
             ThinkProgress::Exhausted
         } else {
