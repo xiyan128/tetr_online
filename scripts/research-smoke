@@ -31,18 +31,18 @@ grep -q "RESUMED from $RUN_DIR at iter 2" <<<"$RESUME_LOG" ||
 grep -Eq 'iter 4 \| screen' <<<"$RESUME_LOG" || fail "resume did not reach iter 4"
 
 echo "== promotion panel (null check: smoke-panel must NOT promote)"
-PROMOTE_LOG=$(tr_run run smoke-panel 2>&1) || fail "promote errored: $PROMOTE_LOG"
+PROMOTE_LOG=$(tr_run run smoke-panel attack-tuned-tiny 2>&1) || fail "promote errored: $PROMOTE_LOG"
 grep -q '^panel_verdict REJECT' <<<"$PROMOTE_LOG" ||
     fail "null-check candidate was not rejected"
 
 echo "== metric parse contract (smoke-downstack)"
-METRIC_LOG=$(tr_run run smoke-downstack 2>/dev/null) || fail "metric errored"
+METRIC_LOG=$(tr_run run smoke-downstack dt20 2>/dev/null) || fail "metric errored"
 grep -q '^downstack_pieces_censored ' <<<"$METRIC_LOG" || fail "censored line missing"
 grep -q '^downstack_clear_rate ' <<<"$METRIC_LOG" || fail "clear-rate line missing"
 
 echo "== unknown names are refused (exit 2, never a silent default)"
 set +e
-tr_run run no-such-experiment >/dev/null 2>&1
+tr_run run no-such-experiment dt20 >/dev/null 2>&1
 CODE=$?
 set -e
 [[ "$CODE" -eq 2 ]] || fail "unknown name exited $CODE, want 2"

@@ -8,7 +8,7 @@ This guide is task-oriented; the *rules* live in the crate docs
 ## The five rules (short form)
 
 1. **Determinism.** A game is a pure function of `(BotSpec, seed)`. Every
-   reported number must reproduce from `(commit, registry name)`.
+   reported number must reproduce from `(commit, eval, bots…)` — all names.
 2. **Seed regions.** Seeds come from disjoint index regions
    (`seeds::regions`): train selects, validation checks, confirmation proves.
    Never quote a number on seeds that influenced a decision that produced it.
@@ -68,45 +68,47 @@ the engine's; never use it for a new experiment.
 
 ## The CLI and the registries
 
-Three registries, three concerns: **bots** (`src/bots.rs` — named `BotSpec`
-instances: who plays), **evals** (`src/commands/*` — what is measured, with
-bot SLOTS), and **bindings** (`src/registry.rs` — named experiments pairing
-an eval spec with bot names). ONE binary runs bindings by name:
+Two registries, read as code (there is no `list`/`show` — the files ARE the
+catalogs): **bots** (`src/bots.rs` — named `BotSpec` instances: who plays)
+and **evals** (`src/registry.rs` — named, typed measurement specs). The
+binary pairs them at the prompt:
 
 ```text
-cargo run --release -p tetr-research -- list            # the experiments
-cargo run --release -p tetr-research -- bots            # the bots
-cargo run --release -p tetr-research -- show <name>     # the spec, as recorded
-cargo run --release -p tetr-research -- run  <name>     # execute
+cargo run --release -p tetr-research -- run downstack dt20
+cargo run --release -p tetr-research -- run versus cc2-default dt20
+cargo run --release -p tetr-research -- run race v3-candidate attack-tuned
+cargo run --release -p tetr-research -- run cc2-board-climb
 cargo run --release -p tetr-research -- resume <run-dir>
-cargo run --release -p tetr-research -- runs            # recorded runs
 ```
 
-A recorded result reproduces from `(commit, name)`. Want different
-parameters or a new candidate? Register a new name — a climbed candidate is
-ONE bot registration, after which it is raceable, panelable, and
-benchmarkable in one-line bindings. Never mutate a name with recorded runs;
-`resume` refuses a drifted spec and dirty-tree runs are stamped in the
-receipt. The only flags are machine-local: `--budget-secs`, `--max-iters`
-(how much of the deterministic walk this invocation materializes),
-`--cc2-bin`, `--runs-root`. Tracking is not a participant: the runner
-writes one `spec.json` receipt per run, the climb checkpoints for resume,
-and anything richer (a wandb-style sink) would observe receipts + stdout
-without touching a command.
+A recorded result reproduces from `(commit, eval, bots…)` — all names, all
+stamped into the run receipt. Want different parameters or a new candidate?
+Register a new name — a climbed candidate is ONE bot registration, after
+which it is raceable, panelable, and benchmarkable at the prompt. Never
+mutate a name with recorded runs; `resume` refuses a drifted spec and
+dirty-tree runs are stamped in the receipt. Two things stay in-spec rather
+than at the prompt: the climb's `subject` (a campaign's origin is pinned)
+and the panel's opponent bars (they define the gate; only the candidate is
+positional). The only flags are machine-local: `--budget-secs`,
+`--max-iters` (how much of the deterministic walk this invocation
+materializes), `--cc2-bin`, `--runs-root`. Tracking is not a participant:
+the runner writes one `spec.json` receipt per run, the climb checkpoints
+for resume, and anything richer (a wandb-style sink) would observe receipts
++ stdout without touching a command.
 
 **Daily drivers**
 
-- **`app-metric` / `downstack-metric` / `versus-metric`**: fast headline
-  metrics for iteration loops — capped-marathon score/sec + APP, censored
-  cheese pieces + clear rate, and win rate vs greedy. These names are the
-  /autoresearch parse contracts.
-- **`behavior-dt20` / `behavior-cc2`**: the APP/DS-P suite across the
-  standard scenarios; custom-weight arms are registered bots, not knobs.
+- **`marathon` / `downstack` / `versus`**: fast headline metrics — score/sec
+  + APP, censored cheese pieces + clear rate, win/death/attack head-to-head.
+  `run marathon dt20` and `run downstack dt20` are the /autoresearch parse
+  contracts.
+- **`behavior`**: the APP/DS-P suite across the standard scenarios;
+  custom-weight arms are registered bots, not knobs.
 
 **Versus science**
 
-- **`awareness-ab` / `awareness-ab-bf`**: the awareness A/B. A spec vs its
-  `.blind()` twin, arm-swapped, deaths split from cap tiebreaks.
+- **`awareness`**: the awareness A/B — `run awareness cc2-default` races a
+  bot vs its `.blind()` twin, arm-swapped, deaths split from cap tiebreaks.
 - **`cc2-board-climb`** (and your campaign's entries): the (1+1)-ES weight
   climb with the three-stage gate chain — a fresh-block screen
   (`accept_margin`, calibrate to ~2σ ≈ 150 at 48 matches), a per-accept SPRT
@@ -119,19 +121,18 @@ without touching a command.
   the run records in the climb command's header before climbing; each
   documents a failure mode (seed overfit, noise acceptance, …) the current
   design retires.
-- **`race-v3-candidate`** (and per-candidate entries): the standalone racer,
-  a ship-grade verdict on one candidate vs the incumbent. The unit of
-  evidence is the chair-swapped seed PAIR (pair-level GSPRT — per-game
-  Bernoulli walks void their α under within-pair correlation; the `sprt`
-  module header carries the simulation receipts). ~5 min to resolve a true
-  0.5/0.55 at default settings; an in-budget inconclusive means the effect
-  is small. That *is* the answer.
-- **`panel-null-check`** (and per-candidate entries): the promotion panel —
-  the only gate from "my climb accepted it" to "it is the better bot". The
-  candidate races NAMED opponents × rain {0, 8}, one pair-GSPRT per cell on
-  fresh campaign seeds: `must_beat` opponents demand H1, `must_not_lose_to`
+- **`race`**: the standalone racer — `run race <candidate> <incumbent>`, a
+  ship-grade verdict. The unit of evidence is the chair-swapped seed PAIR
+  (pair-level GSPRT — per-game Bernoulli walks void their α under
+  within-pair correlation; the `sprt` module header carries the simulation
+  receipts). ~5 min to resolve a true 0.5/0.55 at default settings; an
+  in-budget inconclusive means the effect is small. That *is* the answer.
+- **`panel`**: the promotion panel — `run panel <candidate>`, the only gate
+  from "my climb accepted it" to "it is the better bot". The candidate races
+  the spec's NAMED opponents × rain {0, 8}, one pair-GSPRT per cell on fresh
+  campaign seeds: `must_beat` opponents demand H1, `must_not_lose_to`
   opponents demand non-regression, H0 or starved evidence anywhere rejects.
-  A promotion is a bot registration plus a one-line binding. A spec with
+  A promotion is a bot registration plus `run panel <name>`. A spec with
   `final_validation: true` spends the never-iterated FINAL region — its own
   name, exactly once per external claim.
 
@@ -141,9 +142,9 @@ without touching a command.
   binary as a TBP subprocess, refereed on our seeded bag and attack table
   (`--cc2-bin /path/to/cc2`). Uses legacy garbage rules by design; its win
   rates are NOT comparable with `play_versus` numbers.
-- **`cc2-native-versus` / `downstack-cc2eval`**: CC2's *ported evaluator*
-  vs ours on our engine with real mutual garbage — the fair comparison, and
-  the baseline to climb past.
+- **`run versus cc2-default dt20`** (and `run downstack cc2-default`):
+  CC2's *ported evaluator* vs ours on our engine with real mutual garbage —
+  the fair comparison, and the baseline to climb past.
 
 ## Run receipts
 
@@ -192,9 +193,9 @@ one unrecoverable mistake this map cannot prevent.
 2. A serde-serialized `Spec` with bot SLOTS + thin `run(spec, bots…, rt)`
    in a `commands/` module: library calls, one machine-readable `println!`
    per headline number, context on stderr — no tracking.
-3. Bind named entries in `src/registry.rs` (including a tiny `smoke-*`
+3. Register the eval in `src/registry.rs` (including a tiny `smoke-*`
    variant if the smoke gate should cover it) and wire the kind in
-   `main.rs`'s dispatch.
+   `main.rs`'s dispatch (slot count + usage string).
 4. Bound it: honour `rt.budget(...)` with an honest partial verdict.
 5. If it judges survival, race it (`sprt_race`). Don't eyeball block means;
    they pass noise at every size we've measured (σ ≈ ±90 at 48 matches).

@@ -27,7 +27,6 @@ pub mod downstack;
 pub mod marathon;
 pub mod panel;
 pub mod race;
-pub mod runs;
 pub mod versus;
 
 /// Machine-local circumstances of one invocation — everything here may vary

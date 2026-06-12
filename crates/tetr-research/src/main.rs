@@ -1,19 +1,17 @@
-//! `tetr-research` — run named experiments from the registry.
+//! `tetr-research` — run a registered eval on registered bots.
 //!
 //! ```text
-//! cargo run --release -p tetr-research -- list
-//! cargo run --release -p tetr-research -- bots
-//! cargo run --release -p tetr-research -- show cc2-board-climb
-//! cargo run --release -p tetr-research -- run  cc2-board-climb --budget-secs 3600
+//! cargo run --release -p tetr-research -- run downstack dt20
+//! cargo run --release -p tetr-research -- run race v3-candidate attack-tuned
+//! cargo run --release -p tetr-research -- run cc2-board-climb --budget-secs 3600
 //! cargo run --release -p tetr-research -- resume runs/20260612-...-cc2-board-climb-123
 //! ```
 //!
-//! Experiments are bindings of eval specs to named bots, configured in ONE
-//! place each — [`tetr_research::registry`] and [`tetr_research::bots`] — and
-//! addressed here purely by name. The flags on `run`/`resume` are
+//! Everything is a name: evals live in [`tetr_research::registry`], bots in
+//! [`tetr_research::bots`] — read those files for the catalogs (there is no
+//! `list`; the registries are code). A recorded result reproduces from
+//! `(commit, eval, bots…)`, all stamped into the run receipt. The flags are
 //! machine-local circumstances (budgets, paths), never experiment identity.
-//! The runner owns tracking: it writes the receipt before dispatch; commands
-//! never see it.
 
 use std::path::PathBuf;
 
@@ -29,7 +27,7 @@ use tetr_research::registry::{self, Experiment};
 #[command(
     name = "tetr-research",
     version,
-    about = "Deterministic experiment platform: run registry entries by name",
+    about = "Deterministic experiment platform: `run <eval> [bots…]` (catalogs: src/registry.rs, src/bots.rs)",
     max_term_width = 100
 )]
 struct Cli {
@@ -41,13 +39,13 @@ struct Cli {
 /// experiment this invocation materializes, never which experiment runs.
 #[derive(Args, Debug, Default)]
 struct RuntimeArgs {
-    /// Wall-clock budget in seconds (each experiment documents its default).
+    /// Wall-clock budget in seconds (each eval documents its default).
     #[arg(long)]
     budget_secs: Option<u64>,
     /// Climbs: new iterations this invocation (0 = unbounded).
     #[arg(long, default_value_t = 0)]
     max_iters: u32,
-    /// Path to a Cold Clear 2 build (`cc2-baseline-*` entries).
+    /// Path to a Cold Clear 2 build (`cc2-baseline-*` evals).
     #[arg(long)]
     cc2_bin: Option<PathBuf>,
     /// Run-directory root (default: `<git toplevel>/runs`).
@@ -57,36 +55,20 @@ struct RuntimeArgs {
 
 #[derive(Subcommand, Debug)]
 enum Command {
-    /// List every registered experiment.
-    List {
-        /// One JSON object per entry instead of the table.
-        #[arg(long)]
-        json: bool,
-    },
-    /// List every registered bot.
-    Bots,
-    /// Print a registered experiment's spec — the exact JSON its receipt records.
-    Show { name: String },
-    /// Run a registered experiment by name.
+    /// Run a registered eval on registered bots.
     Run {
-        name: String,
+        /// The eval's registry name (src/registry.rs).
+        eval: String,
+        /// The bot name(s) the eval's slots need (src/bots.rs).
+        bots: Vec<String>,
         #[command(flatten)]
         rt: RuntimeArgs,
     },
-    /// Continue an interrupted run from its run directory (climbs only).
+    /// Continue an interrupted climb from its run directory.
     Resume {
         run_dir: PathBuf,
         #[command(flatten)]
         rt: RuntimeArgs,
-    },
-    /// List recorded runs, oldest first.
-    Runs {
-        /// Show only the most recent N.
-        #[arg(long, default_value_t = 20)]
-        last: usize,
-        /// Run-directory root (default: `<git toplevel>/runs`).
-        #[arg(long)]
-        runs_root: Option<PathBuf>,
     },
 }
 
@@ -98,22 +80,36 @@ fn die(message: &str) -> ! {
 fn find_or_die(name: &str) -> registry::Entry {
     registry::find(name).unwrap_or_else(|| {
         die(&format!(
-            "unknown experiment {name:?} — `list` shows the registry"
+            "unknown eval {name:?} — the catalog is src/registry.rs"
         ))
     })
 }
 
 fn bot_or_die(name: &str) -> BotSpec {
-    bots::find(name)
-        .unwrap_or_else(|| die(&format!("unknown bot {name:?} — `bots` shows the registry")))
+    bots::find(name).unwrap_or_else(|| {
+        die(&format!(
+            "unknown bot {name:?} — the catalog is src/bots.rs"
+        ))
+    })
 }
 
-/// Write the receipt, resolve the bound bots, and dispatch.
+/// Write the receipt, resolve the bots, and dispatch.
 fn execute(
     entry: &registry::Entry,
+    bot_names: &[String],
     args: &RuntimeArgs,
     resume: Option<PathBuf>,
 ) -> std::io::Result<()> {
+    if bot_names.len() != entry.experiment.bot_slots() {
+        die(&format!(
+            "{} takes {} bot name(s): run {} {}",
+            entry.name,
+            entry.experiment.bot_slots(),
+            entry.name,
+            entry.experiment.usage(),
+        ));
+    }
+    let bots: Vec<BotSpec> = bot_names.iter().map(|n| bot_or_die(n)).collect();
     let rt = Runtime {
         budget_secs: args.budget_secs,
         max_iters: args.max_iters,
@@ -126,79 +122,35 @@ fn execute(
         json!({
             "experiment": entry.name,
             "spec": registry::spec_json(&entry.experiment),
+            "bots": bot_names,
             "runtime": &rt,
         }),
     )?;
 
     use Experiment::*;
+    let bot = |i: usize| bots[i];
     match (&entry.experiment, &rt.resume_from.clone()) {
-        (Climb { spec }, Some(prior)) => commands::climb::resume(spec, &rt, prior, &run_dir),
+        (Climb(spec), Some(prior)) => commands::climb::resume(spec, &rt, prior, &run_dir),
         (_, Some(_)) => die("only climbs carry checkpoints; `resume` works on climb runs"),
-        (Climb { spec }, None) => commands::climb::run(spec, &rt, &run_dir),
-        (Marathon { spec, bot }, None) => commands::marathon::run(spec, &bot_or_die(bot), &rt),
-        (Downstack { spec, bot }, None) => commands::downstack::run(spec, &bot_or_die(bot), &rt),
-        (Versus { spec, a, b }, None) => {
-            commands::versus::run(spec, &bot_or_die(a), &bot_or_die(b), &rt)
-        }
-        (Behavior { spec, bot }, None) => commands::behavior::run(spec, &bot_or_die(bot), &rt),
-        (Awareness { spec, bot }, None) => commands::awareness::run(spec, &bot_or_die(bot), &rt),
-        (
-            Race {
-                spec,
-                candidate,
-                incumbent,
-            },
-            None,
-        ) => commands::race::run(spec, &bot_or_die(candidate), &bot_or_die(incumbent), &rt),
-        (Panel { spec, candidate }, None) => {
-            commands::panel::run(spec, &bot_or_die(candidate), &rt)
-        }
-        (Cc2Baseline { spec }, None) => commands::cc2_baseline::run(spec, &rt),
+        (Climb(spec), None) => commands::climb::run(spec, &rt, &run_dir),
+        (Marathon(spec), None) => commands::marathon::run(spec, &bot(0), &rt),
+        (Downstack(spec), None) => commands::downstack::run(spec, &bot(0), &rt),
+        (Versus(spec), None) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
+        (Behavior(spec), None) => commands::behavior::run(spec, &bot(0), &rt),
+        (Awareness(spec), None) => commands::awareness::run(spec, &bot(0), &rt),
+        (Race(spec), None) => commands::race::run(spec, &bot(0), &bot(1), &rt),
+        (Panel(spec), None) => commands::panel::run(spec, &bot(0), &rt),
+        (Cc2Baseline(spec), None) => commands::cc2_baseline::run(spec, &rt),
     }
 }
 
 fn main() -> std::io::Result<()> {
     match Cli::parse().command {
-        Command::List { json } => {
-            for entry in registry::entries() {
-                if json {
-                    println!(
-                        "{}",
-                        json!({
-                            "name": entry.name,
-                            "about": entry.about,
-                            "spec": registry::spec_json(&entry.experiment),
-                        })
-                    );
-                } else {
-                    let kind = registry::spec_json(&entry.experiment)["kind"]
-                        .as_str()
-                        .unwrap_or("?")
-                        .to_string();
-                    println!("{:<24} {kind:<13} {}", entry.name, entry.about);
-                }
-            }
-            Ok(())
-        }
-        Command::Bots => {
-            for (name, spec) in bots::bots() {
-                println!("{name:<20} {spec:?}");
-            }
-            Ok(())
-        }
-        Command::Show { name } => {
-            let entry = find_or_die(&name);
-            println!(
-                "{}",
-                serde_json::to_string_pretty(&registry::spec_json(&entry.experiment))?
-            );
-            Ok(())
-        }
-        Command::Run { name, rt } => execute(&find_or_die(&name), &rt, None),
+        Command::Run { eval, bots, rt } => execute(&find_or_die(&eval), &bots, &rt, None),
         Command::Resume { run_dir, rt } => {
-            // The receipt names the experiment and freezes its spec; a
-            // drifted registry entry is refused — register a new name
-            // instead of mutating one with recorded runs.
+            // The receipt names the eval and its bots and freezes the spec; a
+            // drifted registry entry is refused — register a new name instead
+            // of mutating one with recorded runs.
             let spec_path = run_dir.join("spec.json");
             let stored: serde_json::Value = std::fs::File::open(&spec_path)
                 .map_err(|e| {
@@ -222,8 +174,15 @@ fn main() -> std::io::Result<()> {
                     stored["spec"], current
                 ));
             }
-            execute(&entry, &rt, Some(run_dir))
+            let bots: Vec<String> = stored["bots"]
+                .as_array()
+                .map(|a| {
+                    a.iter()
+                        .filter_map(|v| v.as_str().map(str::to_string))
+                        .collect()
+                })
+                .unwrap_or_default();
+            execute(&entry, &bots, &rt, Some(run_dir))
         }
-        Command::Runs { last, runs_root } => commands::runs::list(runs_root.as_deref(), last),
     }
 }
