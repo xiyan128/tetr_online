@@ -21,6 +21,7 @@ use std::time::Duration;
 use tetr_core::ai::Cc2Weights;
 
 pub mod cc2_baseline;
+pub mod climb_app;
 pub mod downstack;
 pub mod marathon;
 pub mod race;

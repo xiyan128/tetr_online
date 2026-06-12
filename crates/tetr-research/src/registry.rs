@@ -17,7 +17,7 @@
 //! Optimizers are not evals: the search side was removed pending a
 //! first-principles redesign (history in git, `aa7bda9` and earlier).
 
-use crate::commands::{cc2_baseline, downstack, marathon, race, versus};
+use crate::commands::{cc2_baseline, climb_app, downstack, marathon, race, versus};
 
 /// One runnable eval: a name, a one-line description, and its spec.
 #[derive(Clone, Debug)]
@@ -37,6 +37,7 @@ pub enum Experiment {
     Versus(versus::Spec),
     Race(race::Spec),
     Cc2Baseline(cc2_baseline::Spec),
+    AppClimb(climb_app::Spec),
 }
 
 impl Experiment {
@@ -55,6 +56,7 @@ impl Experiment {
             Experiment::Versus(_) => "<bot-a> <bot-b>",
             Experiment::Race(_) => "<candidate> <incumbent>",
             Experiment::Cc2Baseline(_) => "",
+            Experiment::AppClimb(_) => "<subject>",
             _ => "<bot>",
         }
     }
@@ -93,6 +95,12 @@ pub fn entries() -> Vec<Entry> {
             "pair-GSPRT survival verdict (`run race <candidate> attack-tuned`)",
             Race(race::Spec::default()),
         ),
+        // --- optimizers (wrap the primitives; promotion stays manual) --------
+        e(
+            "app-climb",
+            "(1+1)-ES over the subject's Cc2 board+reward params on censored APP (`run app-climb attack-tuned-d6w32`)",
+            AppClimb(climb_app::Spec::default()),
+        ),
         // --- external referee ------------------------------------------------
         e(
             "cc2-baseline-app",
@@ -111,6 +119,19 @@ pub fn entries() -> Vec<Entry> {
             Downstack(downstack::Spec {
                 seeds: 4,
                 ..downstack::Spec::default()
+            }),
+        ),
+        e(
+            "smoke-app-climb",
+            "app-climb at toy size (its own campaign; run it on attack-tuned-tiny)",
+            AppClimb(climb_app::Spec {
+                campaign: "smoke-app-climb",
+                seeds_per_block: 2,
+                block_iters: 2,
+                max_pieces: 25,
+                iters: 3,
+                val_seeds: 4,
+                ..climb_app::Spec::default()
             }),
         ),
     ]

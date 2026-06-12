@@ -137,6 +137,7 @@ fn execute(
         Versus(spec) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
         Race(spec) => commands::race::run(spec, &bot(0), &bot(1), &rt),
         Cc2Baseline(spec) => commands::cc2_baseline::run(spec, &rt),
+        AppClimb(spec) => commands::climb_app::run(spec, &bot(0), &rt),
     }?;
     // The entire stdout contract: ONE self-describing JSON line per run
     // (humans read stderr; pipelines read this).
