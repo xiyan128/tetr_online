@@ -267,24 +267,15 @@ fn objective(
 fn race(
     cand_params: &BoardParams,
     incumbent_params: &BoardParams,
-    spec: &Spec,
     subject: &Subject,
-    seed_base: usize,
-    max_matches: u32,
-    alpha: f64,
-    deadline: Instant,
+    format: VersusFormat,
+    config: SprtConfig,
 ) -> SprtReport {
     sprt_race(
         &bot(cand_params, subject),
         &bot(incumbent_params, subject),
-        spec.format,
-        SprtConfig {
-            alpha,
-            seed_base,
-            max_matches,
-            deadline: Some(deadline),
-            ..SprtConfig::default()
-        },
+        format,
+        config,
     )
 }
 
@@ -379,12 +370,15 @@ fn run_climb(
                 let report = race(
                     &proposal,
                     &state.best_params,
-                    spec,
                     subject,
-                    campaign.confirm_base(state.iter, confirm_stride),
-                    spec.confirm_matches,
-                    spec.confirm_alpha,
-                    deadline,
+                    spec.format,
+                    SprtConfig {
+                        alpha: spec.confirm_alpha,
+                        seed_base: campaign.confirm_base(state.iter, confirm_stride),
+                        max_matches: spec.confirm_matches,
+                        deadline: Some(deadline),
+                        ..SprtConfig::default()
+                    },
                 );
                 accepted = report.verdict == SprtVerdict::H1Accepted;
                 eprintln!(
@@ -448,12 +442,15 @@ fn run_climb(
                 let report = race(
                     &state.best_params,
                     &state.anchored_params,
-                    spec,
                     subject,
-                    campaign.anchor_base(event, anchor_stride),
-                    spec.anchor_matches,
-                    0.05,
-                    deadline,
+                    spec.format,
+                    SprtConfig {
+                        alpha: 0.05,
+                        seed_base: campaign.anchor_base(event, anchor_stride),
+                        max_matches: spec.anchor_matches,
+                        deadline: Some(deadline),
+                        ..SprtConfig::default()
+                    },
                 );
                 let action = match report.verdict {
                     SprtVerdict::H1Accepted => {

@@ -187,36 +187,6 @@ fn full_strength(
     ))
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    /// Same spec, same seed => the identical game (the determinism every suite
-    /// rests on, witnessed at the construction seam).
-    #[test]
-    fn same_spec_same_game() {
-        let spec = BotSpec::beam(8, 2).cc2(Cc2Weights::attack_tuned());
-        let outcome = |make: &dyn Fn(u64) -> Box<dyn PlayerController>| {
-            let o = crate::versus::play_versus(make, make, 7, 30);
-            (o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped)
-        };
-        assert_eq!(outcome(&spec.factory()), outcome(&spec.factory()));
-    }
-
-    /// `.blind()` wraps the same brain: with nothing queued the play is
-    /// identical to the sighted spec (the wrapper only strips pending).
-    #[test]
-    fn blind_spec_plays_identically_with_empty_queue() {
-        let spec = BotSpec::beam(8, 2);
-        let o1 = crate::marathon::play_marathon_capped(&spec.factory(), 3, 50_000, 30);
-        let o2 = crate::marathon::play_marathon_capped(&spec.blind().factory(), 3, 50_000, 30);
-        assert_eq!(
-            (o1.score, o1.pieces, o1.lines),
-            (o2.score, o2.pieces, o2.lines)
-        );
-    }
-}
-
 /// The climb's v3 accept (see the climb command's RUN RECORD v3) — judged and
 /// REJECTED by the race run record; registered so the records stay runnable.
 pub const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
@@ -268,4 +238,34 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
 /// Look a registered bot up by name.
 pub fn find(name: &str) -> Option<BotSpec> {
     bots().into_iter().find(|(n, _)| *n == name).map(|(_, b)| b)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// Same spec, same seed => the identical game (the determinism every suite
+    /// rests on, witnessed at the construction seam).
+    #[test]
+    fn same_spec_same_game() {
+        let spec = BotSpec::beam(8, 2).cc2(Cc2Weights::attack_tuned());
+        let outcome = |make: &dyn Fn(u64) -> Box<dyn PlayerController>| {
+            let o = crate::versus::play_versus(make, make, 7, 30);
+            (o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped)
+        };
+        assert_eq!(outcome(&spec.factory()), outcome(&spec.factory()));
+    }
+
+    /// `.blind()` wraps the same brain: with nothing queued the play is
+    /// identical to the sighted spec (the wrapper only strips pending).
+    #[test]
+    fn blind_spec_plays_identically_with_empty_queue() {
+        let spec = BotSpec::beam(8, 2);
+        let o1 = crate::marathon::play_marathon_capped(&spec.factory(), 3, 50_000, 30);
+        let o2 = crate::marathon::play_marathon_capped(&spec.blind().factory(), 3, 50_000, 30);
+        assert_eq!(
+            (o1.score, o1.pieces, o1.lines),
+            (o2.score, o2.pieces, o2.lines)
+        );
+    }
 }
