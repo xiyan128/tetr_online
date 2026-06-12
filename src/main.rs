@@ -3,8 +3,10 @@
 //! Configures `DefaultPlugins` for both native and web targets — nearest-
 //! neighbour image sampling for crisp blocks, no asset meta lookups (so the
 //! browser build doesn't 404 on `.meta` files), and a window bound to the
-//! `#bevy` canvas that resizes with its parent. All game logic lives in
-//! [`GamePlugin`] from the library crate.
+//! `#bevy` canvas that resizes with its parent. On macOS the title bar is
+//! dissolved into the game (transparent, no title text, content drawn behind
+//! it) for a seamless desktop frame. All game logic lives in [`GamePlugin`]
+//! from the library crate.
 
 use bevy::asset::AssetMetaCheck;
 use bevy::prelude::*;
@@ -28,8 +30,18 @@ fn main() {
                 .set(ImagePlugin::default_nearest())
                 .set(WindowPlugin {
                     primary_window: Some(Window {
+                        title: "TETR ONLINE".to_owned(),
                         fit_canvas_to_parent: true,
                         canvas: Some("#bevy".to_owned()),
+                        // macOS: dissolve the title bar into the game. The
+                        // charcoal field renders edge-to-edge behind a
+                        // transparent bar with no title text; only the
+                        // traffic-light buttons float over the top-left,
+                        // kept so the window stays movable and closable.
+                        // These fields are no-ops on web and Linux.
+                        fullsize_content_view: true,
+                        titlebar_transparent: true,
+                        titlebar_show_title: false,
                         ..Default::default()
                     }),
                     ..Default::default()
