@@ -120,7 +120,7 @@ pub fn play_versus(
 }
 
 /// Match-format knobs for [`play_versus_format`].
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct VersusFormat {
     /// Ply cap; a capped game falls back to the net-attack tiebreak.
     pub max_plies: u32,

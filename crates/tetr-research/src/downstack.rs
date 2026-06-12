@@ -8,7 +8,7 @@ use tetr_core::engine::{CellKind, Engine, EngineConfig, EngineEvent, PieceType};
 use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{controller_seed, fold_combo};
-use crate::cli::SplitMix64;
+use crate::rng::SplitMix64;
 
 /// Garbage-hole column per row for a seeded cheese board (independent per row =
 /// maximum messiness). Both bots face the identical cheese for a given seed.

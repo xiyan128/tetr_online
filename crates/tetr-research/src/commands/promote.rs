@@ -4,7 +4,7 @@
 //! A climb optimizes against ONE incumbent in ONE format, so its winner may
 //! be a one-trick candidate — overfit to the incumbent's style or to rain
 //! pressure. Promotion therefore races the candidate against a PANEL across
-//! formats, each cell a pair-level GSPRT ([`tetr_research::sprt`]) on fresh
+//! formats, each cell a pair-level GSPRT ([`crate::sprt`]) on fresh
 //! campaign seeds:
 //!
 //! | opponent | bar | why |
@@ -18,19 +18,15 @@
 //! time" is not evidence. The verdict prints as `promote_verdict` with one
 //! machine line per cell.
 //!
-//! `FINAL_VALIDATION=1` draws from [`regions::FINAL`] instead of the
-//! campaign's promotion region — the never-iterated reserve that backs ONE
-//! verdict per external claim. Run it exactly once, when the claim is
-//! drafted and nothing will be tuned afterwards; the run manifest records
-//! the spend.
+//! A spec with `final_validation: true` draws from [`regions::FINAL`]
+//! instead of the campaign's promotion region — the never-iterated reserve
+//! that backs ONE verdict per external claim. Register it as its own named
+//! entry (the name and manifest then record the spend), run it exactly once,
+//! when the claim is drafted and nothing will be tuned afterwards.
 //!
-//! Env: CAMPAIGN ("scratch"), CAND_PARAMS (the candidate's 11 CC2 board
-//!      params; defaults to the origin, making the default run a null check
-//!      — origin cells tie out, nothing promotes), INCUMBENT_PARAMS
-//!      (defaults to the origin), CELL_MATCHES (800 per cell), P1 (0.55),
-//!      ALPHA (0.05), RAIN_PERIOD (8 — the rainy half of the format axis),
-//!      MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH (16), TIME_BUDGET_SECS
-//!      (3600, shared by all cells), FINAL_VALIDATION (presence flag).
+//! The registered candidate comes from the registry — a promotion IS a named
+//! configuration: paste the climb's `best_params` into a new entry and run
+//! it by name.
 
 use std::time::{Duration, Instant};
 
@@ -38,15 +34,17 @@ use serde_json::json;
 
 use tetr_core::ai::Cc2Weights;
 use tetr_core::player::PlayerController;
-use tetr_research::bots::BotSpec;
-use tetr_research::cli::{env_f32_array, env_f64, env_flag, env_string, env_usize};
-use tetr_research::ledger::RunLedger;
-use tetr_research::seeds::{Campaign, regions};
-use tetr_research::sprt::{SprtConfig, SprtVerdict, sprt_race};
-use tetr_research::versus::VersusFormat;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum Opponent {
+use crate::bots::BotSpec;
+use crate::commands::{Beam, BoardParams, Runtime};
+use crate::ledger::RunLedger;
+use crate::seeds::{Campaign, regions};
+use crate::sprt::{SprtConfig, SprtVerdict, sprt_race};
+use crate::versus::VersusFormat;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Opponent {
     Greedy,
     Origin,
     Incumbent,
@@ -58,6 +56,43 @@ impl Opponent {
             Opponent::Greedy => "greedy",
             Opponent::Origin => "origin",
             Opponent::Incumbent => "incumbent",
+        }
+    }
+}
+
+#[derive(Clone, Debug, serde::Serialize)]
+pub struct Spec {
+    /// The campaign whose promotion sub-region judges this candidate.
+    pub campaign: String,
+    pub cand_params: BoardParams,
+    pub incumbent_params: BoardParams,
+    /// Match cap per panel cell.
+    pub cell_matches: u32,
+    pub p1: f64,
+    pub alpha: f64,
+    /// The rainy half of the format axis (the other half is rain 0).
+    pub rain_period: u32,
+    pub max_plies: u32,
+    pub beam: Beam,
+    /// Draw from the never-iterated FINAL reserve instead of the campaign
+    /// region — one verdict per external claim.
+    pub final_validation: bool,
+}
+
+impl Default for Spec {
+    fn default() -> Self {
+        let origin = Cc2Weights::attack_tuned().board_params();
+        Self {
+            campaign: "scratch".to_string(),
+            cand_params: origin,
+            incumbent_params: origin,
+            cell_matches: 800,
+            p1: 0.55,
+            alpha: 0.05,
+            rain_period: 8,
+            max_plies: 240,
+            beam: Beam::default(),
+            final_validation: false,
         }
     }
 }
@@ -76,29 +111,22 @@ fn cell_passes(opponent: Opponent, verdict: SprtVerdict, wins: u32, losses: u32)
     }
 }
 
-fn main() {
-    const N: usize = Cc2Weights::BOARD_PARAM_COUNT;
-    let origin = Cc2Weights::attack_tuned().board_params();
-    let campaign = Campaign::derive(&env_string("CAMPAIGN", "scratch"));
-    let cand_params = env_f32_array::<N>("CAND_PARAMS", origin);
-    let incumbent_params = env_f32_array::<N>("INCUMBENT_PARAMS", origin);
-    let cell_matches = env_usize("CELL_MATCHES", 800) as u32;
-    let p1 = env_f64("P1", 0.55);
-    let alpha = env_f64("ALPHA", 0.05);
-    let rain = env_usize("RAIN_PERIOD", 8) as u32;
-    let max_plies = env_usize("MAX_PLIES", 240) as u32;
-    let depth = env_usize("BEAM_DEPTH", 2) as u8;
-    let width = env_usize("BEAM_WIDTH", 16);
-    let budget_secs = env_usize("TIME_BUDGET_SECS", 3600) as u64;
-    let final_validation = env_flag("FINAL_VALIDATION");
+/// Default wall-clock budget shared by all cells (`--budget-secs` overrides).
+const DEFAULT_BUDGET_SECS: u64 = 3600;
 
-    let stride = 4096usize.max(cell_matches as usize);
+pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result<()> {
+    let campaign = Campaign::derive(&spec.campaign);
+    let origin = Cc2Weights::attack_tuned().board_params();
+    let Beam { width, depth } = spec.beam;
+    let budget = rt.budget(DEFAULT_BUDGET_SECS);
+
+    let stride = 4096usize.max(spec.cell_matches as usize);
     let opponents = [Opponent::Greedy, Opponent::Origin, Opponent::Incumbent];
-    let rains = [0u32, rain];
+    let rains = [0u32, spec.rain_period];
     let cells = opponents.len() * rains.len();
     // The campaign's promotion sub-region, or — exactly once per external
     // claim — the never-iterated FINAL reserve.
-    let seed_base = if final_validation {
+    let seed_base = if spec.final_validation {
         eprintln!(
             "==== FINAL VALIDATION: spending the never-iterated region. One verdict \
              per claim; do not tune after this. ===="
@@ -108,40 +136,32 @@ fn main() {
         campaign.promote(cells * stride)
     };
 
-    let mut ledger = RunLedger::create(
-        "promote",
-        json!({
-            "campaign": { "id": campaign.id, "slot": campaign.slot },
-            "final_validation": final_validation,
-            "candidate": cand_params.as_slice(),
-            "incumbent": incumbent_params.as_slice(),
-            "bot": format!("beam(d{depth}, w{width}) cc2 attack_tuned+board_params"),
-        }),
-    )
-    .expect("promote: cannot create the run ledger");
-
-    let cc2 = |params: &[f32; N]| {
+    let cc2 = |params: &BoardParams| {
         BotSpec::beam(width, depth)
             .cc2(Cc2Weights::attack_tuned().with_board_params(params))
             .factory()
     };
-    let cand = cc2(&cand_params);
+    let cand = cc2(&spec.cand_params);
     let opponent_bot = |o: Opponent| -> Box<dyn Fn(u64) -> Box<dyn PlayerController> + Sync> {
         match o {
             Opponent::Greedy => Box::new(BotSpec::greedy().factory()),
             Opponent::Origin => Box::new(cc2(&origin)),
-            Opponent::Incumbent => Box::new(cc2(&incumbent_params)),
+            Opponent::Incumbent => Box::new(cc2(&spec.incumbent_params)),
         }
     };
 
     eprintln!(
         "Promotion panel — campaign '{}' (slot {}) | candidate vs {{greedy, origin, incumbent}} \
-         x rain {{0, {rain}}} | {cell_matches} matches/cell | budget {budget_secs}s",
-        campaign.id, campaign.slot
+         x rain {{0, {}}} | {} matches/cell | budget {}s",
+        campaign.id,
+        campaign.slot,
+        spec.rain_period,
+        spec.cell_matches,
+        budget.as_secs()
     );
 
     let start = Instant::now();
-    let deadline = start + Duration::from_secs(budget_secs);
+    let deadline = start + budget;
     let mut all_pass = true;
     for (i, (&opponent, &rain_period)) in opponents
         .iter()
@@ -149,7 +169,7 @@ fn main() {
         .enumerate()
     {
         let format = VersusFormat {
-            max_plies,
+            max_plies: spec.max_plies,
             rain_period,
         };
         let report = sprt_race(
@@ -157,10 +177,10 @@ fn main() {
             &*opponent_bot(opponent),
             format,
             SprtConfig {
-                p1,
-                alpha,
+                p1: spec.p1,
+                alpha: spec.alpha,
                 seed_base: seed_base + i * stride,
-                max_matches: cell_matches,
+                max_matches: spec.cell_matches,
                 deadline: Some(deadline),
                 ..SprtConfig::default()
             },
@@ -188,7 +208,7 @@ fn main() {
             opponent.name(),
             if pass { "PASS" } else { "FAIL" }
         );
-        let _ = ledger.append_outcome(&json!({
+        ledger.append_outcome(&json!({
             "cell": i,
             "opponent": opponent.name(),
             "rain_period": rain_period,
@@ -202,7 +222,7 @@ fn main() {
             "trinomial_llr": report.trinomial_llr,
             "pair_correlation": report.pair_correlation,
             "pass": pass,
-        }));
+        }))?;
     }
 
     let verdict = if all_pass { "PROMOTE" } else { "REJECT" };
@@ -216,15 +236,16 @@ fn main() {
     );
     println!("promote_verdict {verdict}");
 
-    let _ = ledger.write_summary(json!({
-        "exit_reason": if start.elapsed().as_secs() >= budget_secs {
+    ledger.write_summary(json!({
+        "exit_reason": if start.elapsed() >= Duration::from_secs(budget.as_secs()) {
             "time_budget"
         } else {
             "complete"
         },
         "verdict": verdict,
-        "final_validation": final_validation,
-    }));
+        "final_validation": spec.final_validation,
+    }))?;
+    Ok(())
 }
 
 #[cfg(test)]

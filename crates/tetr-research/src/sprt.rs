@@ -382,7 +382,7 @@ pub fn sprt_race(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::cli::SplitMix64;
+    use crate::rng::SplitMix64;
 
     /// (n/2)·ln(4/(2−μ₁)²) with μ₁ = 0.2 crosses ln(19) ≈ 2.944 at n = 28:
     /// a pure double-win streak convinces the pair test in 28 pairs.

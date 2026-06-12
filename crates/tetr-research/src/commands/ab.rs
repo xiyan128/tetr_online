@@ -16,17 +16,67 @@
 //!   trades net attack for cancellation). So deaths are reported first-class:
 //!   `aware_death_rate` vs `blind_death_rate` is the headline, with the
 //!   cap-game attack tiebreak shown separately for what it is.
-//!
-//! Env: `SEEDS` (48 — doubled by the swap), `BOT` (beam | bf), `BEAM_DEPTH`
-//! (2; bf ply cap when BOT=bf), `BEAM_WIDTH` (16), `NODE_BUDGET` (192, bf),
-//! `MAX_PLIES` (160).
+
+use serde_json::json;
 
 use tetr_core::ai::Cc2Weights;
-use tetr_research::bots::BotSpec;
-use tetr_research::cli::{env_choice, env_usize};
-use tetr_research::ledger::RunLedger;
-use tetr_research::seeds::seed_set;
-use tetr_research::versus::{VersusFormat, VersusResult, VersusStats, evaluate_versus_format};
+
+use crate::bots::BotSpec;
+use crate::commands::{Beam, Runtime};
+use crate::ledger::RunLedger;
+use crate::seeds::seed_set;
+use crate::versus::{VersusFormat, VersusResult, VersusStats, evaluate_versus_format};
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Bot {
+    /// Beam over CC2 defaults.
+    Beam,
+    /// Best-first (the `node_budget` arm; depth floors at 6).
+    Bf,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum WeightsArg {
+    /// CC2 defaults.
+    Default,
+    /// `attack_tuned` — the shipped operating point's attack output, the
+    /// pressure regime where deaths (the verdict awareness exists for) occur.
+    Attack,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct Spec {
+    /// Seed count (doubled by the arm swap).
+    pub seeds: usize,
+    /// The spec under test.
+    pub bot: Bot,
+    pub beam: Beam,
+    /// Best-first total node expansions (`bot: Bf`).
+    pub node_budget: u32,
+    /// Ply cap per match.
+    pub max_plies: u32,
+    /// Queue one symmetric line every N plies (0 = off) — the decisiveness
+    /// knob (mirror matches almost never kill without it).
+    pub rain_period: u32,
+    /// Evaluator weights for the best-first arm.
+    pub weights: WeightsArg,
+}
+
+impl Spec {
+    pub fn bot(bot: Bot) -> Self {
+        Self {
+            seeds: 48,
+            bot,
+            beam: Beam::default(),
+            node_budget: 192,
+            max_plies: 160,
+            rain_period: 0,
+            weights: WeightsArg::Default,
+        }
+    }
+}
 
 /// Deaths and cap-game outcomes for the aware arm of one orientation.
 /// `aware_is_a`: which side the aware bot played in this run.
@@ -57,75 +107,50 @@ fn tally(stats: &VersusStats, aware_is_a: bool) -> (u32, u32, u32, u32) {
     (aware_deaths, blind_deaths, aware_cap_wins, blind_cap_wins)
 }
 
-fn main() -> std::io::Result<()> {
-    let seeds = seed_set(env_usize("SEEDS", 48));
-    let bot = env_choice("BOT", "beam", &["beam", "bf"]);
-    let depth = env_usize("BEAM_DEPTH", 2) as u8;
-    let width = env_usize("BEAM_WIDTH", 16);
-    let nodes = env_usize("NODE_BUDGET", 192) as u32;
-    let plies = env_usize("MAX_PLIES", 160) as u32;
-    // RAIN_PERIOD > 0 queues one symmetric environmental line every N plies —
-    // the decisiveness knob (mirror matches almost never kill without it).
+pub fn run(spec: &Spec, _rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result<()> {
+    let seeds = seed_set(spec.seeds);
+    let Beam { width, depth } = spec.beam;
     let format = VersusFormat {
-        max_plies: plies,
-        rain_period: env_usize("RAIN_PERIOD", 0) as u32,
+        max_plies: spec.max_plies,
+        rain_period: spec.rain_period,
     };
 
-    let make: BotSpec = match bot.as_str() {
-        "bf" => {
+    let make: BotSpec = match spec.bot {
+        Bot::Bf => {
             let depth = if depth < 4 { 6 } else { depth };
-            // WEIGHTS=attack raises the duel to the shipped operating point's
-            // attack output — the pressure regime where deaths (the verdict
-            // awareness exists for) actually occur.
-            let weights = match env_choice("WEIGHTS", "default", &["default", "attack"]).as_str() {
-                "attack" => Cc2Weights::attack_tuned(),
-                "default" => Cc2Weights::DEFAULT,
-                _ => unreachable!("env_choice returned an unregistered value"),
+            let weights = match spec.weights {
+                WeightsArg::Attack => Cc2Weights::attack_tuned(),
+                WeightsArg::Default => Cc2Weights::DEFAULT,
             };
             eprintln!(
-                "Garbage-awareness A/B — CC2-eval best-first(nodes={nodes}, depth={depth}), {} seeds x2 (arm swap), {plies} plies, rain {}",
+                "Garbage-awareness A/B — CC2-eval best-first(nodes={}, depth={depth}), {} seeds x2 (arm swap), {} plies, rain {}",
+                spec.node_budget,
                 seeds.len(),
-                env_usize("RAIN_PERIOD", 0)
+                spec.max_plies,
+                spec.rain_period
             );
-            BotSpec::best_first(nodes, depth).cc2(weights)
+            BotSpec::best_first(spec.node_budget, depth).cc2(weights)
         }
-        "beam" => {
+        Bot::Beam => {
             eprintln!(
-                "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {plies} plies, rain {}",
+                "Garbage-awareness A/B — CC2-eval beam(depth={depth}, width={width}), {} seeds x2 (arm swap), {} plies, rain {}",
                 seeds.len(),
-                env_usize("RAIN_PERIOD", 0)
+                spec.max_plies,
+                spec.rain_period
             );
             BotSpec::beam(width, depth).cc2(Cc2Weights::DEFAULT)
         }
-        _ => unreachable!("env_choice returned an unregistered value"),
     };
-
-    let mut ledger = RunLedger::create(
-        "garbage_ab",
-        serde_json::json!({
-            "bot": bot,
-            "bot_spec": format!("{make:?}"),
-            "seeds": seeds,
-            "format": { "max_plies": format.max_plies, "rain_period": format.rain_period },
-            "arm_swap": true,
-        }),
-    )?;
 
     // Orientation 1: aware as A. Orientation 2: aware as B. Same seeds; the
     // blind arm is the same spec with the pending queue hidden.
     let fwd = evaluate_versus_format(&make.factory(), &make.blind().factory(), &seeds, format);
     let rev = evaluate_versus_format(&make.blind().factory(), &make.factory(), &seeds, format);
     for outcome in &fwd.outcomes {
-        ledger.append_outcome(&serde_json::json!({
-            "orientation": "aware_a",
-            "outcome": outcome,
-        }))?;
+        ledger.append_outcome(&json!({ "orientation": "aware_a", "outcome": outcome }))?;
     }
     for outcome in &rev.outcomes {
-        ledger.append_outcome(&serde_json::json!({
-            "orientation": "aware_b",
-            "outcome": outcome,
-        }))?;
+        ledger.append_outcome(&json!({ "orientation": "aware_b", "outcome": outcome }))?;
     }
 
     let (fd_a, fd_b, fc_a, fc_b) = tally(&fwd, true);
@@ -153,7 +178,7 @@ fn main() -> std::io::Result<()> {
         "mean net attack: fwd A(aware) {:.1} B(blind) {:.1} | rev A(blind) {:.1} B(aware) {:.1}",
         fwd.mean_attack_a, fwd.mean_attack_b, rev.mean_attack_a, rev.mean_attack_b
     );
-    ledger.write_summary(serde_json::json!({
+    ledger.write_summary(json!({
         "exit_reason": "complete",
         "games": games,
         "aware_deaths": aware_deaths,

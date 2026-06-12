@@ -26,8 +26,8 @@ use tetr_core::engine::Engine;
 use tetr_core::player::PlayerController;
 
 use crate::accounting::controller_seed;
-use crate::cli::SplitMix64;
 use crate::marathon::marathon_config;
+use crate::rng::SplitMix64;
 use crate::versus::versus_step_piece;
 
 /// Garbage queued against a player: a FIFO of `(lines, hole_col)` batches, one per

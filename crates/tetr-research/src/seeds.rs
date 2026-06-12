@@ -35,7 +35,7 @@
 //! before an external claim. Tooling must gate any read of it behind an
 //! explicit, recorded opt-in (the `promote` bin's `FINAL_VALIDATION`).
 
-use crate::cli::SplitMix64;
+use crate::rng::SplitMix64;
 
 // The region map needs a 64-bit index space (CONFIRM = 1<<50); fail loudly
 // with a reason on any 32-bit target instead of overflowing usize.

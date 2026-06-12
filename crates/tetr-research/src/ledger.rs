@@ -9,8 +9,6 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use serde::Serialize;
 use serde_json::{Map, Value, json};
 
-use crate::cli;
-
 const SCHEMA_VERSION: u64 = 1;
 
 /// A run directory containing its specification, per-seed outcomes, and summary.
@@ -21,12 +19,8 @@ pub struct RunLedger {
 
 impl RunLedger {
     /// Create `<runs-root>/<YYYYMMDD-HHMMSS>-<bin>-<pid>/` and write `spec.json`.
-    /// The root is `<git-toplevel>/runs`, falling back to `./runs` outside git.
     pub fn create(bin: &str, extra_spec: Value) -> io::Result<RunLedger> {
-        let root = git_output(&["rev-parse", "--show-toplevel"])
-            .map(|top| PathBuf::from(top).join("runs"))
-            .unwrap_or_else(|| PathBuf::from("runs"));
-        Self::create_at(&root, bin, extra_spec)
+        Self::create_at(&runs_root(), bin, extra_spec)
     }
 
     /// Create a run ledger under an explicit root directory.
@@ -50,7 +44,6 @@ impl RunLedger {
                 "cores": std::thread::available_parallelism().map(usize::from).unwrap_or(1),
                 "os": std::env::consts::OS,
             },
-            "env": cli::resolved_env(),
             "extra": extra_spec,
         });
         write_json(&dir.join("spec.json"), &spec)?;
@@ -109,6 +102,14 @@ impl RunLedger {
     pub fn dir(&self) -> &Path {
         &self.dir
     }
+}
+
+/// The default run-directory root: `<git-toplevel>/runs`, falling back to
+/// `./runs` outside git.
+pub fn runs_root() -> PathBuf {
+    git_output(&["rev-parse", "--show-toplevel"])
+        .map(|top| PathBuf::from(top).join("runs"))
+        .unwrap_or_else(|| PathBuf::from("runs"))
 }
 
 fn validate_bin(bin: &str) -> io::Result<()> {
@@ -227,7 +228,6 @@ mod tests {
         if root.exists() {
             fs::remove_dir_all(&root).unwrap();
         }
-        crate::cli::env_string("TETR_RESEARCH_LEDGER_TEST", "populated");
 
         let mut ledger =
             RunLedger::create_at(&root, "ledger-test", json!({"format": "test"})).unwrap();
@@ -250,10 +250,7 @@ mod tests {
         assert_eq!(RunLedger::read_checkpoint(&dir).unwrap()["step"], 2);
         let spec: Value =
             serde_json::from_reader(File::open(dir.join("spec.json")).unwrap()).unwrap();
-        assert_eq!(
-            spec["env"]["TETR_RESEARCH_LEDGER_TEST"]["value"],
-            "populated"
-        );
+        assert_eq!(spec["extra"]["format"], "test");
 
         drop(ledger);
         fs::remove_dir_all(root).unwrap();
