@@ -88,6 +88,19 @@ impl BagState {
         self.remaining == 0 || self.remaining & Self::bit(piece_type) != 0
     }
 
+    /// Every piece the **next deal** can produce, in canonical
+    /// [`PieceType::all`](crate::engine::PieceType::all) order.
+    ///
+    /// At a bag boundary (empty remainder) this returns all seven pieces,
+    /// matching [`contains`](Self::contains) and [`deal`](Self::deal)'s
+    /// lazy-refill convention.
+    pub fn possible_pieces(self) -> SmallVec<[crate::engine::PieceType; 7]> {
+        crate::engine::PieceType::all()
+            .into_iter()
+            .filter(|&piece_type| self.contains(piece_type))
+            .collect()
+    }
+
     /// Account for `piece_type` having been dealt out of the bag.
     ///
     /// Refills the bag first if it was empty, preserving the seven-bag invariant
