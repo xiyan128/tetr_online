@@ -19,9 +19,7 @@
 //! never climb from two origins), and the panel names its opponent bars
 //! in-spec (they define the gate; only the candidate is yours to pass).
 
-use crate::commands::{
-    awareness, behavior, cc2_baseline, climb, downstack, marathon, panel, race, versus,
-};
+use crate::commands::{behavior, cc2_baseline, climb, downstack, marathon, panel, race, versus};
 
 /// One runnable eval: a name, a one-line description, and its spec.
 #[derive(Clone, Debug)]
@@ -40,7 +38,6 @@ pub enum Experiment {
     Downstack(downstack::Spec),
     Versus(versus::Spec),
     Behavior(behavior::Spec),
-    Awareness(awareness::Spec),
     Race(race::Spec),
     Panel(panel::Spec),
     Climb(climb::Spec),
@@ -105,11 +102,6 @@ pub fn entries() -> Vec<Entry> {
             "behavior",
             "APP / DS-P suite across the standard garbage scenarios",
             Behavior(behavior::Spec::default()),
-        ),
-        e(
-            "awareness",
-            "garbage-awareness A/B: the bot vs its blinded twin, arm-swapped",
-            Awareness(awareness::Spec::default()),
         ),
         e(
             "race",

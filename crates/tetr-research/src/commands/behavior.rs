@@ -5,7 +5,7 @@
 //! bots, not knobs.
 
 use crate::behavior::{ScenarioReport, evaluate_scenario, standard_suite};
-use crate::bots::BotSpec;
+use crate::bots::Bot;
 use crate::commands::Runtime;
 use crate::seeds::seed_set;
 
@@ -52,11 +52,15 @@ fn print_report(r: &ScenarioReport) {
     println!("APP[{}] {:.3}", r.scenario.label(), r.mean_app);
 }
 
-pub fn run(spec: &Spec, bot: &BotSpec, _rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
     let seeds = seed_set(spec.seeds);
-    eprintln!("Behavior + APP suite | {bot:?} | {} seeds", seeds.len());
+    eprintln!(
+        "Behavior + APP suite | {} | {} seeds",
+        bot.name,
+        seeds.len()
+    );
     for scenario in standard_suite() {
-        let report = evaluate_scenario(&bot.factory(), &seeds, scenario);
+        let report = evaluate_scenario(&bot.spec.factory(), &seeds, scenario);
         print_report(&report);
     }
     Ok(())

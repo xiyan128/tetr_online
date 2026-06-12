@@ -18,7 +18,7 @@ use std::path::PathBuf;
 use clap::{Args, Parser, Subcommand};
 use serde_json::json;
 
-use tetr_research::bots::{self, BotSpec};
+use tetr_research::bots::{self, Bot};
 use tetr_research::commands::{self, Runtime};
 use tetr_research::ledger::RunDir;
 use tetr_research::registry::{self, Experiment};
@@ -85,7 +85,7 @@ fn find_or_die(name: &str) -> registry::Entry {
     })
 }
 
-fn bot_or_die(name: &str) -> BotSpec {
+fn bot_or_die(name: &str) -> Bot {
     bots::find(name).unwrap_or_else(|| {
         die(&format!(
             "unknown bot {name:?} — the catalog is src/bots.rs"
@@ -109,7 +109,7 @@ fn execute(
             entry.experiment.usage(),
         ));
     }
-    let bots: Vec<BotSpec> = bot_names.iter().map(|n| bot_or_die(n)).collect();
+    let bots: Vec<Bot> = bot_names.iter().map(|n| bot_or_die(n)).collect();
     let rt = Runtime {
         budget_secs: args.budget_secs,
         max_iters: args.max_iters,
@@ -137,7 +137,6 @@ fn execute(
         (Downstack(spec), None) => commands::downstack::run(spec, &bot(0), &rt),
         (Versus(spec), None) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
         (Behavior(spec), None) => commands::behavior::run(spec, &bot(0), &rt),
-        (Awareness(spec), None) => commands::awareness::run(spec, &bot(0), &rt),
         (Race(spec), None) => commands::race::run(spec, &bot(0), &bot(1), &rt),
         (Panel(spec), None) => commands::panel::run(spec, &bot(0), &rt),
         (Cc2Baseline(spec), None) => commands::cc2_baseline::run(spec, &rt),

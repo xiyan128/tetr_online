@@ -215,6 +215,10 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()),
         ),
         (
+            "cc2-default-blind",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::DEFAULT).blind(),
+        ),
+        (
             "attack-tuned-blind",
             BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()).blind(),
         ),
@@ -235,9 +239,20 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
     ]
 }
 
+/// A registered bot: its name travels with the spec so reports can speak
+/// names instead of weight dumps (the registry and receipt hold the rest).
+#[derive(Clone, Copy, Debug)]
+pub struct Bot {
+    pub name: &'static str,
+    pub spec: BotSpec,
+}
+
 /// Look a registered bot up by name.
-pub fn find(name: &str) -> Option<BotSpec> {
-    bots().into_iter().find(|(n, _)| *n == name).map(|(_, b)| b)
+pub fn find(name: &str) -> Option<Bot> {
+    bots()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(name, spec)| Bot { name, spec })
 }
 
 #[cfg(test)]

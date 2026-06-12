@@ -19,7 +19,6 @@ use std::time::Duration;
 
 use tetr_core::ai::Cc2Weights;
 
-pub mod awareness;
 pub mod behavior;
 pub mod cc2_baseline;
 pub mod climb;

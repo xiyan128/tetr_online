@@ -99,16 +99,16 @@ for resume, and anything richer (a wandb-style sink) would observe receipts
 **Daily drivers**
 
 - **`marathon` / `downstack` / `versus`**: fast headline metrics — score/sec
-  + APP, censored cheese pieces + clear rate, win/death/attack head-to-head.
-  `run marathon dt20` and `run downstack dt20` are the /autoresearch parse
-  contracts.
+  + APP, censored cheese pieces + clear rate, win/death/attack head-to-head
+  (arm-swapped; deaths first-class). `run marathon dt20` and
+  `run downstack dt20` are the /autoresearch parse contracts. Awareness A/Bs
+  are versus with a blinded twin: `run versus cc2-default cc2-default-blind`
+  (mirrors are bland without rain — the decisiveness dial).
 - **`behavior`**: the APP/DS-P suite across the standard scenarios;
   custom-weight arms are registered bots, not knobs.
 
 **Versus science**
 
-- **`awareness`**: the awareness A/B — `run awareness cc2-default` races a
-  bot vs its `.blind()` twin, arm-swapped, deaths split from cap tiebreaks.
 - **`cc2-board-climb`** (and your campaign's entries): the (1+1)-ES weight
   climb with the three-stage gate chain — a fresh-block screen
   (`accept_margin`, calibrate to ~2σ ≈ 150 at 48 matches), a per-accept SPRT

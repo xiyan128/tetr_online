@@ -12,7 +12,7 @@
 
 use std::time::Instant;
 
-use crate::bots::BotSpec;
+use crate::bots::Bot;
 use crate::commands::Runtime;
 use crate::seeds::regions;
 use crate::sprt::{SprtConfig, SprtVerdict, sprt_race};
@@ -50,7 +50,7 @@ impl Default for Spec {
 /// Default wall-clock budget (`--budget-secs` overrides).
 const DEFAULT_BUDGET_SECS: u64 = 3600;
 
-pub fn run(spec: &Spec, cand: &BotSpec, incumbent: &BotSpec, rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::Result<()> {
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
     let config = SprtConfig {
         p1: spec.p1,
@@ -64,8 +64,10 @@ pub fn run(spec: &Spec, cand: &BotSpec, incumbent: &BotSpec, rt: &Runtime) -> st
     };
 
     println!(
-        "pair-GSPRT: {cand:?} vs {incumbent:?} | H0 p=0.5, H1 p={} | rain {}, {} plies, \
+        "pair-GSPRT: {} vs {} | H0 p=0.5, H1 p={} | rain {}, {} plies, \
          blocks of {} seeds (x2 orientations = paired) | budget {}s",
+        cand.name,
+        incumbent.name,
         spec.p1,
         spec.format.rain_period,
         spec.format.max_plies,
@@ -74,7 +76,12 @@ pub fn run(spec: &Spec, cand: &BotSpec, incumbent: &BotSpec, rt: &Runtime) -> st
     );
 
     let start = Instant::now();
-    let report = sprt_race(&cand.factory(), &incumbent.factory(), spec.format, config);
+    let report = sprt_race(
+        &cand.spec.factory(),
+        &incumbent.spec.factory(),
+        spec.format,
+        config,
+    );
 
     let verdict = match report.verdict {
         SprtVerdict::H1Accepted => {

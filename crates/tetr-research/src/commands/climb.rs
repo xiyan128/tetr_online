@@ -170,12 +170,12 @@ struct Subject {
 }
 
 fn resolve_subject(name: &str) -> Subject {
-    let spec = bots::find(name)
+    let bot = bots::find(name)
         .unwrap_or_else(|| panic!("climb subject {name:?} is not a registered bot"));
-    let SearchSpec::Beam { width, depth } = spec.search else {
+    let SearchSpec::Beam { width, depth } = bot.spec.search else {
         panic!("climb subject {name:?} must be a beam bot");
     };
-    let EvalSpec::Cc2(base) = spec.eval else {
+    let EvalSpec::Cc2(base) = bot.spec.eval else {
         panic!("climb subject {name:?} must use the CC2 evaluator");
     };
     Subject { base, width, depth }

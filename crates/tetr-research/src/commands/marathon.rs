@@ -4,7 +4,7 @@
 //! contracts). The piece cap keeps iterations fast; score/sec stays a
 //! faithful early-game scoring-rate proxy.
 
-use crate::bots::BotSpec;
+use crate::bots::Bot;
 use crate::commands::Runtime;
 use crate::marathon::{DEFAULT_MAX_FRAMES, evaluate_capped};
 use crate::seeds::seed_set;
@@ -25,13 +25,19 @@ impl Default for Spec {
     }
 }
 
-pub fn run(spec: &Spec, bot: &BotSpec, _rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
     let seeds = seed_set(spec.seeds);
-    let stats = evaluate_capped(&bot.factory(), &seeds, DEFAULT_MAX_FRAMES, spec.max_pieces);
+    let stats = evaluate_capped(
+        &bot.spec.factory(),
+        &seeds,
+        DEFAULT_MAX_FRAMES,
+        spec.max_pieces,
+    );
     println!("score_per_second {:.2}", stats.mean_score_per_second);
     println!("attack_per_piece {:.4}", stats.mean_attack_per_piece);
     eprintln!(
-        "{bot:?} cap={} | {} seeds | APP={:.4} attack/game={:.1} | score={:.0} level={:.2} pieces={:.0} completion={:.0}%",
+        "{} cap={} | {} seeds | APP={:.4} attack/game={:.1} | score={:.0} level={:.2} pieces={:.0} completion={:.0}%",
+        bot.name,
         spec.max_pieces,
         seeds.len(),
         stats.mean_attack_per_piece,

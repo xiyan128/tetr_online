@@ -19,7 +19,7 @@
 
 use std::time::Instant;
 
-use crate::bots::{self, BotSpec};
+use crate::bots::{self, Bot};
 use crate::commands::Runtime;
 use crate::seeds::{Campaign, regions};
 use crate::sprt::{SprtConfig, SprtVerdict, sprt_race};
@@ -74,7 +74,7 @@ fn cell_passes(must_beat: bool, verdict: SprtVerdict, wins: u32, losses: u32) ->
 /// Default wall-clock budget shared by all cells (`--budget-secs` overrides).
 const DEFAULT_BUDGET_SECS: u64 = 3600;
 
-pub fn run(spec: &Spec, cand: &BotSpec, rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, cand: &Bot, rt: &Runtime) -> std::io::Result<()> {
     let campaign = Campaign::derive(&spec.campaign);
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
 
@@ -100,10 +100,11 @@ pub fn run(spec: &Spec, cand: &BotSpec, rt: &Runtime) -> std::io::Result<()> {
     };
 
     eprintln!(
-        "Promotion panel — campaign '{}' (slot {}) | candidate {cand:?} vs {:?} x rain {{0, {}}} | \
+        "Promotion panel — campaign '{}' (slot {}) | candidate {} vs {:?} x rain {{0, {}}} | \
          {} matches/cell | budget {}s",
         campaign.id,
         campaign.slot,
+        cand.name,
         opponents
             .iter()
             .map(|(n, _)| n.as_str())
@@ -128,8 +129,8 @@ pub fn run(spec: &Spec, cand: &BotSpec, rt: &Runtime) -> std::io::Result<()> {
             rain_period,
         };
         let report = sprt_race(
-            &cand.factory(),
-            &opponent.factory(),
+            &cand.spec.factory(),
+            &opponent.spec.factory(),
             format,
             SprtConfig {
                 p1: spec.p1,
