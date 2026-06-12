@@ -230,6 +230,12 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             "v3-candidate",
             BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned().with_board_params(&V3_CANDIDATE)),
         ),
+        (
+            // Depth-3 candidate: same attack-tuned eval, one ply deeper —
+            // the "deeper search" lever from the v3 epilogue.
+            "attack-tuned-d3",
+            BotSpec::beam(16, 3).cc2(Cc2Weights::attack_tuned()),
+        ),
         // Toy-sized twins for the smoke gate (seconds, not minutes).
         (
             "attack-tuned-tiny",
