@@ -104,9 +104,15 @@ const CONFIRM_OFF: usize = 1 << 31;
 const CONFIRM_END: usize = SLAB_SIZE;
 
 // The slab space must clear the static map's worst-case growth below and
-// FINAL above; a layout edit that breaks either fails here, not in a run.
+// FINAL above, and the sub-regions must tile a slab in order; a layout edit
+// that breaks any of this fails here, not in a run.
 const _: () = assert!(SLAB_BASE >= regions::CONFIRM + (1 << 44));
 const _: () = assert!(SLAB_BASE + SLAB_SLOTS * SLAB_SIZE <= regions::FINAL);
+const _: () = assert!(VALIDATION_END <= ANCHOR_OFF);
+const _: () = assert!(ANCHOR_END <= PROMOTE_OFF);
+const _: () = assert!(PROMOTE_END <= ROTATION_OFF);
+const _: () = assert!(ROTATION_END <= CONFIRM_OFF);
+const _: () = assert!(CONFIRM_END <= SLAB_SIZE);
 
 /// A named optimization campaign and its private slab of seed-index space.
 ///
@@ -263,16 +269,10 @@ mod tests {
         );
     }
 
-    /// Every sub-region of a slab is disjoint from its neighbours and the
-    /// whole slab sits between the static map and FINAL.
+    /// A derived slab sits between the static map and FINAL (the sub-region
+    /// tiling itself is compile-time asserted next to the layout constants).
     #[test]
     fn slab_layout_is_disjoint_and_bounded() {
-        assert!(VALIDATION_END <= ANCHOR_OFF);
-        assert!(ANCHOR_END <= PROMOTE_OFF);
-        assert!(PROMOTE_END <= ROTATION_OFF);
-        assert!(ROTATION_END <= CONFIRM_OFF);
-        assert!(CONFIRM_END <= SLAB_SIZE);
-
         let c = Campaign::derive("layout-probe");
         let slab = c.validation(1);
         assert!(slab >= SLAB_BASE);
