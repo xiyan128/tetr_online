@@ -10,6 +10,11 @@
 //!
 //! Run: `CC2_BIN=/path/to/cold-clear-2 SEEDS=6 PIECES=100 THINK_MS=50 \
 //!       cargo run --release -p tetr-research --bin cc2-baseline`
+//!
+//! FOLLOW-UP: downstack numbers recorded against this referee predate
+//! `mean_pieces_censored` (cleared-only means, no clear rates attached).
+//! Next run with a `CC2_BIN` on hand, re-record with the censored metric and
+//! clear rates so the TBP baseline matches the `cc2-native` record's form.
 
 use std::collections::VecDeque;
 use std::time::Duration;
