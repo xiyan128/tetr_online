@@ -77,7 +77,6 @@ pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::R
 
     let start = Instant::now();
     let report = sprt_race(
-        (cand.name, incumbent.name),
         &cand.spec.factory(),
         &incumbent.spec.factory(),
         spec.format,
@@ -115,17 +114,5 @@ pub fn run(spec: &Spec, cand: &Bot, incumbent: &Bot, rt: &Runtime) -> std::io::R
     println!("sprt_pairs {}", report.pairs);
     println!("sprt_wins {}", report.wins);
     println!("sprt_losses {}", report.losses);
-    crate::events::emit(
-        "result",
-        serde_json::json!({
-            "verdict": format!("{:?}", report.verdict),
-            "sprt_llr": report.llr,
-            "sprt_trinomial_llr": report.trinomial_llr,
-            "sprt_pairs": report.pairs,
-            "sprt_wins": report.wins,
-            "sprt_losses": report.losses,
-            "pair_correlation": report.pair_correlation,
-        }),
-    );
     Ok(())
 }

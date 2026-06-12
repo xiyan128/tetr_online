@@ -115,13 +115,7 @@ fn execute(
             "runtime": &rt,
         }),
     )?;
-    let run_id = run_dir
-        .dir()
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("run")
-        .to_string();
-    events::install(&run_id, run_dir.dir())?;
+    events::install(run_dir.dir())?;
 
     use Experiment::*;
     let bot = |i: usize| bots[i];

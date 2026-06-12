@@ -39,8 +39,9 @@
 //!   sessions and are never silently re-derived.
 //! - **Receipts + events.** The runner stamps every run's coordinates (eval,
 //!   bots, spec, runtime, git state) into one `spec.json` ([`ledger`]) and
-//!   sinks the game stream into `events.jsonl` ([`events`]): games are the
-//!   facts, receipts the parameters, metrics the duckdb queries over both.
+//!   sinks the game stream into `games.jsonl` ([`events`]): games are the
+//!   facts, receipts the parameters, metrics the duckdb queries over both —
+//!   nothing is stored that either already determines.
 //!
 //! # Layout
 //!
@@ -58,7 +59,7 @@
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
 //! | [`rng`] | the dependency-free deterministic PRNG (SplitMix64) |
 //! | [`progress`] | stderr progress bars (cosmetic only, hidden off-TTY) |
-//! | [`events`] | the game/result event stream (`events.jsonl`, duckdb-ready) |
+//! | [`events`] | the normalized game stream (`games.jsonl`, duckdb-ready) |
 //! | [`ledger`] | run receipts |
 
 pub mod bots;

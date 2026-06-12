@@ -34,9 +34,9 @@ impl RunDir {
         fs::create_dir_all(&root)?;
         fs::create_dir(&dir)?;
 
+        // The run id is the directory name — stored nowhere else.
         let mut spec = json!({
             "schema_version": SCHEMA_VERSION,
-            "run_id": run_id,
             "created_utc": rfc3339_utc(now)?,
             "git": git_metadata(),
         });
@@ -179,6 +179,7 @@ mod tests {
         assert!(dir.join("spec.json").is_file());
         let spec: Value =
             serde_json::from_reader(File::open(dir.join("spec.json")).unwrap()).unwrap();
+        assert!(spec.get("run_id").is_none());
         assert_eq!(spec["experiment"], "ledger-test");
         assert_eq!(spec["spec"]["kind"], "test");
         assert!(spec["git"].is_object());

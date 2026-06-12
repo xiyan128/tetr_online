@@ -52,22 +52,17 @@ pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<()> 
         a_deaths += u32::from(o.b_topped);
         b_deaths += u32::from(o.a_topped);
     }
-    for (names, stats) in [((a.name, b.name), &fwd), ((b.name, a.name), &rev)] {
+    for (swapped, stats) in [(false, &fwd), (true, &rev)] {
         for o in &stats.outcomes {
-            events::emit(
-                "game",
-                json!({
-                    "mode": "versus",
-                    "seed": events::seed_hex(o.seed),
-                    "a": names.0,
-                    "b": names.1,
-                    "a_topped": o.a_topped,
-                    "b_topped": o.b_topped,
-                    "a_attack": o.attack_a,
-                    "b_attack": o.attack_b,
-                    "plies": o.plies,
-                }),
-            );
+            events::game(json!({
+                "seed": events::seed_hex(o.seed),
+                "swapped": swapped,
+                "a_topped": o.a_topped,
+                "b_topped": o.b_topped,
+                "a_attack": o.attack_a,
+                "b_attack": o.attack_b,
+                "plies": o.plies,
+            }));
         }
     }
     let a_wins = fwd.a_wins + rev.b_wins;
@@ -81,14 +76,6 @@ pub fn run(spec: &Spec, a: &Bot, b: &Bot, _rt: &Runtime) -> std::io::Result<()> 
     );
     println!("versus_a_deaths {a_deaths}");
     println!("versus_b_deaths {b_deaths}");
-    events::emit(
-        "result",
-        json!({
-            "versus_a_win_rate": a_wins as f64 / games.max(1) as f64,
-            "versus_a_deaths": a_deaths,
-            "versus_b_deaths": b_deaths,
-        }),
-    );
     eprintln!(
         "{} vs {} | {} {a_wins} / {} {b_wins} / draw {draws} | deaths {} {a_deaths}, {} {b_deaths} \
          (of {games} games) | {} seeds x2, {} plies, rain {}",

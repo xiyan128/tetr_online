@@ -269,9 +269,7 @@ impl SprtState {
 }
 
 /// Race `cand` against `incumbent` until a bound or a budget ends the test.
-/// `names` are the bots' registry names, used only for the game events.
 pub fn sprt_race(
-    names: (&str, &str),
     cand: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     incumbent: &(dyn Fn(u64) -> Box<dyn PlayerController> + Sync),
     format: VersusFormat,
@@ -332,25 +330,15 @@ pub fn sprt_race(
         for pair in outcomes.chunks_exact(2) {
             let (mut wins, mut losses) = (0u32, 0u32);
             for (swapped, o) in pair {
-                let (a, b) = if *swapped {
-                    (names.1, names.0)
-                } else {
-                    (names.0, names.1)
-                };
-                crate::events::emit(
-                    "game",
-                    serde_json::json!({
-                        "mode": "versus",
-                        "seed": crate::events::seed_hex(o.seed),
-                        "a": a,
-                        "b": b,
-                        "a_topped": o.a_topped,
-                        "b_topped": o.b_topped,
-                        "a_attack": o.attack_a,
-                        "b_attack": o.attack_b,
-                        "plies": o.plies,
-                    }),
-                );
+                crate::events::game(serde_json::json!({
+                    "seed": crate::events::seed_hex(o.seed),
+                    "swapped": *swapped,
+                    "a_topped": o.a_topped,
+                    "b_topped": o.b_topped,
+                    "a_attack": o.attack_a,
+                    "b_attack": o.attack_b,
+                    "plies": o.plies,
+                }));
                 let (cand_topped, opp_topped, margin) = if *swapped {
                     (
                         o.b_topped,

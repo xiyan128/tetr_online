@@ -129,16 +129,19 @@ queries**:
 - `spec.json` — the reproducibility receipt: schema version, run ID, git
   commit + dirty state, the eval name, its full typed spec, the bot names,
   and the runtime flags.
-- `events.jsonl` — the game stream: one `game` row per match (raw outcomes;
-  seeds as hex strings — u64s corrupt through f64-only JSON readers) plus
-  one terminal `result` row. Emitted by typed Rust after order-stable
-  collection, so the file is deterministic modulo timestamps. There are no
-  process events: even a race's LLR trajectory is a fold over its ordered
-  games.
+- `games.jsonl` — the facts: one row of raw outcomes per match, fully
+  normalized. No timestamps, run ids, modes, bot names, or derived results
+  in rows — the path, the receipt (`bots` + a per-game `swapped` bit), and
+  queries carry those; the one ordinal `n` survives because order is
+  semantic (LLR folds) and not recoverable in duckdb. Seeds are hex strings
+  (u64s corrupt through f64-only readers). Rows are emitted after
+  order-stable collection, so the file is BYTE-IDENTICAL across replays —
+  `diff` is a replay witness, and the smoke asserts it.
 
 Analysis is duckdb, not the platform: `duckdb -init scripts/research.sql`
-gives `runs` / `events` / `games` / `results` views (receipts join the
-stream on `run`), and a live run streams with `tail -f … | jq`. Parquet is
+gives `runs` / `games` / `games_wide` views (run ids from filenames,
+bot names reconstructed from receipts), and a live run streams with
+`tail -f … | jq`. Parquet is
 an optional later compaction (`COPY … TO`), never the write format. The
 platform never reads events back — they observe runs, they don't steer
 them. `runs/` is ignored by git; doc-header RUN RECORDs cite run IDs.

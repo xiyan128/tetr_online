@@ -14,13 +14,16 @@ METRIC_LOG=$(tr_run run smoke-downstack dt20 2>/dev/null) || fail "metric errore
 grep -q '^downstack_pieces_censored ' <<<"$METRIC_LOG" || fail "censored line missing"
 grep -q '^downstack_clear_rate ' <<<"$METRIC_LOG" || fail "clear-rate line missing"
 
-echo "== receipt + event stream (facts on disk, duckdb-ready)"
+echo "== receipt + game stream (normalized facts, byte-deterministic)"
 RUN_DIR=$(ls -td runs/*-smoke-downstack-* | head -1)
 [[ -f "$RUN_DIR/spec.json" ]] || fail "receipt missing"
-[[ -f "$RUN_DIR/events.jsonl" ]] || fail "event stream missing"
-GAMES=$(grep -c '"kind":"game"' "$RUN_DIR/events.jsonl")
-[[ "$GAMES" -eq 4 ]] || fail "want 4 game events, got $GAMES"
-grep -q '"kind":"result"' "$RUN_DIR/events.jsonl" || fail "result event missing"
+[[ -f "$RUN_DIR/games.jsonl" ]] || fail "game stream missing"
+GAMES=$(wc -l < "$RUN_DIR/games.jsonl")
+[[ "$GAMES" -eq 4 ]] || fail "want 4 game rows, got $GAMES"
+tr_run run smoke-downstack dt20 >/dev/null 2>&1 || fail "replay run errored"
+RUN_DIR2=$(ls -td runs/*-smoke-downstack-* | head -1)
+diff -q "$RUN_DIR/games.jsonl" "$RUN_DIR2/games.jsonl" >/dev/null ||
+    fail "replays are not byte-identical"
 
 echo "== unknown names are refused (exit 2, never a silent default)"
 set +e
