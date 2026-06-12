@@ -13,9 +13,11 @@
 
 use bevy::prelude::*;
 
+use std::time::Duration;
+
 use crate::ai::{
     AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, DEFAULT_AI_SEED, Evaluator, Handicap,
-    LinearEvaluator, Mind, SearchBudget,
+    LinearEvaluator, Mind, PcCoverageConfig, PcCoveragePlanner, PcCoverageUnit, SearchBudget,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms
@@ -206,6 +208,39 @@ impl Default for ModelRegistry {
             "The strongest model: best-first graph search with transposition over \
              the tuned attack evaluator. Also the brain of the web embed.",
             || AiController::attack(Handicap::default(), DEFAULT_AI_SEED),
+        ));
+
+        // The perfect-clear hunter: the research crate's coverage planner at a
+        // watchable operating point (reveal coverage, 14 scenarios, width 2 —
+        // ~0.45 s/decision on PC-active boards, hidden in the reaction delay;
+        // a scan poll can cost a frame or two, the price of the batch grain).
+        // Two deliberate deviations from the catalog's shared conventions,
+        // both about the model's character: imperfection 0 (one misplaced
+        // piece kills a ten-piece PC line — the shared 0.12 would erase what
+        // this entry exists to show) while the human-feel reaction stays; and
+        // a fixed depth-10 budget (PC lines complete around lock 10).
+        entries.push(ModelEntry::new(
+            "PC Hunter",
+            "Perfect-clear builder: covers the bag's possible continuations and \
+             keeps boards PC-alive; plays precisely (no imperfection), with a \
+             general attack beam as its fallback.",
+            || {
+                AiController::interactive_with(
+                    Box::new(PcCoveragePlanner::new(PcCoverageConfig {
+                        scenario_cap: 14,
+                        width_per_root: 2,
+                        min_coverage_percent: 25,
+                        fallback_width: 32,
+                        unit: PcCoverageUnit::Reveals,
+                    })),
+                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                    SearchBudget::beam(10),
+                    Handicap {
+                        reaction: Duration::from_millis(200),
+                        imperfection: 0.0,
+                    },
+                )
+            },
         ));
 
         Self {

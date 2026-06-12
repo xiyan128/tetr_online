@@ -216,7 +216,21 @@ impl AiController {
         eval: Box<dyn crate::ai::Evaluator>,
         budget: SearchBudget,
     ) -> Self {
-        let handicap = Handicap::default();
+        Self::interactive_with(mind, eval, budget, Handicap::default())
+    }
+
+    /// [`interactive`](Self::interactive) with an explicit handicap — for the
+    /// rare catalog entry whose *character* the shared dials would erase (a
+    /// perfect-clear builder dies to any imperfection: one misplaced piece
+    /// kills a whole ten-piece line, so its entry keeps the human-feel
+    /// reaction delay but plays precisely). The venue and seed conventions
+    /// stay pinned here either way.
+    pub fn interactive_with(
+        mind: Box<dyn crate::ai::Mind>,
+        eval: Box<dyn crate::ai::Evaluator>,
+        budget: SearchBudget,
+        handicap: Handicap,
+    ) -> Self {
         let policy = SearchPolicy::new(mind, eval, budget, handicap.imperfection, DEFAULT_AI_SEED);
         Self::with_runner(
             Box::new(SlicedRunner::new(Box::new(policy))),
