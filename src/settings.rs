@@ -74,7 +74,7 @@ impl GameAction {
 /// Action→keys binding map.
 ///
 /// Each action may bind to a primary and an optional secondary [`KeyCode`]
-/// (e.g. rotate-CW defaults to both `ArrowUp` and `KeyW`). The keyboard
+/// (e.g. rotate-CW defaults to both `ArrowUp` and `KeyX`). The keyboard
 /// controller reads `pressed`/`just_pressed` for *either* key.
 #[derive(Resource, Debug, Clone, PartialEq, Eq, Reflect, Serialize, Deserialize)]
 #[reflect(Resource)]
@@ -94,17 +94,18 @@ pub struct Keybinds {
 }
 
 impl Default for Keybinds {
-    /// Arrows OR WASD out of the box: arrows/AD for movement, Down/S soft
-    /// drop, Up/W rotate CW (W mirrors ArrowUp), Z = rotate CCW,
-    /// Space = hard drop, LeftShift = hold, Escape = pause. Both hand
-    /// positions work without a trip to Options.
+    /// The guideline keyboard out of the box: arrows for movement, Down soft
+    /// drop, Space hard drop, X/Up = rotate CW, Z = rotate CCW (the Z/X pair
+    /// every guideline client trains), LeftShift = hold, Escape = pause.
+    /// A/D/S keep their WASD movement mirrors; W is retired — each action
+    /// holds two keys, and the CW slots belong to the standard pair.
     fn default() -> Self {
         Self {
             move_left: (KeyCode::ArrowLeft, Some(KeyCode::KeyA)),
             move_right: (KeyCode::ArrowRight, Some(KeyCode::KeyD)),
             soft_drop: (KeyCode::ArrowDown, Some(KeyCode::KeyS)),
             hard_drop: (KeyCode::Space, None),
-            rotate_cw: (KeyCode::ArrowUp, Some(KeyCode::KeyW)),
+            rotate_cw: (KeyCode::ArrowUp, Some(KeyCode::KeyX)),
             rotate_ccw: (KeyCode::KeyZ, None),
             hold: (KeyCode::ShiftLeft, None),
             pause: (KeyCode::Escape, None),
@@ -197,6 +198,13 @@ impl GameSettings {
         self.next_count = self.next_count.clamp(MIN_NEXT_COUNT, MAX_NEXT_COUNT);
         self.music_volume = self.music_volume.clamp(0.0, 1.0);
         self.sfx_volume = self.sfx_volume.clamp(0.0, 1.0);
+        // Retired-default migration: rotate-CW shipped as Up+W before X took
+        // the guideline slot. The Options rebind flow only ever writes
+        // `(key, None)`, so Up+W in a stored blob is provably our old default
+        // — never a player's hand-picked combo — and upgrades in place.
+        if self.keybinds.rotate_cw == (KeyCode::ArrowUp, Some(KeyCode::KeyW)) {
+            self.keybinds.rotate_cw = Keybinds::default().rotate_cw;
+        }
     }
 }
 
@@ -280,8 +288,13 @@ mod tests {
         let binds = Keybinds::default();
         assert_eq!(
             binds.get(GameAction::RotateCw),
-            (KeyCode::ArrowUp, Some(KeyCode::KeyW)),
-            "W mirrors ArrowUp so a WASD hand can rotate"
+            (KeyCode::ArrowUp, Some(KeyCode::KeyX)),
+            "X is the guideline rotate-CW key; Up mirrors it"
+        );
+        assert_eq!(
+            binds.get(GameAction::RotateCcw),
+            (KeyCode::KeyZ, None),
+            "Z completes the guideline Z/X rotation pair"
         );
         assert_eq!(
             binds.get(GameAction::MoveLeft),
@@ -335,13 +348,34 @@ mod tests {
 
     #[test]
     fn secondary_keybind_alias_survives_a_round_trip() {
-        // The default rotate-CW binds a secondary alias (W); the round trip must
+        // The default rotate-CW binds a secondary alias (X); the round trip must
         // keep the full (primary, secondary) tuple, not just the primary.
         let decoded = decode_settings(&encode_settings(&GameSettings::default())).unwrap();
         assert_eq!(
             decoded.keybinds.get(GameAction::RotateCw),
-            (KeyCode::ArrowUp, Some(KeyCode::KeyW))
+            (KeyCode::ArrowUp, Some(KeyCode::KeyX))
         );
+    }
+
+    #[test]
+    fn sanitize_migrates_the_retired_up_w_rotate_default() {
+        // A blob saved by an older build carries rotate-CW = Up+W (our old
+        // default — the rebind UI can't produce a secondary, so it can't be
+        // a player's choice). Sanitize upgrades it to the guideline Up+X.
+        let mut stale = GameSettings::default();
+        stale.keybinds.rotate_cw = (KeyCode::ArrowUp, Some(KeyCode::KeyW));
+        stale.sanitize();
+        assert_eq!(
+            stale.keybinds.rotate_cw,
+            (KeyCode::ArrowUp, Some(KeyCode::KeyX))
+        );
+        // A genuinely custom primary is left alone.
+        let mut custom = GameSettings::default();
+        custom
+            .keybinds
+            .set_primary(GameAction::RotateCw, KeyCode::KeyK);
+        custom.sanitize();
+        assert_eq!(custom.keybinds.rotate_cw, (KeyCode::KeyK, None));
     }
 
     #[test]

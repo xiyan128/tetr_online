@@ -8,11 +8,11 @@
 //!   sides (where the neighbor is empty or a different kind). Cells of one
 //!   piece share a single perimeter, so a tetromino reads as one designed
 //!   object while two touching pieces keep a mortar seam between them.
-//! * **weave** — a fine 4 px-period grain of darker texels across the body.
-//!   Its period divides the cell, so it tiles seamlessly over a whole piece:
-//!   cloth-like material, the same grain vocabulary as the ambient
-//!   background — texture, not ornament. Garbage is weave-LESS: dead weight
-//!   has no nap.
+//! * **weave** — 2×2 dots of darker body tone on an 8 px twill diagonal.
+//!   The period divides the cell, so the grain tiles seamlessly over a
+//!   whole piece: cloth-like material, the same grain vocabulary as the
+//!   ambient background — texture, not ornament. Garbage is weave-LESS:
+//!   dead weight has no nap.
 //! * **rounded corners** — where two sides open onto EMPTY board, the
 //!   outermost 2×2 texels are cut to transparent, pixel-rounding the
 //!   silhouette against air. A side facing ANY mino — same piece or not —
@@ -44,6 +44,16 @@ const EDGE_PX: usize = 2;
 /// scale without ever forming a shape.
 const EDGE_DARKEN: f32 = 0.12;
 const WEAVE_DARKEN: f32 = 0.09;
+
+/// Weave geometry: a [`WEAVE_DOT_PX`]² dot at the origin of every
+/// [`WEAVE_PERIOD`]-px tile plus one at its center — a twill diagonal, the
+/// same coverage as the old single-texel 4 px grain but chunky enough to
+/// read at play scale. The period must divide the cell for the grain to run
+/// unbroken across a connected piece.
+const WEAVE_PERIOD: usize = 8;
+const WEAVE_DOT_PX: usize = 2;
+const _: () = assert!(MINO_TEXTURE_SIZE.is_multiple_of(WEAVE_PERIOD));
+const _: () = assert!(WEAVE_DOT_PX <= WEAVE_PERIOD / 2);
 
 /// Neighbor-mask bits: a set bit means "same kind continues that way", and
 /// that side is painted seamless instead of edged.
@@ -228,9 +238,13 @@ fn paint_mino_pixels(base: [u8; 3], mask: u8, corners: u8, woven: bool) -> Vec<u
                 || (exposed_s && y >= size - EDGE_PX)
                 || (exposed_w && x < EDGE_PX)
                 || (exposed_e && x >= size - EDGE_PX);
-            // The weave's 4 px period divides the cell, so the grain runs
+            // The weave's period divides the cell, so the grain runs
             // unbroken across every cell of a connected piece.
-            let on_weave = woven && matches!((x % 4, y % 4), (0, 0) | (2, 2));
+            let (wx, wy) = (x % WEAVE_PERIOD, y % WEAVE_PERIOD);
+            let half = WEAVE_PERIOD / 2;
+            let dot = |w: usize, at: usize| w >= at && w < at + WEAVE_DOT_PX;
+            let on_weave =
+                woven && ((dot(wx, 0) && dot(wy, 0)) || (dot(wx, half) && dot(wy, half)));
             let tone = if on_edge {
                 edge
             } else if on_weave {
@@ -317,8 +331,8 @@ mod tests {
         // Isolated: the top row is the edge tone, darker than the body.
         assert_eq!(texel(&isolated, 16, 0), shade(base, -EDGE_DARKEN));
         // Connected to the north: the top row continues the body seamlessly
-        // (probe a non-weave texel: x % 4 == 1).
-        assert_eq!(texel(&connected_north, 17, 0), base);
+        // (probe off the weave dots: x % WEAVE_PERIOD == 2, y == 0).
+        assert_eq!(texel(&connected_north, 18, 0), base);
         // The other three sides stay edged either way.
         assert_eq!(
             texel(&connected_north, 16, MINO_TEXTURE_SIZE - 1),
@@ -332,13 +346,19 @@ mod tests {
         // Fully connected cell: pure body + weave, no edges, no cuts.
         let pixels = paint_mino_pixels(base, 0xF, 0, true);
         let weave = shade(base, -WEAVE_DARKEN);
+        // A 2×2 dot at the tile origin and another at its center…
         assert_eq!(texel(&pixels, 8, 8), weave);
-        assert_eq!(texel(&pixels, 10, 10), weave);
-        assert_eq!(texel(&pixels, 9, 9), base);
-        // 4 px period divides the 32 px cell, so the pattern at one cell's
+        assert_eq!(texel(&pixels, 9, 9), weave);
+        assert_eq!(texel(&pixels, 12, 12), weave);
+        assert_eq!(texel(&pixels, 13, 13), weave);
+        // …and bare body between them.
+        assert_eq!(texel(&pixels, 10, 10), base);
+        // The period divides the 32 px cell, so the pattern at one cell's
         // last column continues at the next cell's first column: the texel
-        // pattern is purely position-mod-4, identical across the boundary.
-        assert_eq!(texel(&pixels, 0, 0), texel(&pixels, 28, 28));
+        // pattern is purely position-mod-period, identical across the
+        // boundary.
+        assert_eq!(texel(&pixels, 0, 0), texel(&pixels, 24, 24));
+        assert_eq!(texel(&pixels, 2, 2), texel(&pixels, 26, 26));
         // Garbage has no nap.
         let garbage = paint_mino_pixels(base, 0xF, 0, false);
         assert_eq!(texel(&garbage, 8, 8), base);

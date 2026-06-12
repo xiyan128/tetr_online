@@ -621,7 +621,7 @@ mod tests {
         binds.set_primary(GameAction::HardDrop, KeyCode::KeyJ);
 
         let mut keyboard = ButtonInput::<KeyCode>::default();
-        keyboard.press(KeyCode::KeyW); // rotate-CW secondary alias (WASD side)
+        keyboard.press(KeyCode::KeyX); // rotate-CW secondary alias (guideline X)
         keyboard.press(KeyCode::KeyJ); // remapped hard drop
         keyboard.press(KeyCode::ArrowLeft); // move-left primary
 

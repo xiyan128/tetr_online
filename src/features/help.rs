@@ -360,10 +360,10 @@ mod tests {
             };
             assert!(!rendered.is_empty(), "{} rendered empty", action.label());
         }
-        // Rotate CW carries the WASD-side secondary (Up / W).
+        // Rotate CW carries the guideline secondary (Up / X).
         let (p, s) = binds.get(GameAction::RotateCw);
         assert_eq!(key_label(p), "Up");
-        assert_eq!(s.map(key_label).as_deref(), Some("W"));
+        assert_eq!(s.map(key_label).as_deref(), Some("X"));
     }
 
     #[test]
