@@ -138,7 +138,9 @@ queries**:
   order-stable collection, so the file is BYTE-IDENTICAL across replays —
   `diff` is a replay witness, and the smoke asserts it.
 
-Analysis is duckdb, not the platform: `duckdb -init scripts/research.sql`
+The invariants behind this split are an ADR (`docs/adr-data-architecture.md`)
+— read it before extending the data system. Analysis is duckdb, not the
+platform: `duckdb -init scripts/research.sql`
 gives `runs` / `games` / `games_wide` views (run ids from filenames,
 bot names reconstructed from receipts), and a live run streams with
 `tail -f … | jq`. Parquet is
