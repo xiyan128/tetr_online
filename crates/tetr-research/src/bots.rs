@@ -344,6 +344,23 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             "probe-bf2k-d8",
             BotSpec::best_first(2000, 8).cc2(Cc2Weights::attack_tuned()),
         ),
+        // The bf axis fired (1k: 0.7433, 2k: 0.7822 vs beam d6w32's 0.7211 on
+        // TRAIN) — scale budget, depth, and the eval interaction.
+        (
+            "probe-bf4k-d8",
+            BotSpec::best_first(4000, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-d10",
+            BotSpec::best_first(2000, 10).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-combo4",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights {
+                combo_attack: 4.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
         // Toy-sized twins for the smoke gate (seconds, not minutes).
         (
             "attack-tuned-tiny",
