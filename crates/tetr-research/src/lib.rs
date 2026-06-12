@@ -37,10 +37,10 @@
 //! - **Run records.** A command's doc header carries the durable results of
 //!   its runs (with settings and a [`ledger`] run id), so conclusions outlive
 //!   sessions and are never silently re-derived.
-//! - **Run receipts.** The runner stamps every run's coordinates (eval,
-//!   bots, spec, runtime, git state) into one `spec.json` via [`ledger`];
-//!   results live on stdout as machine lines, and only climbs persist more
-//!   (their resume checkpoint).
+//! - **Receipts + events.** The runner stamps every run's coordinates (eval,
+//!   bots, spec, runtime, git state) into one `spec.json` ([`ledger`]) and
+//!   sinks the game stream into `events.jsonl` ([`events`]): games are the
+//!   facts, receipts the parameters, metrics the duckdb queries over both.
 //!
 //! # Layout
 //!
@@ -48,7 +48,6 @@
 //! |---|---|
 //! | [`registry`] | named eval specs as code (one of the two configuration surfaces) |
 //! | [`commands`] | the eval executors behind `tetr-research run` |
-//! | [`search`] | climbs + promotion panels behind `tetr-climb` |
 //! | [`marathon`] | solo scoring/APP suite (the original benchmark) |
 //! | [`downstack`] | cheese-clearing suite (digging skill, not gameable by combos) |
 //! | [`versus`] | head-to-head under the **engine's** garbage rules |
@@ -59,18 +58,19 @@
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
 //! | [`rng`] | the dependency-free deterministic PRNG (SplitMix64) |
 //! | [`progress`] | stderr progress bars (cosmetic only, hidden off-TTY) |
+//! | [`events`] | the game/result event stream (`events.jsonl`, duckdb-ready) |
 //! | [`ledger`] | run receipts |
 
 pub mod bots;
 pub mod cc2;
 pub mod commands;
 pub mod downstack;
+pub mod events;
 pub mod ledger;
 pub mod marathon;
 pub mod progress;
 pub mod registry;
 pub mod rng;
-pub mod search;
 pub mod seeds;
 pub mod sprt;
 pub mod versus;

@@ -10,8 +10,9 @@
 //! - **Tracking** is not a participant: the runner writes the receipt
 //!   ([`crate::ledger`]) before dispatch; commands never see it.
 //!
-//! Optimizers are NOT here: climbs and panels live behind the `tetr-climb`
-//! binary ([`crate::search`]), wrapping these primitives.
+//! Optimizers are NOT here: search (climbs, promotion gates) was removed
+//! pending a first-principles redesign and will return wrapping these
+//! primitives.
 
 use std::path::PathBuf;
 use std::time::Duration;

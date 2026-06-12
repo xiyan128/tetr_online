@@ -5,8 +5,6 @@ edition.workspace = true
 license.workspace = true
 description = "Headless research & evaluation harness for the Tetris bot — behavior metrics, benchmarks, CC2 baselines."
 publish = false
-# Two binaries (measure vs search); bare `cargo run -p tetr-research` measures.
-default-run = "tetr-research"
 
 # Headless research + evaluation for the Tetris bot — Bevy-free, so it compiles
 # and iterates fast. One binary (`tetr-research`, src/main.rs) runs named
@@ -31,10 +29,6 @@ indicatif = "0.18"
 
 [lib]
 bench = false
-
-[[bin]]
-name = "tetr-climb"
-path = "src/bin/tetr_climb.rs"
 
 [lints]
 workspace = true

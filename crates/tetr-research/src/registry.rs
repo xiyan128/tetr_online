@@ -14,8 +14,8 @@
 //! whose stored spec no longer matches its entry, and a dirty working tree
 //! is stamped into every receipt.
 //!
-//! Optimizers are not evals: climbs and panels live in [`crate::search`]
-//! behind the `tetr-climb` binary.
+//! Optimizers are not evals: the search side was removed pending a
+//! first-principles redesign (history in git, `aa7bda9` and earlier).
 
 use crate::commands::{cc2_baseline, downstack, marathon, race, versus};
 

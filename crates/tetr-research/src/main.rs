@@ -20,6 +20,7 @@ use serde_json::json;
 
 use tetr_research::bots::{self, Bot};
 use tetr_research::commands::{self, Runtime};
+use tetr_research::events;
 use tetr_research::ledger::RunDir;
 use tetr_research::registry::{self, Experiment};
 
@@ -104,7 +105,7 @@ fn execute(
         budget_secs: args.budget_secs,
         cc2_bin: args.cc2_bin.clone(),
     };
-    RunDir::create(
+    let run_dir = RunDir::create(
         args.runs_root.as_deref(),
         entry.name,
         json!({
@@ -114,6 +115,13 @@ fn execute(
             "runtime": &rt,
         }),
     )?;
+    let run_id = run_dir
+        .dir()
+        .file_name()
+        .and_then(|n| n.to_str())
+        .unwrap_or("run")
+        .to_string();
+    events::install(&run_id, run_dir.dir())?;
 
     use Experiment::*;
     let bot = |i: usize| bots[i];

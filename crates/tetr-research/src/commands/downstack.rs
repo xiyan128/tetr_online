@@ -2,9 +2,12 @@
 //! optimization-safe scalar — failures count as the cap) plus clear rate,
 //! both on parsed stdout. Lower censored pieces = better digging.
 
+use serde_json::json;
+
 use crate::bots::Bot;
 use crate::commands::Runtime;
 use crate::downstack::evaluate_downstack;
+use crate::events;
 use crate::seeds::seed_set;
 
 #[derive(Clone, Copy, Debug, serde::Serialize)]
@@ -34,6 +37,27 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
         &seeds,
         spec.garbage_rows,
         spec.max_pieces,
+    );
+    for o in &ds.outcomes {
+        events::emit(
+            "game",
+            json!({
+                "mode": "downstack",
+                "seed": events::seed_hex(o.seed),
+                "a": bot.name,
+                "pieces": o.pieces,
+                "cleared": o.cleared,
+                "topped": o.topped_out,
+                "attack": o.attack,
+            }),
+        );
+    }
+    events::emit(
+        "result",
+        json!({
+            "downstack_pieces_censored": ds.mean_pieces_censored,
+            "downstack_clear_rate": ds.clear_rate,
+        }),
     );
     println!("downstack_pieces_censored {:.2}", ds.mean_pieces_censored);
     println!("downstack_clear_rate {:.2}", ds.clear_rate);

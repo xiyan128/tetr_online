@@ -76,8 +76,7 @@ binary pairs them at the prompt:
 cargo run --release -p tetr-research -- run downstack dt20
 cargo run --release -p tetr-research -- run versus cc2-default dt20
 cargo run --release -p tetr-research -- run race v3-candidate attack-tuned
-cargo run --release -p tetr-research --bin tetr-climb -- climb cc2-board-v4
-cargo run --release -p tetr-research --bin tetr-climb -- panel default <candidate>
+duckdb -init scripts/research.sql      # analyze every run ever recorded
 ```
 
 A recorded result reproduces from `(commit, eval, bots…)` — all names, all
@@ -85,16 +84,12 @@ stamped into the run receipt. Want different parameters or a new candidate?
 Register a new name — a climbed candidate is ONE bot registration, after
 which it is raceable, panelable, and benchmarkable at the prompt. Never
 mutate a name with recorded runs; `resume` refuses a drifted spec and
-dirty-tree runs are stamped in the receipt. Optimizers are a separate
-binary: `tetr-climb` runs named climb/panel configurations from
-`src/search/mod.rs` (the climb's `subject` and the panel's opponent bars
-stay in-spec — a campaign's origin is pinned and the bars define the gate).
-There is no resume: an interrupted climb is simply rerun — the walk replays
-deterministically from its spec. The only flags are machine-local:
-`--budget-secs`, `--max-iters`, `--cc2-bin`, `--runs-root`. Tracking is not
-a participant: the runner writes one `spec.json` receipt per run; anything
-richer (a wandb-style sink) would observe receipts + stdout without
-touching a command.
+dirty-tree runs are stamped in the receipt. The search side
+(climbs, promotion panels) was removed pending a first-principles redesign;
+its history and run records live in git (`aa7bda9` and earlier). The only
+flags are machine-local: `--budget-secs`, `--cc2-bin`, `--runs-root`.
+Tracking is not a participant: the runner writes the receipt and installs
+the event sink before dispatch; commands never see either.
 
 **Daily drivers**
 
@@ -107,32 +102,13 @@ touching a command.
 
 **Versus science**
 
-- **`tetr-climb climb cc2-board-v4`** (and your campaign's entries): the
-  (1+1)-ES weight climb with the three-stage gate chain — a fresh-block screen
-  (`accept_margin`, calibrate to ~2σ ≈ 150 at 48 matches), a per-accept SPRT
-  confirmation race (`confirm_matches`, 0 disables; `confirm_alpha` 0.02),
-  and every `anchor_every` confirmed accepts an anchor race against the last
-  *verified* point that re-anchors on H1 and ROLLS BACK on H0 — so
-  confirmation-alpha accumulation buys noise for at most one anchor window,
-  never the campaign. Each spec names its campaign; interrupted
-  walks are rerun (deterministic replay from `climb_seed`). Read
-  the run records in the climb command's header before climbing; each
-  documents a failure mode (seed overfit, noise acceptance, …) the current
-  design retires.
 - **`race`**: the standalone racer — `run race <candidate> <incumbent>`, a
   ship-grade verdict. The unit of evidence is the chair-swapped seed PAIR
   (pair-level GSPRT — per-game Bernoulli walks void their α under
   within-pair correlation; the `sprt` module header carries the simulation
   receipts). ~5 min to resolve a true 0.5/0.55 at default settings; an
   in-budget inconclusive means the effect is small. That *is* the answer.
-- **`tetr-climb panel default <candidate>`**: the promotion panel, the only gate
-  from "my climb accepted it" to "it is the better bot". The candidate races
-  the spec's NAMED opponents × rain {0, 8}, one pair-GSPRT per cell on fresh
-  campaign seeds: `must_beat` opponents demand H1, `must_not_lose_to`
-  opponents demand non-regression, H0 or starved evidence anywhere rejects.
-  A promotion is a bot registration plus a panel run. A spec with
-  `final_validation: true` spends the never-iterated FINAL region — its own
-  name, exactly once per external claim.
+
 
 **External baseline**
 
@@ -144,16 +120,28 @@ touching a command.
   CC2's *ported evaluator* vs ours on our engine with real mutual garbage —
   the fair comparison, and the baseline to climb past.
 
-## Run receipts
+## Receipts, events, and duckdb
 
-Every run creates `runs/<UTC timestamp>-<experiment>-<pid>/` holding
-`spec.json` — the reproducibility receipt: schema version, run ID, creation
-time, git commit + dirty state, the experiment NAME, its full typed spec
-exactly as `show <name>` prints it, and the invocation's runtime flags.
-Climbs additionally keep `checkpoint.json` (atomically replaced each
-iteration — the resume seam). Results live on stdout as machine lines;
-`runs/` is ignored by git. A doc-header RUN RECORD cites its run ID so the
-durable conclusion traces to a receipt.
+Every run creates `runs/<UTC timestamp>-<eval>-<pid>/` holding two files,
+split by role — **receipts are parameters, events are facts, metrics are
+queries**:
+
+- `spec.json` — the reproducibility receipt: schema version, run ID, git
+  commit + dirty state, the eval name, its full typed spec, the bot names,
+  and the runtime flags.
+- `events.jsonl` — the game stream: one `game` row per match (raw outcomes;
+  seeds as hex strings — u64s corrupt through f64-only JSON readers) plus
+  one terminal `result` row. Emitted by typed Rust after order-stable
+  collection, so the file is deterministic modulo timestamps. There are no
+  process events: even a race's LLR trajectory is a fold over its ordered
+  games.
+
+Analysis is duckdb, not the platform: `duckdb -init scripts/research.sql`
+gives `runs` / `events` / `games` / `results` views (receipts join the
+stream on `run`), and a live run streams with `tail -f … | jq`. Parquet is
+an optional later compaction (`COPY … TO`), never the write format. The
+platform never reads events back — they observe runs, they don't steer
+them. `runs/` is ignored by git; doc-header RUN RECORDs cite run IDs.
 
 ## Seed regions and campaigns
 

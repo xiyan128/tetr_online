@@ -4,8 +4,11 @@
 //! contracts). The piece cap keeps iterations fast; score/sec stays a
 //! faithful early-game scoring-rate proxy.
 
+use serde_json::json;
+
 use crate::bots::Bot;
 use crate::commands::Runtime;
+use crate::events;
 use crate::marathon::{DEFAULT_MAX_FRAMES, evaluate_capped};
 use crate::seeds::seed_set;
 
@@ -32,6 +35,31 @@ pub fn run(spec: &Spec, bot: &Bot, _rt: &Runtime) -> std::io::Result<()> {
         &seeds,
         DEFAULT_MAX_FRAMES,
         spec.max_pieces,
+    );
+    for o in &stats.outcomes {
+        events::emit(
+            "game",
+            json!({
+                "mode": "marathon",
+                "seed": events::seed_hex(o.seed),
+                "a": bot.name,
+                "score": o.score,
+                "level": o.level,
+                "lines": o.lines,
+                "pieces": o.pieces,
+                "frames": o.frames,
+                "topped": o.topped_out,
+                "completed": o.completed,
+                "attack": o.total_attack,
+            }),
+        );
+    }
+    events::emit(
+        "result",
+        json!({
+            "score_per_second": stats.mean_score_per_second,
+            "attack_per_piece": stats.mean_attack_per_piece,
+        }),
     );
     println!("score_per_second {:.2}", stats.mean_score_per_second);
     println!("attack_per_piece {:.4}", stats.mean_attack_per_piece);
