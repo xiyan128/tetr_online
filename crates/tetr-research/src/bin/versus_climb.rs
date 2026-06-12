@@ -78,7 +78,7 @@
 //! repeated campaigns stop iterating against one static validation region.
 //! Train (the non-rotate path) stays at `regions::TRAIN`. Every run writes a
 //! [`tetr_research::ledger`] run directory (spec, per-iteration outcomes,
-//! checkpoint each iteration, summary); RESUME=<run-dir> continues an
+//! checkpoint each iteration, summary); `RESUME=<run-dir>` continues an
 //! interrupted walk bit-identically from its checkpoint (state carries the
 //! RNG word, sigma, iteration, params, and anchor bookkeeping — witnessed by
 //! the `resume_reproduces_the_uninterrupted_walk` test). All pre-campaign
