@@ -238,16 +238,14 @@ fn drive_wave_targets(
         }
         if let Some((snapshot, _)) = chosen {
             b2b = snapshot.0.back_to_back_active;
-            danger = crate::session::render::stack_peak_row(&snapshot.0) >= DANGER_ROW;
+            // Any depth into the danger zone calms the wave — the shared
+            // definition also drives the frame-warming pass.
+            danger = crate::session::render::danger_level(&snapshot.0) > 0.0;
         }
     }
     state.amber_target = if b2b { 1.0 } else { 0.0 };
     state.calm_target = if danger { 1.0 } else { 0.0 };
 }
-
-/// The board row at which the stack counts as "in the danger zone" — the top
-/// four visible rows, matching the frame-warming pass in `session::render`.
-const DANGER_ROW: isize = 16;
 
 /// Ease, advance the stepped clock, and repaint the grain texture.
 fn animate_wave(
@@ -341,13 +339,23 @@ fn crest_displacement(cross: f32, phase: f32) -> f32 {
 /// continuous meandering curve — never amplitude-gated, so it cannot break
 /// into clumps; never straight, so it cannot read as an ellipse. Intensity
 /// never exceeds `level`, so the in-match cap stays exact.
+///
+/// Production paints through the per-diagonal bend table in [`paint_grains`]
+/// (same field, the bend hoisted out of the inner loop); this per-site form
+/// is the tests' oracle for the field's shape guarantees.
+#[cfg(test)]
 fn wave_intensity(site_x: usize, site_y: usize, phase: f32, level: f32) -> f32 {
-    use std::f32::consts::TAU;
     let (x, y) = (
         site_x as f32 * SITE_STRIDE as f32,
         site_y as f32 * SITE_STRIDE as f32,
     );
-    let along = (x + y) + crest_displacement(x - y, phase);
+    bent_intensity((x + y) + crest_displacement(x - y, phase), phase, level)
+}
+
+/// The carrier mix at an already-bent travel coordinate — split out so the
+/// painter can bend whole diagonals at once (see `paint_grains`).
+fn bent_intensity(along: f32, phase: f32, level: f32) -> f32 {
+    use std::f32::consts::TAU;
     let primary = 0.5
         + 0.5 * (TAU * (along / WAVELENGTH_PRIMARY_TEXELS - phase / CYCLE_PRIMARY_SECONDS)).sin();
     let secondary = 0.5
@@ -386,9 +394,18 @@ fn paint_grains(
         return 0;
     }
     let mut grains = 0;
-    for site_y in 0..height.div_ceil(SITE_STRIDE) {
-        for site_x in 0..width.div_ceil(SITE_STRIDE) {
-            let intensity = wave_intensity(site_x, site_y, phase, level);
+    let (sites_w, sites_h) = (width.div_ceil(SITE_STRIDE), height.div_ceil(SITE_STRIDE));
+    // The crest bend depends only on the cross coordinate (x − y), constant
+    // along every travel diagonal — compute it once per diagonal instead of
+    // re-running its trig at all ~sites_w × sites_h sites.
+    let stride = SITE_STRIDE as f32;
+    let bend: Vec<f32> = (0..sites_w + sites_h - 1)
+        .map(|i| crest_displacement((i as isize - (sites_h as isize - 1)) as f32 * stride, phase))
+        .collect();
+    for site_y in 0..sites_h {
+        for site_x in 0..sites_w {
+            let along = (site_x + site_y) as f32 * stride + bend[site_x + sites_h - 1 - site_y];
+            let intensity = bent_intensity(along, phase, level);
             if intensity <= bayer_threshold(site_x, site_y) {
                 continue;
             }
@@ -453,6 +470,17 @@ mod tests {
         let mut buffer = vec![0u8; w * h * 4];
         let count = paint_grains(&mut buffer, w, h, 3.7, level, amber);
         (count, buffer)
+    }
+
+    #[test]
+    fn the_amber_grain_is_the_theme_accent() {
+        // The const's doc promises "theme::ACCENT as bytes" — pin it, so
+        // tuning the theme amber cannot silently leave the wave's B2B tint
+        // behind.
+        assert_eq!(
+            GRAIN_AMBER,
+            crate::ui::widgets::theme::rgb_bytes(crate::ui::widgets::theme::ACCENT)
+        );
     }
 
     #[test]

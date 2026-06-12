@@ -439,8 +439,15 @@ fn load_settings(storage: Res<StorageResource>, mut settings: ResMut<GameSetting
     if let Some(raw) = storage.0.load(keys::SETTINGS)
         && let Some(loaded) = crate::settings::decode_settings(&raw)
     {
-        *settings = loaded;
+        *settings = loaded.clone();
         settings.sanitize();
+        // If sanitize had to repair the blob (clamp a value, migrate a
+        // retired keybind default), write the repaired shape back once —
+        // otherwise storage re-migrates on every boot and would regress the
+        // moment the migration code retires.
+        if *settings != loaded {
+            persist(&storage, &settings);
+        }
     }
 }
 

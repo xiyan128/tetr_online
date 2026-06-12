@@ -118,16 +118,10 @@ impl MinoKind {
     }
 
     fn base_color(self) -> [u8; 3] {
-        let color = match self {
+        theme::rgb_bytes(match self {
             MinoKind::Piece(piece) => piece_color(piece),
             MinoKind::Garbage => theme::GARBAGE,
-        };
-        let srgba = color.to_srgba();
-        [
-            (srgba.red * 255.0).round() as u8,
-            (srgba.green * 255.0).round() as u8,
-            (srgba.blue * 255.0).round() as u8,
-        ]
+        })
     }
 }
 
@@ -273,8 +267,9 @@ fn shade(color: [u8; 3], amount: f32) -> [u8; 3] {
     })
 }
 
-/// Neighbor mask from an arbitrary sameness predicate — the locked board
-/// uses it to merge same-kind neighbors out of a keyed cell map.
+/// Neighbor mask from a sameness predicate: the locked board merges
+/// same-kind neighbors out of a keyed cell map; the active piece, ghost, and
+/// avatars probe their own four cells directly.
 pub fn neighbor_mask_where(x: isize, y: isize, same: impl Fn(isize, isize) -> bool) -> u8 {
     let mut mask = 0;
     if same(x, y + 1) {
@@ -292,26 +287,11 @@ pub fn neighbor_mask_where(x: isize, y: isize, same: impl Fn(isize, isize) -> bo
     mask
 }
 
-/// Neighbor mask for `cell` against a set of same-kind occupied positions.
-pub fn neighbor_mask(
-    x: isize,
-    y: isize,
-    occupied: &std::collections::HashSet<(isize, isize)>,
-) -> u8 {
-    let mut mask = 0;
-    if occupied.contains(&(x, y + 1)) {
-        mask |= MASK_N;
-    }
-    if occupied.contains(&(x + 1, y)) {
-        mask |= MASK_E;
-    }
-    if occupied.contains(&(x, y - 1)) {
-        mask |= MASK_S;
-    }
-    if occupied.contains(&(x - 1, y)) {
-        mask |= MASK_W;
-    }
-    mask
+/// The empty-neighbor mask of a piece IN FLIGHT: everything that isn't the
+/// piece itself counts as open air (the stack it hasn't joined yet included),
+/// so every exposed corner rounds until the piece locks.
+pub fn airborne_empty(kind_mask: u8) -> u8 {
+    0xF & !kind_mask
 }
 
 #[cfg(test)]
@@ -407,11 +387,14 @@ mod tests {
 
     #[test]
     fn neighbor_mask_reads_board_adjacency() {
-        let occupied: std::collections::HashSet<(isize, isize)> =
-            [(5, 6), (6, 5), (4, 4)].into_iter().collect();
+        let occupied = [(5, 6), (6, 5), (4, 4)];
+        let mask = |x, y| neighbor_mask_where(x, y, |nx, ny| occupied.contains(&(nx, ny)));
         // North of (5,5) is (5,6); east is (6,5); (4,4) is diagonal — no bit.
-        assert_eq!(neighbor_mask(5, 5, &occupied), MASK_N | MASK_E);
-        assert_eq!(neighbor_mask(0, 0, &std::collections::HashSet::new()), 0);
+        assert_eq!(mask(5, 5), MASK_N | MASK_E);
+        assert_eq!(neighbor_mask_where(0, 0, |_, _| false), 0);
+        // A floating piece is wrapped in air everywhere it isn't.
+        assert_eq!(airborne_empty(MASK_N | MASK_E), MASK_S | MASK_W);
+        assert_eq!(airborne_empty(0), 0xF);
     }
 
     #[test]

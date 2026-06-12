@@ -21,7 +21,7 @@ use bevy::camera::ScalingMode;
 use bevy::prelude::*;
 use bevy::sprite::Anchor;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use crate::GameState;
 use crate::assets::GameAssets;
@@ -577,15 +577,16 @@ fn reconcile_active_pieces(
         // single connected object with one shared perimeter. In flight the
         // piece is wrapped in air — every exposed corner rounds; it binds to
         // the stack only once it locks.
-        let occupied: HashSet<(isize, isize)> = active.cells.iter().map(|c| (c.x, c.y)).collect();
-        let ids: Vec<Entity> = active
-            .cells
+        let cells = &active.cells;
+        let ids: Vec<Entity> = cells
             .iter()
             .map(|cell| {
-                let mask = skin::neighbor_mask(cell.x, cell.y, &occupied);
+                let mask = skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
+                    cells.iter().any(|c| c.x == x && c.y == y)
+                });
                 commands
                     .spawn(block_sprite(
-                        minos.handle(cell_kind(cell), mask, 0xF & !mask),
+                        minos.handle(cell_kind(cell), mask, skin::airborne_empty(mask)),
                         SessionLayout::BLOCK,
                         cell.x,
                         cell.y,
@@ -644,41 +645,46 @@ fn ghost_cell_outline(
         .collect()
 }
 
-/// Rebuild each seat's ghost every frame (hidden when grounded or disabled).
+/// Rebuild a seat's ghost when it changes (hidden when grounded or disabled —
+/// folded into the cache key as an empty cell list, so the rebuild also
+/// happens only on the show/hide transition, not every hidden frame).
 fn reconcile_ghost_pieces(
     mut commands: Commands,
     settings: Res<crate::settings::GameSettings>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
+    mut cache: Local<[Option<Vec<SnapshotCell>>; 2]>,
 ) {
     for (seat, snapshot) in &seats {
+        let index = seat.index.min(1);
+        let airborne = snapshot
+            .0
+            .active
+            .as_ref()
+            .is_some_and(|active| !active.landed);
+        let cells: &[SnapshotCell] = if settings.ghost_enabled && airborne {
+            &snapshot.0.ghost_cells
+        } else {
+            &[]
+        };
+        if cache[index].as_deref() == Some(cells) {
+            continue;
+        }
         let Some(layer) = layer_for(&layers, seat.index, VsLayer::Ghost) else {
             continue;
         };
         commands.entity(layer).despawn_related::<Children>();
-        if !settings.ghost_enabled {
-            continue;
-        }
-        let landed = snapshot
-            .0
-            .active
-            .as_ref()
-            .is_none_or(|active| active.landed);
-        if landed {
-            continue;
-        }
-        let occupied: HashSet<(isize, isize)> =
-            snapshot.0.ghost_cells.iter().map(|c| (c.x, c.y)).collect();
-        let ids: Vec<Entity> = snapshot
-            .0
-            .ghost_cells
+        let ids: Vec<Entity> = cells
             .iter()
             .flat_map(|cell| {
-                let mask = skin::neighbor_mask(cell.x, cell.y, &occupied);
+                let mask = skin::neighbor_mask_where(cell.x, cell.y, |x, y| {
+                    cells.iter().any(|c| c.x == x && c.y == y)
+                });
                 ghost_cell_outline(&mut commands, SessionLayout::BLOCK, cell.x, cell.y, mask)
             })
             .collect();
         commands.entity(layer).add_children(&ids);
+        cache[index] = Some(cells.to_vec());
     }
 }
 
@@ -763,15 +769,18 @@ fn spawn_avatar(
         .id();
     // The avatar is one piece: connected, one shared perimeter, air all
     // around (every exposed corner rounds).
-    let occupied: HashSet<(isize, isize)> = piece.avatar_cells().iter().copied().collect();
-    let ids: Vec<Entity> = piece
-        .avatar_cells()
+    let cells = piece.avatar_cells();
+    let ids: Vec<Entity> = cells
         .iter()
         .map(|&(x, y)| {
-            let mask = skin::neighbor_mask(x, y, &occupied);
+            let mask = skin::neighbor_mask_where(x, y, |nx, ny| cells.contains(&(nx, ny)));
             commands
                 .spawn(block_sprite(
-                    minos.handle(MinoKind::Piece(piece_type), mask, 0xF & !mask),
+                    minos.handle(
+                        MinoKind::Piece(piece_type),
+                        mask,
+                        skin::airborne_empty(mask),
+                    ),
                     block,
                     x,
                     y,
@@ -864,15 +873,26 @@ fn update_seat_timer_bars(
 }
 
 /// Highest occupied row of a snapshot's stack, or `-1` for an empty board.
-/// Shared by the danger-frame pass here and the ambient background's calm
-/// state (`features::ambient_wave`).
-pub(crate) fn stack_peak_row(snapshot: &crate::engine::EngineSnapshot) -> isize {
+fn stack_peak_row(snapshot: &crate::engine::EngineSnapshot) -> isize {
     snapshot
         .board_cells
         .iter()
         .map(|cell| cell.y)
         .max()
         .unwrap_or(-1)
+}
+
+/// First board row of the danger zone, with the ramp spanning it and the
+/// rows above (16..=19; buffer-zone cells clamp to full danger).
+const DANGER_ZONE_ROW: isize = 16;
+const DANGER_ZONE_SPAN: f32 = 4.0;
+
+/// How deep a stack sits in the danger zone, 0..=1 — the ONE definition of
+/// "the stack is dangerously high", consumed by the frame-warming pass here
+/// and the ambient background's calm state (`features::ambient_wave`).
+pub(crate) fn danger_level(snapshot: &crate::engine::EngineSnapshot) -> f32 {
+    let rows_in = (stack_peak_row(snapshot) - DANGER_ZONE_ROW + 1) as f32;
+    (rows_in / DANGER_ZONE_SPAN).clamp(0.0, 1.0)
 }
 
 /// Danger state: warm a seat's field frame toward `ATTACK` as its stack
@@ -884,9 +904,7 @@ fn tint_danger_frames(
 ) {
     use bevy::color::Mix;
     for (seat, snapshot) in &seats {
-        let peak = stack_peak_row(&snapshot.0);
-        // Ramp over rows 16..=19 (buffer-zone cells above row 19 clamp to 1).
-        let danger = ((peak as f32 - 15.0) / 4.0).clamp(0.0, 1.0);
+        let danger = danger_level(&snapshot.0);
         let color =
             crate::ui::widgets::theme::FRAME.mix(&crate::ui::widgets::theme::ATTACK, 0.55 * danger);
         for (frame, mut sprite) in &mut frames {

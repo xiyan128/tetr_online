@@ -116,6 +116,10 @@ const CALLOUT_TTL: f32 = 1.1;
 const CALLOUT_LANE_BLOCKS: f32 = 5.0;
 /// Step between stacked callout lines, px (display type plus leading).
 const CALLOUT_LINE_STEP: f32 = 36.0;
+/// How far the "BACK-TO-BACK" prefix rides above the headline, as a fraction
+/// of the line step — a short step (the prefix is half the type size), so the
+/// pair reads as one unit.
+const PREFIX_RISE: f32 = 0.85;
 /// Vertical lane of the "+n" attack pop, in blocks: under the callout stack,
 /// near the gutter floor.
 const POP_LANE_BLOCKS: f32 = 2.0;
@@ -213,7 +217,7 @@ fn spawn_seat_callouts(
                 spawn_line(
                     "BACK-TO-BACK",
                     theme::BUTTON_FONT_SIZE,
-                    lane_y + 0.85 * CALLOUT_LINE_STEP,
+                    lane_y + PREFIX_RISE * CALLOUT_LINE_STEP,
                 );
             }
         }
@@ -412,7 +416,7 @@ mod gutter_tests {
 
         let drift = 18.0 * CALLOUT_TTL;
         let prefix_top = CALLOUT_LANE_BLOCKS * block
-            + 0.85 * CALLOUT_LINE_STEP
+            + PREFIX_RISE * CALLOUT_LINE_STEP
             + crate::ui::widgets::theme::BUTTON_FONT_SIZE / 2.0
             + drift;
         assert!(

@@ -42,6 +42,17 @@ pub mod theme {
     /// Incoming damage and danger. The saturation ceiling of the whole system.
     pub const ATTACK: Color = Color::srgb(0.8196, 0.2941, 0.2588); // #D14B42
 
+    /// A theme color as raw sRGB bytes, for the CPU painters (the mino skin,
+    /// the ambient wave's grain tests) that write texels directly.
+    pub fn rgb_bytes(color: Color) -> [u8; 3] {
+        let srgba = color.to_srgba();
+        [
+            (srgba.red * 255.0).round() as u8,
+            (srgba.green * 255.0).round() as u8,
+            (srgba.blue * 255.0).round() as u8,
+        ]
+    }
+
     /// Dogica at native multiples only (8 px grid): 32 / 24 / 16, plus the
     /// countdown's single ceremony numeral at 96 (×12).
     pub const TITLE_FONT_SIZE: f32 = 32.0;
