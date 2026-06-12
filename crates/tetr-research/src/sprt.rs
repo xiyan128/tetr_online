@@ -135,8 +135,8 @@ pub struct SprtReport {
     /// nothing; reported next to `llr` to show what an independence model
     /// would have concluded on the same stream.
     pub trinomial_llr: f64,
-    /// Within-pair outcome correlation estimate (None until enough pairs):
-    /// > 0 means a per-game independence model understates the stream's
+    /// Within-pair outcome correlation estimate (None until enough pairs);
+    /// positive means a per-game independence model understates the stream's
     /// variance, i.e. the trinomial cross-check is anticonservative here.
     pub pair_correlation: Option<f64>,
     /// Mean candidate net-attack margin over all matches (context only).
