@@ -8,7 +8,7 @@ use tetr_core::engine::{CellKind, Engine, EngineConfig, EngineEvent, PieceType};
 use tetr_core::player::{PlayerController, drive_engine};
 
 use crate::accounting::{controller_seed, fold_combo};
-use crate::cli::SplitMix64;
+use crate::rng::SplitMix64;
 
 /// Garbage-hole column per row for a seeded cheese board (independent per row =
 /// maximum messiness). Both bots face the identical cheese for a given seed.
@@ -18,7 +18,7 @@ pub fn cheese_holes(seed: u64, rows: usize) -> Vec<usize> {
 }
 
 /// One cheese-clear game's result.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct DownstackOutcome {
     pub seed: u64,
     pub garbage_rows: u32,
@@ -103,12 +103,57 @@ pub fn play_downstack(
 #[derive(Debug, Clone)]
 pub struct DownstackStats {
     pub games: usize,
-    /// Mean pieces to clear the cheese, over games that cleared it (DEFENSE).
+    /// Per-game cap used to censor failed clears. It is part of the metric definition.
+    pub max_pieces: u32,
+    /// Optimization-safe mean: cleared games contribute their piece count and failed
+    /// games contribute [`max_pieces`](Self::max_pieces). Lower is better. This scalar
+    /// is only interpretable alongside the recorded cap.
+    pub mean_pieces_censored: f32,
+    /// Descriptive mean pieces over games that cleared; selective failure can game it.
     pub mean_pieces_to_clear: f32,
     /// Mean attack sent while clearing, over games that cleared it (OFFENSE proxy).
     pub mean_attack: f32,
     pub clear_rate: f32,
     pub outcomes: Vec<DownstackOutcome>,
+}
+
+impl DownstackStats {
+    /// Aggregate a set of already-played outcomes under a fixed censoring cap.
+    pub fn from_outcomes(outcomes: Vec<DownstackOutcome>, max_pieces: u32) -> Self {
+        let cleared: Vec<&DownstackOutcome> = outcomes.iter().filter(|o| o.cleared).collect();
+        let (mean_pieces_to_clear, mean_attack) = if cleared.is_empty() {
+            (0.0, 0.0)
+        } else {
+            let n = cleared.len() as f32;
+            (
+                cleared.iter().map(|o| o.pieces as f32).sum::<f32>() / n,
+                cleared.iter().map(|o| o.attack as f32).sum::<f32>() / n,
+            )
+        };
+        let games = outcomes.len();
+        let n = games.max(1) as f32;
+        let mean_pieces_censored = outcomes
+            .iter()
+            .map(|outcome| {
+                (if outcome.cleared {
+                    outcome.pieces
+                } else {
+                    max_pieces
+                }) as f32
+            })
+            .sum::<f32>()
+            / n;
+
+        Self {
+            games,
+            max_pieces,
+            mean_pieces_censored,
+            mean_pieces_to_clear,
+            mean_attack,
+            clear_rate: cleared.len() as f32 / n,
+            outcomes,
+        }
+    }
 }
 
 /// Evaluate a bot's cheese-clear efficiency over `seeds`.
@@ -123,23 +168,7 @@ pub fn evaluate_downstack(
         .par_iter()
         .map(|&seed| play_downstack(make_bot, seed, garbage_rows, max_pieces))
         .collect();
-    let cleared: Vec<&DownstackOutcome> = outcomes.iter().filter(|o| o.cleared).collect();
-    let (mean_pieces_to_clear, mean_attack) = if cleared.is_empty() {
-        (0.0, 0.0)
-    } else {
-        let n = cleared.len() as f32;
-        (
-            cleared.iter().map(|o| o.pieces as f32).sum::<f32>() / n,
-            cleared.iter().map(|o| o.attack as f32).sum::<f32>() / n,
-        )
-    };
-    DownstackStats {
-        games: outcomes.len(),
-        mean_pieces_to_clear,
-        mean_attack,
-        clear_rate: cleared.len() as f32 / outcomes.len().max(1) as f32,
-        outcomes,
-    }
+    DownstackStats::from_outcomes(outcomes, max_pieces)
 }
 
 #[cfg(test)]
@@ -164,5 +193,60 @@ mod tests {
                 (s.seed, s.pieces, s.cleared, s.topped_out, s.attack),
             );
         }
+    }
+
+    fn outcome(seed: u64, pieces: u32, cleared: bool) -> DownstackOutcome {
+        DownstackOutcome {
+            seed,
+            garbage_rows: 9,
+            pieces,
+            cleared,
+            topped_out: !cleared,
+            attack: 0,
+        }
+    }
+
+    #[test]
+    fn all_failures_are_censored_at_the_cap() {
+        let stats =
+            DownstackStats::from_outcomes(vec![outcome(1, 3, false), outcome(2, 80, false)], 100);
+        assert_eq!(stats.mean_pieces_censored, 100.0);
+        assert_eq!(stats.clear_rate, 0.0);
+    }
+
+    #[test]
+    fn selective_failure_cannot_improve_the_censored_metric() {
+        let a = DownstackStats::from_outcomes(
+            vec![
+                outcome(1, 20, true),
+                outcome(2, 22, true),
+                outcome(3, 24, true),
+                outcome(4, 30, true),
+            ],
+            100,
+        );
+        let b = DownstackStats::from_outcomes(
+            vec![
+                outcome(1, 20, true),
+                outcome(2, 22, true),
+                outcome(3, 24, true),
+                outcome(4, 30, false),
+            ],
+            100,
+        );
+
+        assert_eq!(a.mean_pieces_to_clear, 24.0);
+        assert_eq!(b.mean_pieces_to_clear, 22.0);
+        assert_eq!(a.mean_pieces_censored, 24.0);
+        assert_eq!(b.mean_pieces_censored, 41.5);
+        assert!(a.mean_pieces_censored < b.mean_pieces_censored);
+    }
+
+    #[test]
+    fn one_piece_cap_real_game_is_censored() {
+        let make = BotSpec::greedy().factory();
+        let stats = evaluate_downstack(&make, &[0], 9, 1);
+        assert_eq!(stats.mean_pieces_censored, 1.0);
+        assert_eq!(stats.clear_rate, 0.0);
     }
 }

@@ -2,14 +2,10 @@
 //!
 //! Before the engine owned the versus rules (see `docs/adr-versus-rules.md`),
 //! this module's `GarbageQueue` *was* the versus implementation. It survives
-//! for exactly two consumers, both of which would be invalidated by switching
-//! them to the engine path:
-//!
-//! 1. **Scripted pressure scenarios** ([`crate::behavior`]'s Faucet): inject
-//!    garbage on a schedule, with the harness doing the bookkeeping.
-//! 2. **The TBP referee** (`cc2_baseline`): Cold Clear 2 runs as an external
-//!    process with no garbage messages, so the referee inserts raw and keeps
-//!    cancellation accounting outside both engines.
+//! for exactly one consumer, which would be invalidated by switching it to
+//! the engine path: **the TBP referee** (`cc2-baseline`) — Cold Clear 2 runs
+//! as an external process with no garbage messages, so the referee inserts
+//! raw and keeps cancellation accounting outside both engines.
 //!
 //! NOTE the deliberate divergence from the engine rules: this queue settles
 //! the OLDEST garbage lowest ([`GarbageQueue::drain_newest_first`]), while the
@@ -26,8 +22,8 @@ use tetr_core::engine::Engine;
 use tetr_core::player::PlayerController;
 
 use crate::accounting::controller_seed;
-use crate::cli::SplitMix64;
 use crate::marathon::marathon_config;
+use crate::rng::SplitMix64;
 use crate::versus::versus_step_piece;
 
 /// Garbage queued against a player: a FIFO of `(lines, hole_col)` batches, one per

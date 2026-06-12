@@ -5,6 +5,7 @@
 /.wasm-dev
 /dist-embed
 /.embed-dev
+/runs/
 
 # OS / editor cruft
 .DS_Store

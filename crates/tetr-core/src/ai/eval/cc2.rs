@@ -22,12 +22,19 @@
 //! [`SearchState`](crate::ai::SearchState)). The T-slot `cutout_count` (needs
 //! bag/reserve) is approximated as a single cutout. These gaps affect *offense
 //! bookkeeping*, not the board-shaping that defines CC2's style.
+//!
+//! One deliberate **extension** on top of the port: [`Cc2Weights::attack`]
+//! (default `0.0` = pure CC2), the engine-true attack reward — see the field doc.
 
 use super::{EvalContext, Evaluator, Reward, Value};
-use crate::engine::{Board, CellKind, LockOutcome, PieceType, TSpinKind};
+use crate::engine::{
+    Board, CellKind, EngineScoreAction, LockOutcome, PieceType, TSpinKind, attack_lines,
+    qualifies_for_back_to_back,
+};
 
 /// Cold Clear 2 `freestyle` weights (`src/bot/freestyle.rs::Weights`), kept as `f32`
-/// exactly as CC2 stores them.
+/// exactly as CC2 stores them — plus one marked extension ([`attack`](Self::attack),
+/// default-off) that CC2 does not have.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Cc2Weights {
     pub cell_coveredness: f32,
@@ -49,6 +56,14 @@ pub struct Cc2Weights {
     pub combo_attack: f32,
     pub perfect_clear: f32,
     pub perfect_clear_override: bool,
+    /// **Our extension, not a CC2 field** (CC2 has no such term): the engine-true
+    /// attack reward, mirroring [`RewardWeights::attack`](super::RewardWeights) —
+    /// each clear adds `attack × attack_lines(…)`, the garbage it actually sends
+    /// under the search-path chain (combo + B2B continuation from [`EvalContext`],
+    /// the engine's own predicates). At the default `0.0` the evaluator is CC2's,
+    /// byte-for-byte; positive values let the search optimize the APP objective
+    /// itself within its horizon, with the shaped clear tables as residual priors.
+    pub attack: f32,
 }
 
 impl Cc2Weights {
@@ -73,6 +88,7 @@ impl Cc2Weights {
         combo_attack: 1.5,
         perfect_clear: 15.0,
         perfect_clear_override: true,
+        attack: 0.0,
     };
 
     /// Number of tunable board-Value weights exposed for hillclimbing.
@@ -132,6 +148,59 @@ impl Cc2Weights {
         self.height_upper_quarter = p[5];
         self.tetris_well_depth = p[6];
         self.tslot = [p[7], p[8], p[9], p[10]];
+        self
+    }
+
+    /// Number of tunable reward / chain weights exposed for hillclimbing — the
+    /// attack-side surface, complementing [`BOARD_PARAM_COUNT`](Self::BOARD_PARAM_COUNT).
+    pub const REWARD_PARAM_COUNT: usize = 15;
+
+    /// The reward-side weights as a flat vector, for hillclimbing. Order:
+    /// `[attack, wasted_t, has_back_to_back, back_to_back_clear, combo_attack,
+    /// perfect_clear, normal_clears[1..=4], spin_clears[1..=3],
+    /// mini_spin_clears[1..=2]]`. Index 0 of each clear table stays fixed: those
+    /// are the no-clear / zero-line anchors, and `normal_clears[0]` (paid by every
+    /// non-clearing placement) is redundant with shifting all clear rewards over a
+    /// fixed search depth — a dead climb dimension by construction. The integer /
+    /// bool fields stay fixed too.
+    pub fn reward_params(&self) -> [f32; Self::REWARD_PARAM_COUNT] {
+        [
+            self.attack,
+            self.wasted_t,
+            self.has_back_to_back,
+            self.back_to_back_clear,
+            self.combo_attack,
+            self.perfect_clear,
+            self.normal_clears[1],
+            self.normal_clears[2],
+            self.normal_clears[3],
+            self.normal_clears[4],
+            self.spin_clears[1],
+            self.spin_clears[2],
+            self.spin_clears[3],
+            self.mini_spin_clears[1],
+            self.mini_spin_clears[2],
+        ]
+    }
+
+    /// Return a copy with the reward-side weights replaced by `p` (see
+    /// [`reward_params`](Self::reward_params) for the order).
+    pub fn with_reward_params(mut self, p: &[f32; Self::REWARD_PARAM_COUNT]) -> Self {
+        self.attack = p[0];
+        self.wasted_t = p[1];
+        self.has_back_to_back = p[2];
+        self.back_to_back_clear = p[3];
+        self.combo_attack = p[4];
+        self.perfect_clear = p[5];
+        self.normal_clears[1] = p[6];
+        self.normal_clears[2] = p[7];
+        self.normal_clears[3] = p[8];
+        self.normal_clears[4] = p[9];
+        self.spin_clears[1] = p[10];
+        self.spin_clears[2] = p[11];
+        self.spin_clears[3] = p[12];
+        self.mini_spin_clears[1] = p[13];
+        self.mini_spin_clears[2] = p[14];
         self
     }
 }
@@ -240,13 +309,14 @@ impl Cc2Evaluator {
         eval
     }
 
-    /// CC2's per-move Reward terms (clears, spins, B2B, perfect clear, wasted-T).
+    /// CC2's per-move Reward terms (clears, spins, B2B, perfect clear, wasted-T),
+    /// plus our engine-true [`attack`](Cc2Weights::attack) term.
     fn placement_reward(
         &self,
         lock: &LockOutcome,
         is_empty: bool,
         t_spin: Option<TSpinKind>,
-        combo: u32,
+        ctx: EvalContext,
     ) -> f32 {
         let w = &self.weights;
         let lines = lock.cleared_rows.len();
@@ -275,7 +345,7 @@ impl Cc2Evaluator {
             };
             // Combo attack (CC2): `combo_attack × floor((combo-1)/2)`, using the
             // search-path combo now supplied via EvalContext.
-            reward += w.combo_attack * (combo.saturating_sub(1) / 2) as f32;
+            reward += w.combo_attack * (ctx.combo.saturating_sub(1) / 2) as f32;
         }
 
         // wasted-T: a T placed without a T-spin double+ is "wasted".
@@ -286,6 +356,18 @@ impl Cc2Evaluator {
         }
         // `softdrop` (per-move soft-drop distance) is still omitted — our movegen does
         // not model it; `has_back_to_back` is applied in `evaluate` from `ctx.b2b`.
+
+        // Engine-true attack (our extension; see the field doc): the garbage this
+        // clear actually sends under the search-path chain — combo and B2B
+        // *continuation* both from `ctx`, via the engine's own predicates — outside
+        // the perfect-clear override (it claims engine-exact attack, which a PC
+        // changes rather than replaces). Adds nothing at the default `attack == 0.0`.
+        if lines > 0 {
+            let action = EngineScoreAction::from_lock_result(t_spin, lines);
+            let b2b_continue = ctx.b2b && qualifies_for_back_to_back(t_spin, lines);
+            reward +=
+                w.attack * attack_lines(action, b2b_continue, ctx.combo, perfect_clear) as f32;
+        }
 
         reward
     }
@@ -306,7 +388,7 @@ impl Cc2Evaluator {
             value += self.weights.has_back_to_back;
         }
         let is_empty = cols.iter().all(|&c| c == 0);
-        let reward = self.placement_reward(lock, is_empty, t_spin, ctx.combo);
+        let reward = self.placement_reward(lock, is_empty, t_spin, ctx);
         (
             Value((value * SCALE).round() as i32),
             Reward((reward * SCALE).round() as i32),
@@ -459,6 +541,78 @@ mod tests {
         let w = Cc2Weights::DEFAULT.with_board_params(&p);
         assert_eq!(w.board_params(), p);
         assert_eq!(w.perfect_clear, Cc2Weights::DEFAULT.perfect_clear);
+    }
+
+    #[test]
+    fn cc2_reward_params_round_trip() {
+        let w = Cc2Weights::DEFAULT;
+        assert_eq!(w.reward_params().len(), Cc2Weights::REWARD_PARAM_COUNT);
+        assert_eq!(w.with_reward_params(&w.reward_params()), w);
+    }
+
+    #[test]
+    fn cc2_with_reward_params_is_positional() {
+        // Distinct value per slot ⇒ a swapped index is caught; board fields and
+        // the fixed table anchors (index 0 of each clear table) stay untouched.
+        let p: [f32; Cc2Weights::REWARD_PARAM_COUNT] =
+            std::array::from_fn(|i| (i as f32 + 1.0) * 3.0);
+        let w = Cc2Weights::DEFAULT.with_reward_params(&p);
+        assert_eq!(w.reward_params(), p);
+        assert_eq!(w.holes, Cc2Weights::DEFAULT.holes);
+        assert_eq!(w.normal_clears[0], 0.0);
+        assert_eq!(w.spin_clears[0], 0.0);
+        assert_eq!(w.mini_spin_clears[0], 0.0);
+    }
+
+    #[test]
+    fn attack_term_is_engine_exact() {
+        // With the shaped tables zeroed and `attack = 1.0`, the reward of a clear
+        // must be exactly SCALE × attack_lines under the search-path chain: a
+        // Tetris at ctx { combo: 5, b2b: true } sends 4 (base) + 1 (B2B
+        // continuation) + 2 (COMBO_TABLE[5]) = 7. A non-clearing lock stays 0.
+        let zeroed = Cc2Weights {
+            attack: 1.0,
+            normal_clears: [0.0; 5],
+            mini_spin_clears: [0.0; 3],
+            spin_clears: [0.0; 4],
+            back_to_back_clear: 0.0,
+            combo_attack: 0.0,
+            perfect_clear: 0.0,
+            perfect_clear_override: false,
+            ..Cc2Weights::DEFAULT
+        };
+        let eval = Cc2Evaluator::new(zeroed);
+        let mut board = Board::new(10, 20);
+        board.set(0, 0, CellKind::Some(PieceType::O)); // not a perfect clear
+        let tetris = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0, 1, 2, 3],
+            top_y_after_lock: None,
+        };
+        let ctx = EvalContext {
+            combo: 5,
+            b2b: true,
+        };
+        let (_, r) = eval.evaluate(&tetris, &board, None, ctx);
+        assert_eq!(r, Reward((7.0 * SCALE).round() as i32));
+
+        // B2B continuation gates on ctx.b2b (chain-exact, unlike the abstract
+        // `back_to_back_clear` which credits every eligible clear).
+        let cold = EvalContext {
+            combo: 0,
+            b2b: false,
+        };
+        let (_, r) = eval.evaluate(&tetris, &board, None, cold);
+        assert_eq!(r, Reward((4.0 * SCALE).round() as i32));
+
+        // A single sends 0 attack at combo 0 — and the zeroed shaping must not leak.
+        let single = LockOutcome {
+            cells_locked: vec![(0, 0, CellKind::Some(PieceType::I))],
+            cleared_rows: vec![0],
+            top_y_after_lock: None,
+        };
+        let (_, r) = eval.evaluate(&single, &board, None, cold);
+        assert_eq!(r, Reward(0));
     }
 
     #[test]

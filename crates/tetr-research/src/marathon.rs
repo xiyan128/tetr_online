@@ -31,7 +31,7 @@ pub fn marathon_config() -> EngineConfig {
 }
 
 /// The result of one Marathon game.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, serde::Serialize)]
 pub struct MarathonOutcome {
     pub seed: u64,
     pub score: u32,

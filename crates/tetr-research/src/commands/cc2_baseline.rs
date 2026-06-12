@@ -1,32 +1,37 @@
 //! `cc2-baseline` — measure **Cold Clear 2**'s attack-per-piece (APP) on the same
 //! seeded task our bot plays, so we have a real, reproducible baseline to beat.
 //!
-//! We are the referee: CC2 (a TBP subprocess, see [`tetr_research::cc2`]) suggests
+//! We are the referee: CC2 (a TBP subprocess, see [`crate::cc2`]) suggests
 //! moves on a board it tracks itself; we mirror the board in a tiny bitboard sim,
 //! drive the *same seeded 7-bag* (`tetr_core::engine::PieceGenerator`) our bot uses,
 //! apply CC2's chosen cells, count the clears, and score them with the identical
 //! [`tetr_core::engine::attack_lines`] table — using CC2's reported spin. Hold is
 //! inferred from the placed piece (TBP semantics), with asserts guarding board sync.
 //!
-//! Run: `CC2_BIN=/path/to/cold-clear-2 SEEDS=6 PIECES=100 THINK_MS=50 \
-//!       cargo run --release -p tetr-research --bin cc2-baseline`
+//! Run via the registry (`cc2-baseline-app` / `cc2-baseline-downstack`),
+//! pointing `--cc2-bin` at a Cold Clear 2 build.
+//!
+//! FOLLOW-UP: downstack numbers recorded against this referee predate
+//! `mean_pieces_censored` (cleared-only means, no clear rates attached).
+//! Next run with a `CC2_BIN` on hand, re-record with the censored metric and
+//! clear rates so the TBP baseline matches the `cc2-native` record's form.
 
 use std::collections::VecDeque;
 use std::time::Duration;
 
+use crate::bots::BotSpec;
+use crate::cc2::{Cc2, TbpBoard, TbpMove};
+use crate::downstack::{cheese_holes, evaluate_downstack};
+use crate::seeds::seed_set;
+use crate::versus::{VersusResult, decide_versus};
+use crate::versus_legacy::{GarbageQueue, VersusEngine, versus_hole};
 use tetr_core::engine::{EngineScoreAction, PieceGenerator, PieceType, TSpinKind, attack_lines};
-use tetr_research::bots::BotSpec;
-use tetr_research::cc2::{Cc2, TbpBoard, TbpMove};
-use tetr_research::downstack::{cheese_holes, evaluate_downstack};
-use tetr_research::seeds::seed_set;
-use tetr_research::versus::{VersusResult, decide_versus};
-use tetr_research::versus_legacy::{GarbageQueue, VersusEngine, versus_hole};
 
 const WIDTH: i32 = 10;
 const FULL_ROW: u16 = (1 << WIDTH) - 1;
 const VISIBLE_QUEUE: usize = 7;
 
-use tetr_research::cli::env_usize;
+use crate::commands::Runtime;
 
 // --- TBP <-> piece mapping ---------------------------------------------------
 
@@ -104,7 +109,7 @@ impl Sim {
     }
 
     /// A board pre-filled with `rows` of seeded cheese (each row full except its
-    /// hole) — identical to what `tetr_research::play_downstack` paints, so both
+    /// hole) — identical to what `crate::play_downstack` paints, so both
     /// bots face the same garbage for a given seed.
     fn with_cheese(seed: u64, rows: usize) -> Self {
         let mut sim = Sim::new();
@@ -420,7 +425,7 @@ fn run_versus(
 
     // The referee's own hole stream (engine-rules matches draw holes inside each
     // receiver engine instead — see tetr-core's garbage module).
-    let mut hole_rng = seed ^ tetr_research::versus_legacy::VERSUS_HOLE_SALT;
+    let mut hole_rng = seed ^ crate::versus_legacy::VERSUS_HOLE_SALT;
     let mut ours_topped = false;
     let mut cc2_topped = false;
     let mut cc2_plies = 0u32; // CC2 placements made
@@ -506,95 +511,154 @@ fn run_versus(
     Ok((result, ours_attack, cc2_attack))
 }
 
-fn main() -> std::io::Result<()> {
-    let bin = std::env::var("CC2_BIN")
-        .unwrap_or_else(|_| "/tmp/cold-clear-2/target/release/cold-clear-2".to_string());
-    let n_seeds = env_usize("SEEDS", 6);
-    let pieces = env_usize("PIECES", 100);
-    let think = Duration::from_millis(env_usize("THINK_MS", 50) as u64);
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum Mode {
+    /// CC2's attack-per-piece on our seeded bag — the original baseline.
+    App,
+    /// Head-to-head cheese-clear efficiency, our beam vs CC2 (the FAIR
+    /// CC2 comparison under this referee).
+    Downstack,
+    /// Mutual-garbage head-to-head. NOT A FAIR COMPARISON — base TBP has no
+    /// incremental-garbage message, so injection forces a stop+start re-sync
+    /// that discards CC2's search tree; kept for infrastructure with a loud
+    /// caveat. The fair versus comparison is `cc2-native`.
+    Versus,
+}
+
+#[derive(Clone, Copy, Debug, serde::Serialize)]
+pub struct Spec {
+    pub mode: Mode,
+    pub seeds: usize,
+    /// Pieces per game (and the downstack censoring cap).
+    pub pieces: usize,
+    /// CC2 think time per move.
+    pub think_ms: u64,
+    /// Downstack cheese height.
+    pub garbage_rows: u32,
+    /// Versus ply cap.
+    pub max_plies: u32,
+}
+
+impl Spec {
+    pub fn mode(mode: Mode) -> Self {
+        Self {
+            mode,
+            seeds: 6,
+            pieces: 100,
+            think_ms: 50,
+            garbage_rows: 9,
+            max_plies: 60,
+        }
+    }
+}
+
+/// The historical CC2 build location — `--cc2-bin` overrides (machine-local).
+const DEFAULT_CC2_BIN: &str = "/tmp/cold-clear-2/target/release/cold-clear-2";
+
+pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<serde_json::Value> {
+    let bin = rt
+        .cc2_bin
+        .as_ref()
+        .map(|p| p.to_string_lossy().into_owned())
+        .unwrap_or_else(|| DEFAULT_CC2_BIN.to_string());
+    let think = Duration::from_millis(spec.think_ms);
+    let seeds = seed_set(spec.seeds);
+    let pieces = spec.pieces;
 
     eprintln!(
-        "Cold Clear 2 baseline — {n_seeds} seeds × {pieces} pieces, think {think:?}/move, bin {bin}"
+        "Cold Clear 2 baseline — {} seeds × {pieces} pieces, think {think:?}/move, bin {bin}",
+        spec.seeds
     );
-    let seeds = seed_set(n_seeds);
 
-    // Downstack comparison: head-to-head cheese-clear efficiency, our beam vs CC2.
-    if std::env::var("DOWNSTACK").is_ok() {
-        let garbage_rows = env_usize("GARBAGE_ROWS", 9) as u32;
-        let cap = pieces as u32;
-        let ours = evaluate_downstack(&BotSpec::beam(16, 2).factory(), &seeds, garbage_rows, cap);
-        let mut cc2_sum = 0.0f64;
-        let mut cc2_cleared = 0usize;
-        for &seed in &seeds {
-            let (p, cleared) = run_downstack(&bin, seed, garbage_rows, cap, think)?;
-            eprintln!("  CC2 seed {seed:>20}: pieces={p:>3} cleared={cleared}");
-            if cleared {
-                cc2_sum += p as f64;
-                cc2_cleared += 1;
+    let result = match spec.mode {
+        // Downstack comparison: head-to-head cheese-clear efficiency.
+        Mode::Downstack => {
+            let garbage_rows = spec.garbage_rows;
+            let cap = pieces as u32;
+            let ours =
+                evaluate_downstack(&BotSpec::beam(16, 2).factory(), &seeds, garbage_rows, cap);
+            let mut cc2_censored_sum = 0.0f64;
+            let mut cc2_cleared = 0usize;
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
+            for &seed in &seeds {
+                let (p, cleared) = run_downstack(&bin, seed, garbage_rows, cap, think)?;
+                pb.suspend(|| eprintln!("  CC2 seed {seed:>20}: pieces={p:>3} cleared={cleared}"));
+                pb.inc(1);
+                cc2_censored_sum += f64::from(if cleared { p } else { cap });
+                if cleared {
+                    cc2_cleared += 1;
+                }
             }
+            pb.finish_and_clear();
+            let cc2_mean_censored = cc2_censored_sum / seeds.len().max(1) as f64;
+            eprintln!(
+                "downstack {garbage_rows} rows | OURS {:.2} censored ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
+                ours.mean_pieces_censored,
+                ours.clear_rate * 100.0,
+                cc2_mean_censored,
+                cc2_cleared,
+                seeds.len()
+            );
+            serde_json::json!({
+                "ours_pieces_censored": ours.mean_pieces_censored,
+                "ours_clear_rate": ours.clear_rate,
+                "cc2_pieces_censored": cc2_mean_censored,
+                "cc2_clear_rate": cc2_cleared as f64 / seeds.len().max(1) as f64,
+            })
         }
-        let cc2_mean = if cc2_cleared > 0 {
-            cc2_sum / cc2_cleared as f64
-        } else {
-            0.0
-        };
-        println!(
-            "downstack {garbage_rows} rows — pieces-to-clear (lower=better): OURS {:.2} ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
-            ours.mean_pieces_to_clear,
-            ours.clear_rate * 100.0,
-            cc2_mean,
-            cc2_cleared,
-            seeds.len()
-        );
-        return Ok(());
-    }
-
-    // Versus head-to-head: our beam vs CC2 with mutual garbage.
-    //
-    // NOT A FAIR COMPARISON — kept for infrastructure, reported with a loud caveat.
-    // Base TBP has no incremental-garbage message, so injecting garbage into CC2
-    // forces a stop+start re-sync that discards its search tree. CC2 ends up
-    // forfeiting while sending almost no attack (~4, vs its 0.69-APP baseline) —
-    // it is crippled by the harness, not out-played. A credible versus result needs
-    // a TBP garbage extension (if CC2 supports one) or a custom protocol. Until
-    // then the rigorous, *fairly measurable* CC2 comparison is DOWNSTACK.
-    if std::env::var("VERSUS").is_ok() {
-        let max_plies = env_usize("MAX_PLIES", 60) as u32;
-        let (mut ours_wins, mut cc2_wins, mut draws) = (0usize, 0usize, 0usize);
-        let (mut ours_atk_sum, mut cc2_atk_sum) = (0u32, 0u32);
-        for &seed in &seeds {
-            let (res, ours_atk, cc2_atk) = run_versus(&bin, seed, max_plies, think)?;
-            ours_atk_sum += ours_atk;
-            cc2_atk_sum += cc2_atk;
-            match res {
-                VersusResult::AWins => ours_wins += 1,
-                VersusResult::BWins => cc2_wins += 1,
-                VersusResult::Draw => draws += 1,
+        // Versus head-to-head — see [`Mode::Versus`] for why this is not fair.
+        Mode::Versus => {
+            let max_plies = spec.max_plies;
+            let (mut ours_wins, mut cc2_wins, mut draws) = (0usize, 0usize, 0usize);
+            let (mut ours_atk_sum, mut cc2_atk_sum) = (0u32, 0u32);
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
+            for &seed in &seeds {
+                let (res, ours_atk, cc2_atk) = run_versus(&bin, seed, max_plies, think)?;
+                ours_atk_sum += ours_atk;
+                cc2_atk_sum += cc2_atk;
+                match res {
+                    VersusResult::AWins => ours_wins += 1,
+                    VersusResult::BWins => cc2_wins += 1,
+                    VersusResult::Draw => draws += 1,
+                }
+                pb.suspend(|| {
+                    eprintln!(
+                        "  seed {seed:>20}: {res:?} | ours atk {ours_atk:>3} | cc2 atk {cc2_atk:>3}"
+                    )
+                });
+                pb.inc(1);
             }
-            eprintln!("  seed {seed:>20}: {res:?} | ours atk {ours_atk:>3} | cc2 atk {cc2_atk:>3}");
+            pb.finish_and_clear();
+            let n = seeds.len().max(1) as f64;
+            eprintln!(
+                "  !! NOT FAIR: CC2 is crippled by TBP re-sync (see source); treat as infra only."
+            );
+            eprintln!(
+                "VERSUS ours vs CC2 | OURS {ours_wins} / CC2 {cc2_wins} / draw {draws} | mean attack ours {:.1} cc2 {:.1} | {} seeds, {max_plies} plies, {think:?}/move",
+                ours_atk_sum as f64 / n,
+                cc2_atk_sum as f64 / n,
+                seeds.len(),
+            );
+            serde_json::json!({
+                "ours_win_rate": ours_wins as f64 / n,
+                "ours_wins": ours_wins, "cc2_wins": cc2_wins, "draws": draws,
+            })
         }
-        let n = seeds.len().max(1) as f64;
-        println!("versus_ours_win_rate {:.2}", ours_wins as f64 / n);
-        eprintln!(
-            "  !! NOT FAIR: CC2 is crippled by TBP re-sync (see source); treat as infra only."
-        );
-        eprintln!(
-            "VERSUS ours vs CC2 | OURS {ours_wins} / CC2 {cc2_wins} / draw {draws} | mean attack ours {:.1} cc2 {:.1} | {} seeds, {max_plies} plies, {think:?}/move",
-            ours_atk_sum as f64 / n,
-            cc2_atk_sum as f64 / n,
-            seeds.len(),
-        );
-        return Ok(());
-    }
-
-    let mut total_app = 0.0f64;
-    for &seed in &seeds {
-        let attack = run_one(&bin, seed, pieces, think)?;
-        let app = attack as f64 / pieces as f64;
-        total_app += app;
-        eprintln!("  seed {seed:>20}: attack={attack:>4}  APP={app:.4}");
-    }
-    let mean_app = total_app / n_seeds.max(1) as f64;
-    println!("cc2_attack_per_piece {mean_app:.4}");
-    Ok(())
+        Mode::App => {
+            let mut total_app = 0.0f64;
+            let pb = crate::progress::bar(seeds.len() as u64, "cc2 seeds");
+            for &seed in &seeds {
+                let attack = run_one(&bin, seed, pieces, think)?;
+                let app = attack as f64 / pieces as f64;
+                total_app += app;
+                pb.suspend(|| eprintln!("  seed {seed:>20}: attack={attack:>4}  APP={app:.4}"));
+                pb.inc(1);
+            }
+            pb.finish_and_clear();
+            let mean_app = total_app / spec.seeds.max(1) as f64;
+            serde_json::json!({ "attack_per_piece": mean_app })
+        }
+    };
+    Ok(result)
 }

@@ -7,50 +7,28 @@ description = "Headless research & evaluation harness for the Tetris bot — beh
 publish = false
 
 # Headless research + evaluation for the Tetris bot — Bevy-free, so it compiles
-# and iterates fast. Drives the tetr-core engine with a chosen Evaluator and
-# measures the bot's attack/behavior metrics, and compares against Cold Clear 2.
+# and iterates fast. One binary (`tetr-research`, src/main.rs) runs named
+# experiments from the in-code registry: `cargo run -p tetr-research -- list`.
 
 [dependencies]
 tetr-core = { path = "../tetr-core" }
-# TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON).
+# TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON)
+# and the run-ledger manifests.
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # Parallel match evaluation (research-only; the game never links this). Matches
 # are independent and internally deterministic, so order-stable collection
 # keeps every suite bit-reproducible — see the parallel==serial gates.
 rayon = "1"
+# The CLI shell only (run/resume); experiment configuration lives in
+# src/registry.rs as code, never in flags.
+clap = { version = "4.6.1", features = ["derive"] }
+# Stderr progress bars for the long silences (races, the TBP referee) —
+# cosmetic only, auto-hidden off-TTY, never part of any record.
+indicatif = "0.18"
 
 [lib]
 bench = false
-
-# APP / DS-P / behavior suite across garbage scenarios (the primary bot metric).
-# Run: SEEDS=24 cargo run --release -p tetr-research --bin behavior
-[[bin]]
-name = "behavior"
-path = "src/bin/behavior.rs"
-
-# Fast single-config metric for the /autoresearch loop (one number out). Run:
-# BENCH_SEEDS=6 BEAM_DEPTH=2 cargo run --release -p tetr-research --bin metric
-[[bin]]
-name = "metric"
-path = "src/bin/metric.rs"
-
-# Marathon scoring-speed sweep: greedy baseline vs beam @depth 1/2/3 (linear DT-20 eval).
-[[bin]]
-name = "bench-marathon"
-path = "src/bin/bench_marathon.rs"
-
-# Cold Clear 2 baseline: drive CC2 over TBP on the same seeded task and report its
-# attack-per-piece. Run: CC2_BIN=... cargo run --release -p tetr-research --bin cc2-baseline
-[[bin]]
-name = "cc2-baseline"
-path = "src/bin/cc2_baseline.rs"
-
-# Native CC2 head-to-head: CC2's ported evaluator vs our DT-20, both on our beam +
-# engine + garbage (fair, no TBP). Run: cargo run --release -p tetr-research --bin cc2-native
-[[bin]]
-name = "cc2-native"
-path = "src/bin/cc2_native.rs"
 
 [lints]
 workspace = true

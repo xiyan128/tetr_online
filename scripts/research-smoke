@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# End-to-end smoke of the measurement loop, driven purely by registry
+# names: the parse contract holds, the receipt + event stream land on disk,
+# and unknown names are refused. Debug build, seconds. Run after touching
+# the ledger / events / sprt / registry / bots plumbing.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+tr_run() { cargo run -q -p tetr-research -- "$@" --allow-dirty; }
+fail() { echo "research-smoke: FAIL — $*" >&2; exit 1; }
+
+echo "== metric parse contract (smoke-downstack)"
+METRIC_LOG=$(tr_run run smoke-downstack dt20 2>/dev/null) || fail "metric errored"
+[[ $(wc -l <<<"$METRIC_LOG") -eq 1 ]] || fail "stdout must be exactly one JSON line"
+grep -q '"pieces_censored":' <<<"$METRIC_LOG" || fail "censored field missing"
+grep -q '"run":' <<<"$METRIC_LOG" || fail "run path missing"
+
+echo "== receipt + game stream (normalized facts, byte-deterministic)"
+RUN_DIR=$(ls -td runs/*-smoke-downstack-* | head -1)
+[[ -f "$RUN_DIR/spec.json" ]] || fail "receipt missing"
+[[ -f "$RUN_DIR/games.jsonl" ]] || fail "game stream missing"
+GAMES=$(wc -l < "$RUN_DIR/games.jsonl")
+[[ "$GAMES" -eq 4 ]] || fail "want 4 game rows, got $GAMES"
+tr_run run smoke-downstack dt20 >/dev/null 2>&1 || fail "replay run errored"
+RUN_DIR2=$(ls -td runs/*-smoke-downstack-* | head -1)
+diff -q "$RUN_DIR/games.jsonl" "$RUN_DIR2/games.jsonl" >/dev/null ||
+    fail "replays are not byte-identical"
+
+echo "== optimizer contract (smoke-app-climb)"
+CLIMB_LOG=$(tr_run run smoke-app-climb attack-tuned-tiny 2>/dev/null) || fail "climb errored"
+[[ $(wc -l <<<"$CLIMB_LOG") -eq 1 ]] || fail "climb stdout must be exactly one JSON line"
+grep -q '"board_params":' <<<"$CLIMB_LOG" || fail "climbed params missing"
+grep -q '"origin_val":' <<<"$CLIMB_LOG" || fail "self-validation readout missing"
+
+echo "== unknown names are refused (exit 2, never a silent default)"
+set +e
+tr_run run no-such-experiment dt20 >/dev/null 2>&1
+CODE=$?
+set -e
+[[ "$CODE" -eq 2 ]] || fail "unknown name exited $CODE, want 2"
+
+echo "research-smoke: PASS (first run $RUN_DIR)"

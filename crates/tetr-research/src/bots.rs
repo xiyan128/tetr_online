@@ -19,6 +19,14 @@
 //! pre-spec factory functions are gone — this crate carries no compatibility
 //! surface; recorded run records cite settings, which a spec expresses
 //! completely. A new evaluator gets a new [`EvalSpec`] arm, not a bypass.)
+//!
+//! # The bot registry
+//!
+//! Instances are NAMED ([`bots`]): an experiment binding references bots
+//! purely by name, and a name is registered exactly once — so a climbed
+//! candidate added here is immediately raceable, panelable, and
+//! benchmarkable everywhere with no per-command plumbing. Like experiment
+//! names, bot names with recorded runs are immutable: new weights, new name.
 
 use std::time::Duration;
 
@@ -43,6 +51,11 @@ pub enum SearchSpec {
     /// bag speculation past the visible queue is ON (the `BeamPlanner`
     /// default) — every recorded beam number includes it.
     Beam { width: usize, depth: u8 },
+    /// Transposition-pruned beam ([`BeamPlanner::transposing`]): equal per-root
+    /// future states collapse to their best derivation before truncation, so
+    /// width buys distinct futures. A separate variant — never a flag on
+    /// `Beam` — because recorded plain-beam baselines must stay byte-stable.
+    TpBeam { width: usize, depth: u8 },
     /// Best-first graph search with transposition: `budget` node expansions
     /// per decision, lookahead capped at `depth` plies.
     BestFirst { budget: u32, depth: u8 },
@@ -97,6 +110,15 @@ impl BotSpec {
         }
     }
 
+    /// A transposition-pruned beam bot (see [`SearchSpec::TpBeam`]).
+    pub fn tp_beam(width: usize, depth: u8) -> Self {
+        Self {
+            search: SearchSpec::TpBeam { width, depth },
+            eval: EvalSpec::Linear(Weights::default()),
+            blind: false,
+        }
+    }
+
     /// A best-first bot over the default linear evaluator.
     pub fn best_first(budget: u32, depth: u8) -> Self {
         Self {
@@ -144,6 +166,12 @@ impl BotSpec {
                 SearchBudget::beam(depth),
                 seed,
             ),
+            SearchSpec::TpBeam { width, depth } => full_strength(
+                Box::new(BeamPlanner::transposing(width)),
+                self.eval.build(),
+                SearchBudget::beam(depth),
+                seed,
+            ),
             SearchSpec::BestFirst { budget, depth } => full_strength(
                 Box::new(BestFirstPlanner::new()),
                 self.eval.build(),
@@ -179,6 +207,252 @@ fn full_strength(
     ))
 }
 
+/// Reward = exactly `λ ×` attack sent (the engine's guideline table, chain-exact
+/// via `EvalContext`) on top of the attack-tuned board Value: CC2's shaped clear
+/// tables are zeroed so the search optimizes the APP objective itself within its
+/// horizon. `wasted_t` / `has_back_to_back` stay at CC2's values — they are setup
+/// priors encoding beyond-horizon value a single placement's attack can't see.
+fn attack_true(lambda: f32) -> Cc2Weights {
+    Cc2Weights {
+        attack: lambda,
+        normal_clears: [0.0; 5],
+        mini_spin_clears: [0.0; 3],
+        spin_clears: [0.0; 4],
+        back_to_back_clear: 0.0,
+        combo_attack: 0.0,
+        perfect_clear: 0.0,
+        perfect_clear_override: false,
+        ..Cc2Weights::attack_tuned()
+    }
+}
+
+/// The climb's v3 accept (see the climb command's RUN RECORD v3) — judged and
+/// REJECTED by the race run record; registered so the records stay runnable.
+pub const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
+    -0.003_662_888_2,
+    -1.573_386_2,
+    -0.195_788_15,
+    -0.349_775_85,
+    -1.538_758_6,
+    -5.149_458,
+    0.357_563_6,
+    0.096_651_86,
+    1.550_793,
+    4.478_138_4,
+    3.782_923,
+];
+
+/// The bot registry: every named instance, as code. Names are kebab-case and
+/// permanent once a run cites them.
+pub fn bots() -> Vec<(&'static str, BotSpec)> {
+    vec![
+        ("greedy", BotSpec::greedy()),
+        ("dt20", BotSpec::beam(16, 2)),
+        ("cc2-default", BotSpec::beam(16, 2).cc2(Cc2Weights::DEFAULT)),
+        (
+            "attack-tuned",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "cc2-default-blind",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::DEFAULT).blind(),
+        ),
+        (
+            "attack-tuned-blind",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()).blind(),
+        ),
+        (
+            "bf-192",
+            BotSpec::best_first(192, 6).cc2(Cc2Weights::DEFAULT),
+        ),
+        (
+            "v3-candidate",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned().with_board_params(&V3_CANDIDATE)),
+        ),
+        (
+            // Depth-3 candidate: same attack-tuned eval, one ply deeper —
+            // the "deeper search" lever from the v3 epilogue.
+            "attack-tuned-d3",
+            BotSpec::beam(16, 3).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The APP depth/width ladder (post-bitboard re-map: the old d6w32 ≈ 0.67
+        // plateau was measured pre-perf-strike, and its d8 point was width-16).
+        (
+            "attack-tuned-d4",
+            BotSpec::beam(16, 4).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d6",
+            BotSpec::beam(16, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-d8w32",
+            BotSpec::beam(32, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Engine-true attack reward (λ = 1), shaped tables zeroed — the
+        // objective-in-the-search hypothesis, at matched configs for clean A/Bs.
+        // RESULT 2026-06-12: LOSES at both configs (0.434 vs 0.572 @ d3, 0.618
+        // vs 0.721 @ d6w32) — CC2's shaping carries beyond-horizon value.
+        ("attack-true-d3", BotSpec::beam(16, 3).cc2(attack_true(1.0))),
+        (
+            "attack-true-d6w32",
+            BotSpec::beam(32, 6).cc2(attack_true(1.0)),
+        ),
+        // --- probe-* : single-lever APP hypotheses at the d6w32 incumbent ----
+        // The exploratory tier (screened on TRAIN marathon; most will lose —
+        // they are the lab notebook, immutable like every cited name).
+        // RESULTS (TRAIN, incumbent 0.7211): every eval-side lever loses or
+        // ties — mix05 0.7000, mix1 0.6800, combo4 0.7033, well1 0.6878,
+        // pc40 0.7211 (identical games: the PC branch never decides at this
+        // depth), spin2x 0.6678. Consistent with the d4 climb's null verdict:
+        // attack_tuned is locally optimal for this metric; search class is
+        // the lever that moves (see the bf probes below).
+        // Mixture: engine-true attack ADDED to the intact shaped tables, so
+        // chain continuation (combo staircase, B2B +1) is valued at true scale.
+        (
+            "probe-mix05-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                attack: 0.5,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        (
+            "probe-mix1-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                attack: 1.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Combo emphasis beyond CC2's 1.5 (the engine resumes real combos now).
+        (
+            "probe-combo4-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                combo_attack: 4.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Deeper tetris well (the recorded offense↔survival trade-off knob).
+        (
+            "probe-well1-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                tetris_well_depth: 1.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Perfect-clear hunter (PC = +10 attack, the table's biggest prize).
+        (
+            "probe-pc40-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                perfect_clear: 40.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Spin emphasis: clear rewards and slot Value both doubled.
+        (
+            "probe-spin2x-d6w32",
+            BotSpec::beam(32, 6).cc2(Cc2Weights {
+                spin_clears: [0.0, 2.0, 8.0, 12.0],
+                tslot: [0.2, 3.0, 8.93, 8.0],
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Best-first at research budgets (never re-tested post-bitboard; the
+        // recorded result: beats the beam per node and scales with budget).
+        (
+            "probe-bf1k-d8",
+            BotSpec::best_first(1000, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-d8",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The bf axis fired (1k: 0.7433, 2k: 0.7822 vs beam d6w32's 0.7211 on
+        // TRAIN) — scale budget, depth, and the eval interaction.
+        // ROUND-2 RESULTS (TRAIN): bf4k 0.7278 — budget scaling is
+        // NON-monotone (more search converges to the EVAL's optimum, not
+        // APP's); bf2k-d10 byte-identical to bf2k-d8 (the depth cap never
+        // binds at 2k nodes — identical floats); combo4 0.7600 (the eval is
+        // locally optimal, third confirmation).
+        (
+            "probe-bf4k-d8",
+            BotSpec::best_first(4000, 8).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-d10",
+            BotSpec::best_first(2000, 10).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-combo4",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights {
+                combo_attack: 4.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Transposition-pruned beam (ported from the codex-agent worktree,
+        // 2026-06-12; its claim: w128/d9 = 0.8289 APP on its own 24-seed
+        // holdout — receipt-less, so reproduced here under full discipline).
+        // tp32d6 isolates the dedup delta at the beam incumbent's config;
+        // tp128d6 isolates width-under-dedup; tp128d9 is the claimed config.
+        // REPRODUCED: tp32d6 0.7400 TRAIN (vs plain 0.7211, AND ~20% faster —
+        // dedup shrinks frontier work); tp128d6 0.7767 TRAIN; tp128d9 0.8256
+        // TRAIN / **0.8225 HOLDOUT** (run 20260612-083859-marathon-holdout-
+        // 24880) — the session champion; three disjoint seed sets agree
+        // within ±0.006.
+        (
+            "probe-tp32d6",
+            BotSpec::tp_beam(32, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp128d6",
+            BotSpec::tp_beam(128, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp128d9",
+            BotSpec::tp_beam(128, 9).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
+        // saturates" lesson predates this engine), and PC-hunting where the
+        // search can actually see 7-piece PC lines.
+        (
+            "probe-w64d6",
+            BotSpec::beam(64, 6).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-bf2k-pc40",
+            BotSpec::best_first(2000, 8).cc2(Cc2Weights {
+                perfect_clear: 40.0,
+                ..Cc2Weights::attack_tuned()
+            }),
+        ),
+        // Toy-sized twins for the smoke gate (seconds, not minutes).
+        (
+            "attack-tuned-tiny",
+            BotSpec::beam(4, 1).cc2(Cc2Weights::attack_tuned()),
+        ),
+        ("dt20-tiny", BotSpec::beam(4, 1)),
+    ]
+}
+
+/// A registered bot: its name travels with the spec so reports can speak
+/// names instead of weight dumps (the registry and receipt hold the rest).
+#[derive(Clone, Copy, Debug)]
+pub struct Bot {
+    pub name: &'static str,
+    pub spec: BotSpec,
+}
+
+/// Look a registered bot up by name.
+pub fn find(name: &str) -> Option<Bot> {
+    bots()
+        .into_iter()
+        .find(|(n, _)| *n == name)
+        .map(|(name, spec)| Bot { name, spec })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -193,6 +467,21 @@ mod tests {
             (o.plies, o.attack_a, o.attack_b, o.a_topped, o.b_topped)
         };
         assert_eq!(outcome(&spec.factory()), outcome(&spec.factory()));
+    }
+
+    /// At depth 1 every frontier node is its own ply-1 root, so transposition
+    /// pruning has nothing to collapse: the TP beam must reproduce the plain
+    /// beam exactly (the no-op edge of header pin 5, witnessed end-to-end).
+    #[test]
+    fn tp_beam_depth1_matches_plain_beam() {
+        let plain = BotSpec::beam(4, 1).cc2(Cc2Weights::attack_tuned());
+        let tp = BotSpec::tp_beam(4, 1).cc2(Cc2Weights::attack_tuned());
+        let o1 = crate::marathon::play_marathon_capped(&plain.factory(), 3, 50_000, 30);
+        let o2 = crate::marathon::play_marathon_capped(&tp.factory(), 3, 50_000, 30);
+        assert_eq!(
+            (o1.score, o1.pieces, o1.lines, o1.total_attack),
+            (o2.score, o2.pieces, o2.lines, o2.total_attack)
+        );
     }
 
     /// `.blind()` wraps the same brain: with nothing queued the play is
