@@ -17,7 +17,10 @@
 //! - **Self-bounding.** Every long-running bin honours `TIME_BUDGET_SECS` and
 //!   ends with an honest partial verdict rather than running unbounded.
 //! - **Arm-swapping + CRN.** Paired comparisons play each seed from both
-//!   chairs (seed luck and chair order cancel) on common random numbers.
+//!   chairs (seed luck and chair order cancel) on common random numbers —
+//!   and sequential verdicts treat the chair-swapped pair as ONE observation
+//!   ([`sprt`]): the two games share the seed, so counting them as
+//!   independent voids the test's error bounds.
 //! - **Death decides; the cap tiebreak is biased.** The net-attack tiebreak in
 //!   capped games is structurally anti-defensive (cancelled lines count for
 //!   nothing), so survival verdicts must come from death-decisive matches —
@@ -37,7 +40,7 @@
 //! | [`versus`] | head-to-head under the **engine's** garbage rules |
 //! | [`versus_legacy`] | the pre-engine harness scheduler, quarantined for the TBP referee + scripted scenarios |
 //! | [`behavior`] | APP / DS-P metrics across garbage scenarios |
-//! | [`sprt`] | Wald's sequential test over death-decisive matches |
+//! | [`sprt`] | pair-level GSPRT over death-decisive seed pairs |
 //! | [`bots`] | bot construction (one home for the strength conventions) |
 //! | [`seeds`] | deterministic seed sets + region discipline |
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
