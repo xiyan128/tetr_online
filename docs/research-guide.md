@@ -37,6 +37,7 @@ use tetr_core::ai::eval::Cc2Weights;
 let aware = BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned());
 let blind = aware.blind();                  // same brain, queue hidden
 let deep  = BotSpec::best_first(4000, 6);   // node-budgeted graph search
+let tp    = BotSpec::tp_beam(128, 9);       // transposition-pruned beam
 let base  = BotSpec::greedy();              // the shipped Tier-1 baseline
 
 evaluate_versus_format(&aware.factory(), &blind.factory(), &seeds, format);

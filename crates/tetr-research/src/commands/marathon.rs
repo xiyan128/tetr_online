@@ -3,6 +3,25 @@
 //! `attack_per_piece` the versus/CC2 metric; both are autoresearch parse
 //! contracts). The piece cap keeps iterations fast; score/sec stays a
 //! faithful early-game scoring-rate proxy.
+//!
+//! # RUN RECORD (2026-06-12, the APP campaign — cap 150, TRAIN / holdout)
+//!
+//! Goal: APP toward 1.0. Every gain came from SEARCH CLASS on the fixed
+//! attack-tuned eval; every eval-side lever was null (climb + 8 probes — see
+//! `bots.rs` and the app-climb header). The ladder (TRAIN, 6 seeds):
+//! dt20 0.101 → cc2-default 0.409 → attack-tuned(d2) 0.460 → d3 0.572 →
+//! d4 0.628 → d6 0.649 → d6w32 0.721 → w64d6 0.738 → bf1k-d8 0.743 →
+//! bf2k-d8 0.782 → **tp128d9 0.8256**. Holdout (16 VALIDATION seeds, one
+//! read per candidate): d6w32 0.6829, bf2k 0.7721, bf4k 0.7804 (the TRAIN
+//! bf2k>bf4k dip was 6-seed noise), **tp128d9 0.8225**
+//! (`20260612-083859-marathon-holdout-24880`) — the champion; the codex
+//! worktree's 0.8289 claim REPRODUCED under receipts (three disjoint seed
+//! sets within ±0.006). Gains are concentration, not combo-farm: attack per
+//! line rises 1.55 (d3) → 1.88 (d6w32) → 2.05 (bf2k) at flat ~57 lines/150
+//! pieces, i.e. B2B quad/T-spin play. The old ~0.67 eval+search ceiling is
+//! SUPERSEDED (it predated the bitboard strike, combo tracking, and the B2B
+//! fixes); the eval-optimum ceiling still binds past ~0.83 — beyond it the
+//! recorded map says RL/self-play, not tuning.
 
 use serde_json::json;
 

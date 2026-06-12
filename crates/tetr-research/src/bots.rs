@@ -397,6 +397,11 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
         // holdout — receipt-less, so reproduced here under full discipline).
         // tp32d6 isolates the dedup delta at the beam incumbent's config;
         // tp128d6 isolates width-under-dedup; tp128d9 is the claimed config.
+        // REPRODUCED: tp32d6 0.7400 TRAIN (vs plain 0.7211, AND ~20% faster —
+        // dedup shrinks frontier work); tp128d6 0.7767 TRAIN; tp128d9 0.8256
+        // TRAIN / **0.8225 HOLDOUT** (run 20260612-083859-marathon-holdout-
+        // 24880) — the session champion; three disjoint seed sets agree
+        // within ±0.006.
         (
             "probe-tp32d6",
             BotSpec::tp_beam(32, 6).cc2(Cc2Weights::attack_tuned()),

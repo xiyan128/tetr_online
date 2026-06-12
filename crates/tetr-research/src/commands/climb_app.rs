@@ -27,10 +27,17 @@
 //! unbounded one). Promotion stays manual by design: register the printed
 //! params as a new named bot, then race it.
 //!
-//! # RUN RECORD (2026-06-12, campaign `app-1p0`, subject attack-tuned-d6w32)
+//! # RUN RECORD (2026-06-12, campaign `app-1p0`, subject attack-tuned-d4)
 //!
-//! See `bots.rs::APP_1P0_*` once registered; records land here after the first
-//! recorded climb.
+//! The first recorded climb (600 s, run `20260612-075448-app-climb-80407`,
+//! commit d67b402): 403 iters, 25 accepts, held-out **0.5971 → 0.6033**
+//! (+0.006 ≈ noise) — a NULL result, and a diagnostic one. σ collapsed to the
+//! then-0.01 floor within ~40 iters (see the `sigma_decay` field doc), and the
+//! same session's single-lever probes (`bots.rs`, probe-*) independently found
+//! every eval-side direction loses or ties at the d6w32 incumbent: the
+//! attack-tuned weights are locally optimal for censored APP. The lever that
+//! moved APP all session was SEARCH CLASS (depth → width → best-first →
+//! transposition-pruned beam), not weights — spend climb budget there first.
 
 use std::io;
 use std::time::Instant;
