@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# End-to-end smoke of the agent research loop: a tiny climb writes its run
+# ledger, stops at an iteration cap, RESUMEs from the checkpoint, and the
+# promotion panel renders a verdict; a config-strictness probe rounds it
+# out. Debug build, ~a minute. Run before unleashing autonomous campaigns
+# and after touching the climb / ledger / sprt plumbing.
+set -euo pipefail
+cd "$(git rev-parse --show-toplevel)"
+
+CAMPAIGN="smoke-$(date +%s)"
+TINY=(TIME_BUDGET_SECS=600 SEEDS=2 VAL_SEEDS=2 MAX_PLIES=16 BEAM_DEPTH=1
+      BEAM_WIDTH=4 CONFIRM_MATCHES=0 ANCHOR_MATCHES=0 ANCHOR_EVERY=2
+      ACCEPT_MARGIN=0 CAMPAIGN="$CAMPAIGN")
+
+fail() { echo "research-smoke: FAIL — $*" >&2; exit 1; }
+
+echo "== climb (2 iters, campaign $CAMPAIGN)"
+CLIMB_LOG=$(env "${TINY[@]}" MAX_ITERS=2 \
+    cargo run -q -p tetr-research --bin versus_climb 2>&1) ||
+    fail "first climb run errored: $CLIMB_LOG"
+RUN_DIR=$(sed -n 's/.*resume with RESUME=//p' <<<"$CLIMB_LOG")
+[[ -n "$RUN_DIR" ]] || fail "no RESUME hint in climb output"
+for f in spec.json outcomes.jsonl checkpoint.json summary.json; do
+    [[ -f "$RUN_DIR/$f" ]] || fail "ledger artifact missing: $RUN_DIR/$f"
+done
+grep -q "\"$CAMPAIGN\"" "$RUN_DIR/spec.json" || fail "campaign id not in spec.json"
+grep -q '^best_params ' <<<"$CLIMB_LOG" || fail "no best_params line"
+
+echo "== resume from $RUN_DIR"
+RESUME_LOG=$(env "${TINY[@]}" MAX_ITERS=2 RESUME="$RUN_DIR" \
+    cargo run -q -p tetr-research --bin versus_climb 2>&1) ||
+    fail "resumed climb errored: $RESUME_LOG"
+grep -q "RESUMED from $RUN_DIR at iter 2" <<<"$RESUME_LOG" ||
+    fail "resume did not continue from iter 2"
+grep -Eq 'iter 4 \| screen' <<<"$RESUME_LOG" || fail "resume did not reach iter 4"
+
+echo "== promotion panel (null check: candidate = origin must NOT promote)"
+PROMOTE_LOG=$(env CAMPAIGN="$CAMPAIGN" CELL_MATCHES=4 MAX_PLIES=16 \
+    BEAM_DEPTH=1 BEAM_WIDTH=4 TIME_BUDGET_SECS=600 \
+    cargo run -q -p tetr-research --bin promote 2>&1) ||
+    fail "promote errored: $PROMOTE_LOG"
+grep -q '^promote_verdict REJECT' <<<"$PROMOTE_LOG" ||
+    fail "null-check candidate was not rejected"
+
+echo "== config strictness (a malformed value must exit 2, not run)"
+set +e
+env BENCH_SEEDS=nope cargo run -q -p tetr-research --bin metric >/dev/null 2>&1
+CODE=$?
+set -e
+[[ "$CODE" -eq 2 ]] || fail "BENCH_SEEDS=nope exited $CODE, want 2"
+
+echo "research-smoke: PASS (campaign $CAMPAIGN, first run $RUN_DIR)"
