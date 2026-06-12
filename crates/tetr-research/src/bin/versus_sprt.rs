@@ -15,14 +15,23 @@
 //! default.
 //!
 //! Env: TIME_BUDGET_SECS (3600), BLOCK_SEEDS (8 ⇒ 16 matches/block), P1
-//!      (0.55), RAIN_PERIOD (8), MAX_PLIES (240), BEAM_DEPTH (2), BEAM_WIDTH
-//!      (16), SEED_BASE (regions::SPRT = 16384 — see `seeds::regions` for the
-//!      full partition; disjoint from the climb's regions by construction).
+//!      (0.55), ALPHA (0.05), BETA (0.05), RAIN_PERIOD (8), MAX_PLIES (240),
+//!      BEAM_DEPTH (2), BEAM_WIDTH (16), SEED_BASE (regions::SPRT = 16384 —
+//!      see `seeds::regions` for the full partition; disjoint from the
+//!      climb's regions by construction).
 //!
 //! NOTE: the RUN RECORD above was produced with the then-default
 //! BLOCK_SEEDS=8 (pre-parallelism). The default is now 24 (pool-saturating);
 //! the verdict stands, and re-deriving the exact LLR trajectory needs
 //! BLOCK_SEEDS=8.
+//!
+//! TEST MOVED TO SEED PAIRS (2026-06-11): the racer now scores the
+//! chair-swapped double game as ONE observation (pair-level GSPRT — see
+//! [`tetr_research::sprt`] for why per-game Bernoulli walks void their α
+//! under within-pair correlation). The RUN RECORD's LLR trajectory was the
+//! per-game walk, reproducible only at the pre-pair commit; its H0 verdict
+//! stands (the v3 candidate was also rejected by held-out validation, and
+//! the correction only tightens what the old test would let through).
 
 use std::time::{Duration, Instant};
 
@@ -60,6 +69,8 @@ fn main() {
     };
     let config = SprtConfig {
         p1: env_f64("P1", 0.55),
+        alpha: env_f64("ALPHA", 0.05),
+        beta: env_f64("BETA", 0.05),
         block_seeds: env_usize("BLOCK_SEEDS", 8),
         seed_base: env_usize("SEED_BASE", regions::SPRT),
         max_matches: u32::MAX,
@@ -75,8 +86,8 @@ fn main() {
         .factory();
 
     println!(
-        "SPRT: v3 candidate vs attack_tuned | H0 p=0.5, H1 p={} | beam d{depth} w{width}, \
-         rain {}, {} plies, blocks of {} seeds (x2 orientations) | budget {budget_secs}s",
+        "pair-GSPRT: v3 candidate vs attack_tuned | H0 p=0.5, H1 p={} | beam d{depth} w{width}, \
+         rain {}, {} plies, blocks of {} seeds (x2 orientations = paired) | budget {budget_secs}s",
         config.p1, format.rain_period, format.max_plies, config.block_seeds
     );
 
@@ -92,16 +103,26 @@ fn main() {
     };
     println!(
         "\nVERDICT: {verdict}\n\
-         decisive {}-{} of {} matches ({} ties/caps) | LLR {:+.3} | mean margin {:+.2} | {}s",
+         decisive {}-{} of {} matches / {} pairs ({} ties/caps) | pair scores [-2..+2] {:?} | \
+         LLR {:+.3} (trinomial cross-check {:+.3}) | within-pair corr {} | \
+         mean margin {:+.2} | {}s",
         report.wins,
         report.losses,
         report.matches,
+        report.pairs,
         report.ties,
+        report.pair_counts,
         report.llr,
+        report.trinomial_llr,
+        report
+            .pair_correlation
+            .map_or("n/a".to_string(), |c| format!("{c:+.2}")),
         report.mean_margin,
         start.elapsed().as_secs()
     );
     println!("sprt_llr {:.4}", report.llr);
+    println!("sprt_trinomial_llr {:.4}", report.trinomial_llr);
+    println!("sprt_pairs {}", report.pairs);
     println!("sprt_wins {}", report.wins);
     println!("sprt_losses {}", report.losses);
 }
