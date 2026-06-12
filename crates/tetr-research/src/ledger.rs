@@ -3,8 +3,7 @@
 //! Tracking is deliberately not a participant in experiments: commands never
 //! see this module. The runner writes one `spec.json` RECEIPT per run (the
 //! reproducibility coordinates: experiment name, typed spec, runtime, git
-//! state) before dispatch, and the climb persists its resumable state into
-//! `checkpoint.json` (atomic replace). Anything richer — metrics sinks,
+//! state) before dispatch. Anything richer — metrics sinks,
 //! wandb-style dashboards — belongs in an observer that reads receipts and
 //! the commands' stdout machine lines, not in here.
 
@@ -18,8 +17,7 @@ use serde_json::{Value, json};
 
 const SCHEMA_VERSION: u64 = 2;
 
-/// One run's directory: a receipt, plus a checkpoint for experiments that
-/// resume.
+/// One run's directory, holding its receipt.
 pub struct RunDir {
     dir: PathBuf,
 }
@@ -47,21 +45,6 @@ impl RunDir {
         }
         write_json(&dir.join("spec.json"), &spec)?;
         Ok(Self { dir })
-    }
-
-    /// Atomically write or replace `checkpoint.json` within the run directory.
-    pub fn write_checkpoint(&self, state: Value) -> io::Result<()> {
-        let tmp = self
-            .dir
-            .join(format!("checkpoint.json.tmp-{}", std::process::id()));
-        write_json(&tmp, &state)?;
-        fs::rename(tmp, self.dir.join("checkpoint.json"))
-    }
-
-    /// Read `checkpoint.json` from an existing run directory.
-    pub fn read_checkpoint(run_dir: &Path) -> io::Result<Value> {
-        let file = File::open(run_dir.join("checkpoint.json"))?;
-        serde_json::from_reader(file).map_err(io::Error::other)
     }
 
     /// Path to this run's directory.
@@ -175,7 +158,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn receipt_and_checkpoint_round_trip() {
+    fn receipt_round_trips() {
         let root = std::env::temp_dir().join(format!(
             "tetr-research-ledger-test-{}-{}",
             std::process::id(),
@@ -191,12 +174,9 @@ mod tests {
             json!({"experiment": "ledger-test", "spec": {"kind": "test"}}),
         )
         .unwrap();
-        run.write_checkpoint(json!({"step": 1})).unwrap();
-        run.write_checkpoint(json!({"step": 2})).unwrap();
 
         let dir = run.dir().to_path_buf();
         assert!(dir.join("spec.json").is_file());
-        assert_eq!(RunDir::read_checkpoint(&dir).unwrap()["step"], 2);
         let spec: Value =
             serde_json::from_reader(File::open(dir.join("spec.json")).unwrap()).unwrap();
         assert_eq!(spec["experiment"], "ledger-test");

@@ -54,7 +54,6 @@ evaluate_versus_format(&aware.factory(), &blind.factory(), &seeds, format);
 | `marathon::evaluate[_capped]` | solo Marathon | score/sec, APP |
 | `downstack::evaluate_downstack` | seeded cheese | censored pieces (optimization), clear rate, cleared-only pieces and attack (context) |
 | `versus::evaluate_versus[_format]` | head-to-head, engine garbage rules | wins, deaths, net attack |
-| `behavior::evaluate_scenario` | scripted pressure scenarios | APP, DS/P, survival, clear histogram |
 | `sprt::sprt_race` | sequential survival test | H1 / H0 / inconclusive + LLR |
 
 `VersusFormat { max_plies, rain_period }`: rain queues one cancellable line to
@@ -77,8 +76,8 @@ binary pairs them at the prompt:
 cargo run --release -p tetr-research -- run downstack dt20
 cargo run --release -p tetr-research -- run versus cc2-default dt20
 cargo run --release -p tetr-research -- run race v3-candidate attack-tuned
-cargo run --release -p tetr-research -- run cc2-board-climb
-cargo run --release -p tetr-research -- resume <run-dir>
+cargo run --release -p tetr-research --bin tetr-climb -- climb cc2-board-v4
+cargo run --release -p tetr-research --bin tetr-climb -- panel default <candidate>
 ```
 
 A recorded result reproduces from `(commit, eval, bots…)` — all names, all
@@ -86,15 +85,16 @@ stamped into the run receipt. Want different parameters or a new candidate?
 Register a new name — a climbed candidate is ONE bot registration, after
 which it is raceable, panelable, and benchmarkable at the prompt. Never
 mutate a name with recorded runs; `resume` refuses a drifted spec and
-dirty-tree runs are stamped in the receipt. Two things stay in-spec rather
-than at the prompt: the climb's `subject` (a campaign's origin is pinned)
-and the panel's opponent bars (they define the gate; only the candidate is
-positional). The only flags are machine-local: `--budget-secs`,
-`--max-iters` (how much of the deterministic walk this invocation
-materializes), `--cc2-bin`, `--runs-root`. Tracking is not a participant:
-the runner writes one `spec.json` receipt per run, the climb checkpoints
-for resume, and anything richer (a wandb-style sink) would observe receipts
-+ stdout without touching a command.
+dirty-tree runs are stamped in the receipt. Optimizers are a separate
+binary: `tetr-climb` runs named climb/panel configurations from
+`src/search/mod.rs` (the climb's `subject` and the panel's opponent bars
+stay in-spec — a campaign's origin is pinned and the bars define the gate).
+There is no resume: an interrupted climb is simply rerun — the walk replays
+deterministically from its spec. The only flags are machine-local:
+`--budget-secs`, `--max-iters`, `--cc2-bin`, `--runs-root`. Tracking is not
+a participant: the runner writes one `spec.json` receipt per run; anything
+richer (a wandb-style sink) would observe receipts + stdout without
+touching a command.
 
 **Daily drivers**
 
@@ -104,20 +104,18 @@ for resume, and anything richer (a wandb-style sink) would observe receipts
   `run downstack dt20` are the /autoresearch parse contracts. Awareness A/Bs
   are versus with a blinded twin: `run versus cc2-default cc2-default-blind`
   (mirrors are bland without rain — the decisiveness dial).
-- **`behavior`**: the APP/DS-P suite across the standard scenarios;
-  custom-weight arms are registered bots, not knobs.
 
 **Versus science**
 
-- **`cc2-board-climb`** (and your campaign's entries): the (1+1)-ES weight
-  climb with the three-stage gate chain — a fresh-block screen
+- **`tetr-climb climb cc2-board-v4`** (and your campaign's entries): the
+  (1+1)-ES weight climb with the three-stage gate chain — a fresh-block screen
   (`accept_margin`, calibrate to ~2σ ≈ 150 at 48 matches), a per-accept SPRT
   confirmation race (`confirm_matches`, 0 disables; `confirm_alpha` 0.02),
   and every `anchor_every` confirmed accepts an anchor race against the last
   *verified* point that re-anchors on H1 and ROLLS BACK on H0 — so
   confirmation-alpha accumulation buys noise for at most one anchor window,
-  never the campaign. Each spec names its campaign, checkpoints every
-  iteration, and `resume <run-dir>` continues the walk bit-identically. Read
+  never the campaign. Each spec names its campaign; interrupted
+  walks are rerun (deterministic replay from `climb_seed`). Read
   the run records in the climb command's header before climbing; each
   documents a failure mode (seed overfit, noise acceptance, …) the current
   design retires.
@@ -127,12 +125,12 @@ for resume, and anything richer (a wandb-style sink) would observe receipts
   within-pair correlation; the `sprt` module header carries the simulation
   receipts). ~5 min to resolve a true 0.5/0.55 at default settings; an
   in-budget inconclusive means the effect is small. That *is* the answer.
-- **`panel`**: the promotion panel — `run panel <candidate>`, the only gate
+- **`tetr-climb panel default <candidate>`**: the promotion panel, the only gate
   from "my climb accepted it" to "it is the better bot". The candidate races
   the spec's NAMED opponents × rain {0, 8}, one pair-GSPRT per cell on fresh
   campaign seeds: `must_beat` opponents demand H1, `must_not_lose_to`
   opponents demand non-regression, H0 or starved evidence anywhere rejects.
-  A promotion is a bot registration plus `run panel <name>`. A spec with
+  A promotion is a bot registration plus a panel run. A spec with
   `final_validation: true` spends the never-iterated FINAL region — its own
   name, exactly once per external claim.
 

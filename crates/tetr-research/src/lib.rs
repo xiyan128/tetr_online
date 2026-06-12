@@ -47,21 +47,20 @@
 //! | module | role |
 //! |---|---|
 //! | [`registry`] | named eval specs as code (one of the two configuration surfaces) |
-//! | [`commands`] | the experiment executors behind the CLI verbs |
+//! | [`commands`] | the eval executors behind `tetr-research run` |
+//! | [`search`] | climbs + promotion panels behind `tetr-climb` |
 //! | [`marathon`] | solo scoring/APP suite (the original benchmark) |
 //! | [`downstack`] | cheese-clearing suite (digging skill, not gameable by combos) |
 //! | [`versus`] | head-to-head under the **engine's** garbage rules |
 //! | [`versus_legacy`] | the pre-engine harness scheduler, quarantined for the TBP referee + scripted scenarios |
-//! | [`behavior`] | APP / DS-P metrics across garbage scenarios |
 //! | [`sprt`] | pair-level GSPRT over death-decisive seed pairs |
 //! | [`bots`] | bot construction + the named bot registry (the other surface) |
 //! | [`seeds`] | deterministic seed sets + region discipline |
 //! | [`cc2`] | TBP client for baselining Cold Clear 2 as a subprocess |
 //! | [`rng`] | the dependency-free deterministic PRNG (SplitMix64) |
 //! | [`progress`] | stderr progress bars (cosmetic only, hidden off-TTY) |
-//! | [`ledger`] | run receipts + resume checkpoints |
+//! | [`ledger`] | run receipts |
 
-pub mod behavior;
 pub mod bots;
 pub mod cc2;
 pub mod commands;
@@ -71,6 +70,7 @@ pub mod marathon;
 pub mod progress;
 pub mod registry;
 pub mod rng;
+pub mod search;
 pub mod seeds;
 pub mod sprt;
 pub mod versus;

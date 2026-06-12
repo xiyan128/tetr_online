@@ -8,42 +8,32 @@
 //!   entry. A command is `run(spec, bots…, rt)`: measurement in, machine
 //!   lines on stdout, context on stderr, nothing else.
 //! - **Tracking** is not a participant: the runner writes the receipt
-//!   ([`crate::ledger`]) before dispatch; only the climb touches a run
-//!   directory, and only for its resume checkpoint.
+//!   ([`crate::ledger`]) before dispatch; commands never see it.
 //!
-//! The climb is the one non-eval: an optimizer that MUTATES a subject bot's
-//! params against an objective, gated by screen → confirm → anchor.
+//! Optimizers are NOT here: climbs and panels live behind the `tetr-climb`
+//! binary ([`crate::search`]), wrapping these primitives.
 
 use std::path::PathBuf;
 use std::time::Duration;
 
 use tetr_core::ai::Cc2Weights;
 
-pub mod behavior;
 pub mod cc2_baseline;
-pub mod climb;
 pub mod downstack;
 pub mod marathon;
-pub mod panel;
 pub mod race;
 pub mod versus;
 
 /// Machine-local circumstances of one invocation — everything here may vary
 /// between hosts and runs of the SAME experiment without changing what the
-/// experiment *is*. Budgets gate stopping points only (a budget-cut walk is
-/// a prefix of the unbounded one; `resume` continues it bit-identically).
+/// experiment *is*. Budgets gate stopping points only (a
+/// budget-cut run is a prefix of the unbounded one).
 #[derive(Clone, Debug, Default, serde::Serialize)]
 pub struct Runtime {
     /// Wall-clock bound override; each command documents its default.
     pub budget_secs: Option<u64>,
-    /// Climb only: new iterations allowed this invocation (0 = unbounded).
-    pub max_iters: u32,
     /// Path to a Cold Clear 2 binary (`cc2-baseline` only; machine-local).
     pub cc2_bin: Option<PathBuf>,
-    /// Set by the `resume` verb: the prior run directory whose checkpoint
-    /// this invocation continues.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub resume_from: Option<PathBuf>,
 }
 
 impl Runtime {

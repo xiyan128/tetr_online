@@ -42,9 +42,6 @@ struct RuntimeArgs {
     /// Wall-clock budget in seconds (each eval documents its default).
     #[arg(long)]
     budget_secs: Option<u64>,
-    /// Climbs: new iterations this invocation (0 = unbounded).
-    #[arg(long, default_value_t = 0)]
-    max_iters: u32,
     /// Path to a Cold Clear 2 build (`cc2-baseline-*` evals).
     #[arg(long)]
     cc2_bin: Option<PathBuf>,
@@ -61,12 +58,6 @@ enum Command {
         eval: String,
         /// The bot name(s) the eval's slots need (src/bots.rs).
         bots: Vec<String>,
-        #[command(flatten)]
-        rt: RuntimeArgs,
-    },
-    /// Continue an interrupted climb from its run directory.
-    Resume {
-        run_dir: PathBuf,
         #[command(flatten)]
         rt: RuntimeArgs,
     },
@@ -98,7 +89,6 @@ fn execute(
     entry: &registry::Entry,
     bot_names: &[String],
     args: &RuntimeArgs,
-    resume: Option<PathBuf>,
 ) -> std::io::Result<()> {
     if bot_names.len() != entry.experiment.bot_slots() {
         die(&format!(
@@ -112,11 +102,9 @@ fn execute(
     let bots: Vec<Bot> = bot_names.iter().map(|n| bot_or_die(n)).collect();
     let rt = Runtime {
         budget_secs: args.budget_secs,
-        max_iters: args.max_iters,
         cc2_bin: args.cc2_bin.clone(),
-        resume_from: resume,
     };
-    let run_dir = RunDir::create(
+    RunDir::create(
         args.runs_root.as_deref(),
         entry.name,
         json!({
@@ -129,59 +117,17 @@ fn execute(
 
     use Experiment::*;
     let bot = |i: usize| bots[i];
-    match (&entry.experiment, &rt.resume_from.clone()) {
-        (Climb(spec), Some(prior)) => commands::climb::resume(spec, &rt, prior, &run_dir),
-        (_, Some(_)) => die("only climbs carry checkpoints; `resume` works on climb runs"),
-        (Climb(spec), None) => commands::climb::run(spec, &rt, &run_dir),
-        (Marathon(spec), None) => commands::marathon::run(spec, &bot(0), &rt),
-        (Downstack(spec), None) => commands::downstack::run(spec, &bot(0), &rt),
-        (Versus(spec), None) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
-        (Behavior(spec), None) => commands::behavior::run(spec, &bot(0), &rt),
-        (Race(spec), None) => commands::race::run(spec, &bot(0), &bot(1), &rt),
-        (Panel(spec), None) => commands::panel::run(spec, &bot(0), &rt),
-        (Cc2Baseline(spec), None) => commands::cc2_baseline::run(spec, &rt),
+    match &entry.experiment {
+        Marathon(spec) => commands::marathon::run(spec, &bot(0), &rt),
+        Downstack(spec) => commands::downstack::run(spec, &bot(0), &rt),
+        Versus(spec) => commands::versus::run(spec, &bot(0), &bot(1), &rt),
+        Race(spec) => commands::race::run(spec, &bot(0), &bot(1), &rt),
+        Cc2Baseline(spec) => commands::cc2_baseline::run(spec, &rt),
     }
 }
 
 fn main() -> std::io::Result<()> {
     match Cli::parse().command {
-        Command::Run { eval, bots, rt } => execute(&find_or_die(&eval), &bots, &rt, None),
-        Command::Resume { run_dir, rt } => {
-            // The receipt names the eval and its bots and freezes the spec; a
-            // drifted registry entry is refused — register a new name instead
-            // of mutating one with recorded runs.
-            let spec_path = run_dir.join("spec.json");
-            let stored: serde_json::Value = std::fs::File::open(&spec_path)
-                .map_err(|e| {
-                    die(&format!("cannot open {}: {e}", spec_path.display()));
-                })
-                .and_then(|f| {
-                    serde_json::from_reader(f)
-                        .map_err(|e| die(&format!("{} does not parse: {e}", spec_path.display())))
-                })
-                .unwrap();
-            let name = stored["experiment"]
-                .as_str()
-                .unwrap_or_else(|| die("this run predates the registry; resume it by hand"));
-            let entry = find_or_die(name);
-            let current = registry::spec_json(&entry.experiment);
-            if stored["spec"] != current {
-                die(&format!(
-                    "registry entry '{name}' changed since this run was recorded;\n\
-                     register the changed configuration under a NEW name, or check out\n\
-                     the run's commit. stored:\n{}\ncurrent:\n{}",
-                    stored["spec"], current
-                ));
-            }
-            let bots: Vec<String> = stored["bots"]
-                .as_array()
-                .map(|a| {
-                    a.iter()
-                        .filter_map(|v| v.as_str().map(str::to_string))
-                        .collect()
-                })
-                .unwrap_or_default();
-            execute(&entry, &bots, &rt, Some(run_dir))
-        }
+        Command::Run { eval, bots, rt } => execute(&find_or_die(&eval), &bots, &rt),
     }
 }

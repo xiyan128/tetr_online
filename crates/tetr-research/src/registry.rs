@@ -14,12 +14,10 @@
 //! whose stored spec no longer matches its entry, and a dirty working tree
 //! is stamped into every receipt.
 //!
-//! Two deliberate exceptions to bots-at-the-prompt: the climb names its
-//! `subject` in-spec (a campaign's origin is pinned — the same campaign must
-//! never climb from two origins), and the panel names its opponent bars
-//! in-spec (they define the gate; only the candidate is yours to pass).
+//! Optimizers are not evals: climbs and panels live in [`crate::search`]
+//! behind the `tetr-climb` binary.
 
-use crate::commands::{behavior, cc2_baseline, climb, downstack, marathon, panel, race, versus};
+use crate::commands::{cc2_baseline, downstack, marathon, race, versus};
 
 /// One runnable eval: a name, a one-line description, and its spec.
 #[derive(Clone, Debug)]
@@ -37,10 +35,7 @@ pub enum Experiment {
     Marathon(marathon::Spec),
     Downstack(downstack::Spec),
     Versus(versus::Spec),
-    Behavior(behavior::Spec),
     Race(race::Spec),
-    Panel(panel::Spec),
-    Climb(climb::Spec),
     Cc2Baseline(cc2_baseline::Spec),
 }
 
@@ -49,7 +44,7 @@ impl Experiment {
     pub fn bot_slots(&self) -> usize {
         match self {
             Experiment::Versus(_) | Experiment::Race(_) => 2,
-            Experiment::Climb(_) | Experiment::Cc2Baseline(_) => 0,
+            Experiment::Cc2Baseline(_) => 0,
             _ => 1,
         }
     }
@@ -59,8 +54,7 @@ impl Experiment {
         match self {
             Experiment::Versus(_) => "<bot-a> <bot-b>",
             Experiment::Race(_) => "<candidate> <incumbent>",
-            Experiment::Climb(_) | Experiment::Cc2Baseline(_) => "",
-            Experiment::Panel(_) => "<candidate>",
+            Experiment::Cc2Baseline(_) => "",
             _ => "<bot>",
         }
     }
@@ -72,10 +66,6 @@ fn e(name: &'static str, about: &'static str, experiment: Experiment) -> Entry {
         about,
         experiment,
     }
-}
-
-fn s(name: &str) -> String {
-    name.to_string()
 }
 
 /// The catalog. Names with recorded runs are permanent.
@@ -99,32 +89,9 @@ pub fn entries() -> Vec<Entry> {
             Versus(versus::Spec::default()),
         ),
         e(
-            "behavior",
-            "APP / DS-P suite across the standard garbage scenarios",
-            Behavior(behavior::Spec::default()),
-        ),
-        e(
             "race",
             "pair-GSPRT survival verdict (`run race <candidate> attack-tuned`)",
             Race(race::Spec::default()),
-        ),
-        e(
-            "panel",
-            "promotion panel: candidate vs in-spec opponent bars (scratch campaign)",
-            Panel(panel::Spec::default()),
-        ),
-        // --- optimizers (subject pinned in-spec) ----------------------------
-        e(
-            "cc2-board-climb",
-            "the production (1+1)-ES board-param climb from attack-tuned: \
-             v3-calibrated screen (margin 150, sigma 0.08), confirm α=0.02, \
-             anchored — campaign cc2-board-v4",
-            Climb(climb::Spec {
-                campaign: s("cc2-board-v4"),
-                accept_margin: 150.0,
-                sigma: 0.08,
-                ..climb::Spec::default()
-            }),
         ),
         // --- external referee ------------------------------------------------
         e(
@@ -138,37 +105,6 @@ pub fn entries() -> Vec<Entry> {
             Cc2Baseline(cc2_baseline::Spec::mode(cc2_baseline::Mode::Downstack)),
         ),
         // --- smoke (the research-smoke gate; deliberately tiny) --------------
-        e(
-            "smoke-climb",
-            "tiny anchored climb for the smoke gate (seconds; campaign smoke)",
-            Climb(climb::Spec {
-                campaign: s("smoke"),
-                subject: s("attack-tuned-tiny"),
-                format: crate::versus::VersusFormat {
-                    max_plies: 16,
-                    rain_period: 4,
-                },
-                screen_seeds: 2,
-                val_seeds: 2,
-                accept_margin: 0.0,
-                confirm_matches: 0,
-                anchor_every: 2,
-                anchor_matches: 0,
-                ..climb::Spec::default()
-            }),
-        ),
-        e(
-            "smoke-panel",
-            "tiny promotion panel for the smoke gate (starved cells must REJECT)",
-            Panel(panel::Spec {
-                campaign: s("smoke"),
-                must_beat: vec![s("greedy")],
-                must_not_lose_to: vec![s("attack-tuned-tiny")],
-                cell_matches: 4,
-                max_plies: 16,
-                ..panel::Spec::default()
-            }),
-        ),
         e(
             "smoke-downstack",
             "downstack at 4 seeds (the parse-contract canary)",
@@ -212,29 +148,6 @@ mod tests {
         }
     }
 
-    /// The two in-spec bot references (climb subjects, panel bars) must
-    /// resolve — a typo here would otherwise die mid-run instead of in CI.
-    #[test]
-    fn in_spec_bot_names_resolve() {
-        let check = |entry: &str, name: &str| {
-            assert!(
-                bots::find(name).is_some(),
-                "{entry}: bot {name:?} is not registered"
-            );
-        };
-        for entry in entries() {
-            match &entry.experiment {
-                Experiment::Climb(spec) => check(entry.name, &spec.subject),
-                Experiment::Panel(spec) => {
-                    for opp in spec.must_beat.iter().chain(&spec.must_not_lose_to) {
-                        check(entry.name, opp);
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
-
     /// Bot names are unique too (the other registry).
     #[test]
     fn bot_names_are_unique() {
@@ -265,16 +178,7 @@ mod tests {
     /// renaming them breaks scripts silently — fail here instead.
     #[test]
     fn load_bearing_names_exist() {
-        for name in [
-            "smoke-climb",
-            "smoke-panel",
-            "smoke-downstack",
-            "marathon",
-            "downstack",
-            "race",
-            "panel",
-            "cc2-board-climb",
-        ] {
+        for name in ["smoke-downstack", "marathon", "downstack", "versus", "race"] {
             assert!(find(name).is_some(), "missing load-bearing entry {name}");
         }
     }

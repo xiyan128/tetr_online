@@ -87,14 +87,12 @@
 //! verdicts stand — as do the env-var-era invocations this CLI replaced
 //! (2026-06-12; the knobs map 1:1 onto [`Spec`] fields).
 
-use std::path::Path;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 use crate::bots::{self, BotSpec, EvalSpec, SearchSpec};
-use crate::commands::{BoardParams, Runtime};
-use crate::ledger::RunDir;
+use crate::commands::BoardParams;
 use crate::rng::SplitMix64;
 use crate::seeds::{Campaign, seed_set, seed_set_from};
 use crate::sprt::{SprtConfig, SprtReport, SprtVerdict, sprt_race};
@@ -187,7 +185,7 @@ const DEFAULT_BUDGET_SECS: u64 = 1800;
 /// The walk's complete resumable state — everything the next iteration reads.
 /// A checkpointed state plus the same spec reproduces the uninterrupted
 /// trajectory bit-for-bit (the RNG is carried as its raw word).
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Serialize)]
 struct ClimbState {
     schema_version: u64,
     campaign: String,
@@ -200,9 +198,6 @@ struct ClimbState {
     best_params: BoardParams,
     origin_params: BoardParams,
     anchored_params: BoardParams,
-    /// Wall-clock seconds consumed by prior invocations (reporting only —
-    /// each invocation is freshly bounded by its own budget).
-    consumed_secs: u64,
 }
 
 fn fresh_state(campaign: &Campaign, subject: &Subject, sigma: f64, climb_seed: u64) -> ClimbState {
@@ -219,7 +214,6 @@ fn fresh_state(campaign: &Campaign, subject: &Subject, sigma: f64, climb_seed: u
         best_params: origin,
         origin_params: origin,
         anchored_params: origin,
-        consumed_secs: 0,
     }
 }
 
@@ -288,7 +282,6 @@ fn run_climb(
     budget: std::time::Duration,
     max_iters: u32,
     mut state: ClimbState,
-    checkpoint: Option<&RunDir>,
 ) -> (ClimbState, &'static str) {
     let start = Instant::now();
     let deadline = start + budget;
@@ -472,51 +465,19 @@ fn run_climb(
         } else {
             state.sigma = (state.sigma * 0.95).max(0.02);
         }
-
-        if let Some(dir) = checkpoint {
-            let mut snapshot = state.clone();
-            snapshot.consumed_secs += start.elapsed().as_secs();
-            let _ = dir.write_checkpoint(serde_json::to_value(&snapshot).unwrap());
-        }
     };
 
-    state.consumed_secs += start.elapsed().as_secs();
     (state, exit_reason)
 }
 
-pub fn run(spec: &Spec, rt: &Runtime, run_dir: &RunDir) -> std::io::Result<()> {
-    let subject = resolve_subject(&spec.subject);
+/// Run the walk: fresh state from the subject's weights, gates as specced,
+/// stopping at `budget` or `max_iters` (0 = unbounded). Interrupted? Rerun:
+/// the trajectory replays deterministically from `climb_seed`.
+pub fn run(spec: &Spec, budget: Option<Duration>, max_iters: u32) -> std::io::Result<()> {
+    let subject = &resolve_subject(&spec.subject);
     let campaign = Campaign::derive(&spec.campaign);
-    let state = fresh_state(&campaign, &subject, spec.sigma, spec.climb_seed);
-    drive(spec, &subject, rt, campaign, state, run_dir)
-}
-
-/// Continue an interrupted walk from `prior` (a run directory with a
-/// checkpoint). The registry-drift check happened in `main`; the campaign
-/// assert below is the in-checkpoint belt to that suspender.
-pub fn resume(spec: &Spec, rt: &Runtime, prior: &Path, run_dir: &RunDir) -> std::io::Result<()> {
-    let subject = resolve_subject(&spec.subject);
-    let campaign = Campaign::derive(&spec.campaign);
-    let checkpoint = RunDir::read_checkpoint(prior)?;
-    let state: ClimbState = serde_json::from_value(checkpoint).map_err(std::io::Error::other)?;
-    assert_eq!(
-        state.campaign, campaign.id,
-        "checkpoint belongs to campaign '{}' but the spec says '{}'",
-        state.campaign, campaign.id
-    );
-    eprintln!("RESUMED from {} at iter {}", prior.display(), state.iter);
-    drive(spec, &subject, rt, campaign, state, run_dir)
-}
-
-fn drive(
-    spec: &Spec,
-    subject: &Subject,
-    rt: &Runtime,
-    campaign: Campaign,
-    state: ClimbState,
-    run_dir: &RunDir,
-) -> std::io::Result<()> {
-    let budget = rt.budget(DEFAULT_BUDGET_SECS);
+    let state = fresh_state(&campaign, subject, spec.sigma, spec.climb_seed);
+    let budget = budget.unwrap_or(Duration::from_secs(DEFAULT_BUDGET_SECS));
     eprintln!(
         "Versus climb — campaign '{}' (slot {}) | beam(d{}, w{}) vs attack_tuned | \
          {} train seeds x2, rain {}, {} plies | budget {}s",
@@ -530,20 +491,10 @@ fn drive(
         budget.as_secs(),
     );
 
-    let (state, exit_reason) = run_climb(
-        spec,
-        subject,
-        &campaign,
-        budget,
-        rt.max_iters,
-        state,
-        Some(run_dir),
-    );
+    let (state, exit_reason) = run_climb(spec, subject, &campaign, budget, max_iters, state);
     eprintln!(
-        "climb stopped ({exit_reason}): {} iters, {} accepts | continue with `resume {}`",
-        state.iter,
-        state.accepts,
-        run_dir.dir().display()
+        "climb stopped ({exit_reason}): {} iters, {} accepts",
+        state.iter, state.accepts
     );
     println!(
         "best_params {}",
@@ -607,7 +558,7 @@ mod tests {
 
     fn tiny_spec() -> Spec {
         Spec {
-            campaign: "resume-bit-identity-test".to_string(),
+            campaign: "replay-determinism-test".to_string(),
             subject: "attack-tuned-tiny".to_string(),
             format: VersusFormat {
                 max_plies: 16,
@@ -616,78 +567,39 @@ mod tests {
             screen_seeds: 2,
             val_seeds: 2,
             rotate: true,
-            // Every screen passes: the test exercises the accept path, sigma
-            // growth, and anchor bookkeeping deterministically.
             accept_margin: f64::NEG_INFINITY,
             sigma: 0.15,
             climb_seed: 7,
             confirm_matches: 0,
             confirm_alpha: 0.02,
             anchor_every: 2,
-            // Zero-match anchor races resolve Inconclusive instantly — the
-            // bookkeeping (events, counters) still advances and checkpoints.
             anchor_matches: 0,
         }
     }
 
-    fn go(spec: &Spec, max_iters: u32, state: ClimbState) -> (ClimbState, &'static str) {
+    fn go(spec: &Spec, max_iters: u32) -> ClimbState {
         let campaign = Campaign::derive(&spec.campaign);
+        let subject = resolve_subject(&spec.subject);
+        let state = fresh_state(&campaign, &subject, spec.sigma, spec.climb_seed);
         run_climb(
             spec,
-            &resolve_subject(&spec.subject),
+            &subject,
             &campaign,
             Duration::from_secs(3600),
             max_iters,
             state,
-            None,
         )
+        .0
     }
 
-    /// An interrupted walk continued from its checkpointed state must equal
-    /// the uninterrupted walk bit-for-bit — params, sigma, RNG word, and
-    /// anchor bookkeeping (wall-clock accounting excluded by construction).
+    /// The walk is a pure function of its spec: two runs are bit-identical
+    /// (params, sigma, RNG word, anchor bookkeeping). This is what replaces
+    /// checkpoint/resume — an interrupted climb is simply rerun.
     #[test]
-    fn resume_reproduces_the_uninterrupted_walk() {
+    fn the_walk_replays_bit_identically() {
         let spec = tiny_spec();
-        let fresh = || {
-            fresh_state(
-                &Campaign::derive(&spec.campaign),
-                &resolve_subject(&spec.subject),
-                spec.sigma,
-                spec.climb_seed,
-            )
-        };
-
-        let (full, reason) = go(&spec, 6, fresh());
-        assert_eq!(reason, "max_iters");
-
-        let (half, _) = go(&spec, 3, fresh());
-        let (resumed, _) = go(&spec, 3, half);
-
-        let scrub = |mut s: ClimbState| {
-            s.consumed_secs = 0;
-            serde_json::to_value(s).unwrap()
-        };
-        assert_eq!(scrub(full), scrub(resumed));
-    }
-
-    /// The state round-trips through its checkpoint encoding unchanged — the
-    /// other half of the resume guarantee.
-    #[test]
-    fn checkpoint_encoding_round_trips() {
-        let spec = tiny_spec();
-        let (state, _) = go(
-            &spec,
-            2,
-            fresh_state(
-                &Campaign::derive(&spec.campaign),
-                &resolve_subject(&spec.subject),
-                spec.sigma,
-                spec.climb_seed,
-            ),
-        );
-        let encoded = serde_json::to_value(&state).unwrap();
-        let decoded: ClimbState = serde_json::from_value(encoded.clone()).unwrap();
-        assert_eq!(serde_json::to_value(&decoded).unwrap(), encoded);
+        let a = serde_json::to_value(go(&spec, 6)).unwrap();
+        let b = serde_json::to_value(go(&spec, 6)).unwrap();
+        assert_eq!(a, b);
     }
 }

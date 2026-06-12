@@ -17,10 +17,9 @@
 //! Register it as its own named entry, run it exactly once, when the claim
 //! is drafted and nothing will be tuned afterwards.
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::bots::{self, Bot};
-use crate::commands::Runtime;
 use crate::seeds::{Campaign, regions};
 use crate::sprt::{SprtConfig, SprtVerdict, sprt_race};
 use crate::versus::VersusFormat;
@@ -74,9 +73,9 @@ fn cell_passes(must_beat: bool, verdict: SprtVerdict, wins: u32, losses: u32) ->
 /// Default wall-clock budget shared by all cells (`--budget-secs` overrides).
 const DEFAULT_BUDGET_SECS: u64 = 3600;
 
-pub fn run(spec: &Spec, cand: &Bot, rt: &Runtime) -> std::io::Result<()> {
+pub fn run(spec: &Spec, cand: &Bot, budget: Option<Duration>) -> std::io::Result<()> {
     let campaign = Campaign::derive(&spec.campaign);
-    let budget = rt.budget(DEFAULT_BUDGET_SECS);
+    let budget = budget.unwrap_or(Duration::from_secs(DEFAULT_BUDGET_SECS));
 
     let opponents: Vec<(String, bool)> = spec
         .must_beat

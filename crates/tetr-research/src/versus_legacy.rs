@@ -2,14 +2,10 @@
 //!
 //! Before the engine owned the versus rules (see `docs/adr-versus-rules.md`),
 //! this module's `GarbageQueue` *was* the versus implementation. It survives
-//! for exactly two consumers, both of which would be invalidated by switching
-//! them to the engine path:
-//!
-//! 1. **Scripted pressure scenarios** ([`crate::behavior`]'s Faucet): inject
-//!    garbage on a schedule, with the harness doing the bookkeeping.
-//! 2. **The TBP referee** (`cc2_baseline`): Cold Clear 2 runs as an external
-//!    process with no garbage messages, so the referee inserts raw and keeps
-//!    cancellation accounting outside both engines.
+//! for exactly one consumer, which would be invalidated by switching it to
+//! the engine path: **the TBP referee** (`cc2-baseline`) — Cold Clear 2 runs
+//! as an external process with no garbage messages, so the referee inserts
+//! raw and keeps cancellation accounting outside both engines.
 //!
 //! NOTE the deliberate divergence from the engine rules: this queue settles
 //! the OLDEST garbage lowest ([`GarbageQueue::drain_newest_first`]), while the

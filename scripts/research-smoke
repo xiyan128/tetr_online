@@ -1,37 +1,31 @@
 #!/usr/bin/env bash
 # End-to-end smoke of the agent research loop, driven purely by registry
-# names: a tiny climb writes its receipt + checkpoint, stops at a cap,
-# RESUMEs from the checkpoint, the promotion panel renders a verdict, the
+# names: a tiny climb writes its receipt, stops at a cap,
+# the promotion panel renders a verdict, the
 # metric parse contract holds, and an unknown name is refused. Debug build,
 # ~a minute. Run before unleashing autonomous campaigns and after touching
 # the climb / ledger / sprt / registry / bots plumbing.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-tr_run() { cargo run -q -p tetr-research -- "$@"; }
+tr_run() { cargo run -q -p tetr-research --bin tetr-research -- "$@"; }
+tr_climb() { cargo run -q -p tetr-research --bin tetr-climb -- "$@"; }
 fail() { echo "research-smoke: FAIL — $*" >&2; exit 1; }
 
-echo "== climb (2 iters, smoke-climb)"
-CLIMB_LOG=$(tr_run run smoke-climb --max-iters 2 2>&1) ||
+echo "== climb (2 iters, tetr-climb climb smoke; rerun replaces resume)"
+CLIMB_LOG=$(tr_climb climb smoke --max-iters 2 2>&1) ||
     fail "first climb run errored: $CLIMB_LOG"
-RUN_DIR=$(sed -n 's/.*continue with `resume \(.*\)`.*/\1/p' <<<"$CLIMB_LOG")
-[[ -n "$RUN_DIR" ]] || fail "no resume hint in climb output"
-for f in spec.json checkpoint.json; do
+RUN_DIR=$(ls -td runs/*-climb-smoke-* | head -1)
+[[ -n "$RUN_DIR" ]] || fail "no climb receipt dir"
+for f in spec.json; do
     [[ -f "$RUN_DIR/$f" ]] || fail "ledger artifact missing: $RUN_DIR/$f"
 done
-grep -q '"experiment": "smoke-climb"' "$RUN_DIR/spec.json" ||
+grep -q '"experiment": "climb-smoke"' "$RUN_DIR/spec.json" ||
     fail "experiment name not in spec.json"
 grep -q '^best_params ' <<<"$CLIMB_LOG" || fail "no best_params line"
 
-echo "== resume from $RUN_DIR"
-RESUME_LOG=$(tr_run resume "$RUN_DIR" --max-iters 2 2>&1) ||
-    fail "resumed climb errored: $RESUME_LOG"
-grep -q "RESUMED from $RUN_DIR at iter 2" <<<"$RESUME_LOG" ||
-    fail "resume did not continue from iter 2"
-grep -Eq 'iter 4 \| screen' <<<"$RESUME_LOG" || fail "resume did not reach iter 4"
-
 echo "== promotion panel (null check: smoke-panel must NOT promote)"
-PROMOTE_LOG=$(tr_run run smoke-panel attack-tuned-tiny 2>&1) || fail "promote errored: $PROMOTE_LOG"
+PROMOTE_LOG=$(tr_climb panel smoke attack-tuned-tiny 2>&1) || fail "promote errored: $PROMOTE_LOG"
 grep -q '^panel_verdict REJECT' <<<"$PROMOTE_LOG" ||
     fail "null-check candidate was not rejected"
 
