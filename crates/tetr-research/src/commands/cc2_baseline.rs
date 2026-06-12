@@ -31,10 +31,7 @@ const WIDTH: i32 = 10;
 const FULL_ROW: u16 = (1 << WIDTH) - 1;
 const VISIBLE_QUEUE: usize = 7;
 
-use serde_json::json;
-
 use crate::commands::Runtime;
-use crate::ledger::RunLedger;
 
 // --- TBP <-> piece mapping ---------------------------------------------------
 
@@ -559,7 +556,7 @@ impl Spec {
 /// The historical CC2 build location — `--cc2-bin` overrides (machine-local).
 const DEFAULT_CC2_BIN: &str = "/tmp/cold-clear-2/target/release/cold-clear-2";
 
-pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result<()> {
+pub fn run(spec: &Spec, rt: &Runtime) -> std::io::Result<()> {
     let bin = rt
         .cc2_bin
         .as_ref()
@@ -581,29 +578,17 @@ pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result
             let cap = pieces as u32;
             let ours =
                 evaluate_downstack(&BotSpec::beam(16, 2).factory(), &seeds, garbage_rows, cap);
-            for outcome in &ours.outcomes {
-                ledger.append_outcome(&json!({ "arm": "ours", "outcome": outcome }))?;
-            }
             let mut cc2_censored_sum = 0.0f64;
             let mut cc2_cleared = 0usize;
             for &seed in &seeds {
                 let (p, cleared) = run_downstack(&bin, seed, garbage_rows, cap, think)?;
                 eprintln!("  CC2 seed {seed:>20}: pieces={p:>3} cleared={cleared}");
-                ledger.append_outcome(&json!({
-                    "arm": "cc2",
-                    "seed": seed,
-                    "garbage_rows": garbage_rows,
-                    "pieces": p,
-                    "cleared": cleared,
-                    "max_pieces": cap,
-                }))?;
                 cc2_censored_sum += f64::from(if cleared { p } else { cap });
                 if cleared {
                     cc2_cleared += 1;
                 }
             }
             let cc2_mean_censored = cc2_censored_sum / seeds.len().max(1) as f64;
-            let cc2_clear_rate = cc2_cleared as f64 / seeds.len().max(1) as f64;
             println!(
                 "downstack {garbage_rows} rows — censored pieces (lower=better, cap {cap}): OURS {:.2} ({:.0}% clear) | CC2 {:.2} ({}/{} clear)",
                 ours.mean_pieces_censored,
@@ -612,19 +597,6 @@ pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result
                 cc2_cleared,
                 seeds.len()
             );
-            ledger.write_summary(json!({
-                "exit_reason": "complete",
-                "ours": {
-                    "mean_pieces_censored": ours.mean_pieces_censored,
-                    "mean_pieces_to_clear": ours.mean_pieces_to_clear,
-                    "clear_rate": ours.clear_rate,
-                    "mean_attack": ours.mean_attack,
-                },
-                "cc2": {
-                    "mean_pieces_censored": cc2_mean_censored,
-                    "clear_rate": cc2_clear_rate,
-                },
-            }))?;
         }
         // Versus head-to-head — see [`Mode::Versus`] for why this is not fair.
         Mode::Versus => {
@@ -640,12 +612,6 @@ pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result
                     VersusResult::BWins => cc2_wins += 1,
                     VersusResult::Draw => draws += 1,
                 }
-                ledger.append_outcome(&json!({
-                    "seed": seed,
-                    "result": res,
-                    "ours_attack": ours_atk,
-                    "cc2_attack": cc2_atk,
-                }))?;
                 eprintln!(
                     "  seed {seed:>20}: {res:?} | ours atk {ours_atk:>3} | cc2 atk {cc2_atk:>3}"
                 );
@@ -661,17 +627,6 @@ pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result
                 cc2_atk_sum as f64 / n,
                 seeds.len(),
             );
-            ledger.write_summary(json!({
-                "exit_reason": "complete",
-                "games": seeds.len(),
-                "ours_wins": ours_wins,
-                "cc2_wins": cc2_wins,
-                "draws": draws,
-                "ours_win_rate": ours_wins as f64 / n,
-                "mean_attack_ours": ours_atk_sum as f64 / n,
-                "mean_attack_cc2": cc2_atk_sum as f64 / n,
-                "fair_comparison": false,
-            }))?;
         }
         Mode::App => {
             let mut total_app = 0.0f64;
@@ -679,21 +634,10 @@ pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result
                 let attack = run_one(&bin, seed, pieces, think)?;
                 let app = attack as f64 / pieces as f64;
                 total_app += app;
-                ledger.append_outcome(&json!({
-                    "seed": seed,
-                    "pieces": pieces,
-                    "attack": attack,
-                    "attack_per_piece": app,
-                }))?;
                 eprintln!("  seed {seed:>20}: attack={attack:>4}  APP={app:.4}");
             }
             let mean_app = total_app / spec.seeds.max(1) as f64;
             println!("cc2_attack_per_piece {mean_app:.4}");
-            ledger.write_summary(json!({
-                "exit_reason": "complete",
-                "games": seeds.len(),
-                "mean_attack_per_piece": mean_app,
-            }))?;
         }
     }
     Ok(())

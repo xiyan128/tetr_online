@@ -66,26 +66,33 @@ SPRT run rayon-parallel (~6×), bit-identical to sequential by gate.
 kept ONLY for the TBP referee and the behavior faucet. Its rules diverge from
 the engine's; never use it for a new experiment.
 
-## The CLI and the registry
+## The CLI and the registries
 
-ONE binary runs NAMED experiments; the names live in `src/registry.rs` as
-typed Rust literals — the crate's entire configuration surface:
+Three registries, three concerns: **bots** (`src/bots.rs` — named `BotSpec`
+instances: who plays), **evals** (`src/commands/*` — what is measured, with
+bot SLOTS), and **bindings** (`src/registry.rs` — named experiments pairing
+an eval spec with bot names). ONE binary runs bindings by name:
 
 ```text
-cargo run --release -p tetr-research -- list            # the catalog
+cargo run --release -p tetr-research -- list            # the experiments
+cargo run --release -p tetr-research -- bots            # the bots
 cargo run --release -p tetr-research -- show <name>     # the spec, as recorded
 cargo run --release -p tetr-research -- run  <name>     # execute
 cargo run --release -p tetr-research -- resume <run-dir>
-cargo run --release -p tetr-research -- runs            # the ledger index
+cargo run --release -p tetr-research -- runs            # recorded runs
 ```
 
 A recorded result reproduces from `(commit, name)`. Want different
-parameters? Register a new name (one literal) — never mutate a name with
-recorded runs; `resume` refuses a drifted spec and dirty-tree runs are
-stamped in the manifest. The only flags are machine-local: `--budget-secs`,
-`--max-iters` (how much of the deterministic walk this invocation
-materializes), `--cc2-bin`, `--runs-root`. Each command module documents its
-method and run records in its doc header; read it before running.
+parameters or a new candidate? Register a new name — a climbed candidate is
+ONE bot registration, after which it is raceable, panelable, and
+benchmarkable in one-line bindings. Never mutate a name with recorded runs;
+`resume` refuses a drifted spec and dirty-tree runs are stamped in the
+receipt. The only flags are machine-local: `--budget-secs`, `--max-iters`
+(how much of the deterministic walk this invocation materializes),
+`--cc2-bin`, `--runs-root`. Tracking is not a participant: the runner
+writes one `spec.json` receipt per run, the climb checkpoints for resume,
+and anything richer (a wandb-style sink) would observe receipts + stdout
+without touching a command.
 
 **Daily drivers**
 
@@ -94,8 +101,7 @@ method and run records in its doc header; read it before running.
   cheese pieces + clear rate, and win rate vs greedy. These names are the
   /autoresearch parse contracts.
 - **`behavior-dt20` / `behavior-cc2`**: the APP/DS-P suite across the
-  standard scenarios; custom-weight arms get their own registry entries.
-- **`marathon-sweep`**: the full greedy-vs-beam sweep (depths 1-3).
+  standard scenarios; custom-weight arms are registered bots, not knobs.
 
 **Versus science**
 
@@ -120,15 +126,14 @@ method and run records in its doc header; read it before running.
   module header carries the simulation receipts). ~5 min to resolve a true
   0.5/0.55 at default settings; an in-budget inconclusive means the effect
   is small. That *is* the answer.
-- **`promote-null-check`** (and per-candidate entries): the promotion panel
-  — the only gate from "my climb accepted it" to "it is the better bot".
-  Candidate vs {greedy, origin, incumbent} × rain {0, 8}, one pair-GSPRT per
-  cell on fresh campaign seeds: greedy and origin cells demand H1, incumbent
-  cells demand non-regression, H0 or starved evidence anywhere rejects. A
-  promotion is a configuration: paste the climb's `best_params` into a new
-  entry. A spec with `final_validation: true` spends the never-iterated
-  FINAL region — register it as its own name, run it exactly once per
-  external claim.
+- **`panel-null-check`** (and per-candidate entries): the promotion panel —
+  the only gate from "my climb accepted it" to "it is the better bot". The
+  candidate races NAMED opponents × rain {0, 8}, one pair-GSPRT per cell on
+  fresh campaign seeds: `must_beat` opponents demand H1, `must_not_lose_to`
+  opponents demand non-regression, H0 or starved evidence anywhere rejects.
+  A promotion is a bot registration plus a one-line binding. A spec with
+  `final_validation: true` spends the never-iterated FINAL region — its own
+  name, exactly once per external claim.
 
 **External baseline**
 
@@ -136,27 +141,20 @@ method and run records in its doc header; read it before running.
   binary as a TBP subprocess, refereed on our seeded bag and attack table
   (`--cc2-bin /path/to/cc2`). Uses legacy garbage rules by design; its win
   rates are NOT comparable with `play_versus` numbers.
-- **`cc2-native-baseline`**: CC2's *ported evaluator* vs ours on our engine
-  with real mutual garbage. The fair comparison, and the baseline to climb
-  past. Its downstack output reports censored pieces and clear rate for both
-  evaluators.
+- **`cc2-native-versus` / `downstack-cc2eval`**: CC2's *ported evaluator*
+  vs ours on our engine with real mutual garbage — the fair comparison, and
+  the baseline to climb past.
 
-## Run manifests
+## Run receipts
 
-Every run creates `runs/<run-id>/`, where the run ID is
-`<UTC timestamp>-<experiment>-<pid>`. The directory contains:
-
-- `spec.json`: schema version, run ID, UTC creation time, git commit and
-  dirty state, host metadata, and `extra` — the experiment NAME, its full
-  typed spec exactly as `show <name>` prints it, and the invocation's
-  runtime flags.
-- `outcomes.jsonl`: one JSON object per game or seed result.
-- `summary.json`: UTC finish time, exit reason, and headline aggregate fields.
-- `checkpoint.json`: optional atomically replaced resume state for experiments
-  that checkpoint.
-
+Every run creates `runs/<UTC timestamp>-<experiment>-<pid>/` holding
+`spec.json` — the reproducibility receipt: schema version, run ID, creation
+time, git commit + dirty state, the experiment NAME, its full typed spec
+exactly as `show <name>` prints it, and the invocation's runtime flags.
+Climbs additionally keep `checkpoint.json` (atomically replaced each
+iteration — the resume seam). Results live on stdout as machine lines;
 `runs/` is ignored by git. A doc-header RUN RECORD cites its run ID so the
-durable conclusion can be traced to the machine-readable manifest.
+durable conclusion traces to a receipt.
 
 ## Seed regions and campaigns
 
@@ -190,13 +188,11 @@ one unrecoverable mistake this map cannot prevent.
 
 ## Adding an experiment (checklist)
 
-1. Compose arms as `BotSpec`s; pick or claim a seed region (or run under a
-   campaign).
-2. A serde-serialized `Spec` + thin `run(spec, rt, ledger)` in a
-   `commands/` module: library calls, one machine-readable `println!` per
-   headline number, context on stderr, one outcome per game in the ledger,
-   a terminal summary. Cite run IDs in doc-header RUN RECORDs.
-3. Register named entries in `src/registry.rs` (including a tiny `smoke-*`
+1. Register the arms as named bots (`src/bots.rs`) if they don't exist.
+2. A serde-serialized `Spec` with bot SLOTS + thin `run(spec, bots…, rt)`
+   in a `commands/` module: library calls, one machine-readable `println!`
+   per headline number, context on stderr — no tracking.
+3. Bind named entries in `src/registry.rs` (including a tiny `smoke-*`
    variant if the smoke gate should cover it) and wire the kind in
    `main.rs`'s dispatch.
 4. Bound it: honour `rt.budget(...)` with an honest partial verdict.

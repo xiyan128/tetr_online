@@ -77,8 +77,8 @@
 //! ([`crate::seeds::Campaign`]) — fresh per campaign name, so repeated
 //! campaigns stop iterating against one static validation region. Train (the
 //! non-rotate path) stays at `regions::TRAIN`. Every run writes a
-//! [`crate::ledger`] run directory (spec, per-iteration outcomes, checkpoint
-//! each iteration, summary); `resume <run-dir>` continues an interrupted walk
+//! [`crate::ledger`] receipt, and the walk checkpoints its state into the
+//! run directory each iteration; `resume <run-dir>` continues an interrupted walk
 //! bit-identically from its checkpoint (state carries the RNG word, sigma,
 //! iteration, params, and anchor bookkeeping — witnessed by the
 //! `resume_reproduces_the_uninterrupted_walk` test), and refuses a registry
@@ -91,13 +91,10 @@ use std::path::Path;
 use std::time::Instant;
 
 use serde::{Deserialize, Serialize};
-use serde_json::json;
 
-use tetr_core::ai::Cc2Weights;
-
-use crate::bots::BotSpec;
-use crate::commands::{Beam, BoardParams, Runtime};
-use crate::ledger::RunLedger;
+use crate::bots::{self, BotSpec, EvalSpec, SearchSpec};
+use crate::commands::{BoardParams, Runtime};
+use crate::ledger::RunDir;
 use crate::rng::SplitMix64;
 use crate::seeds::{Campaign, seed_set, seed_set_from};
 use crate::sprt::{SprtConfig, SprtReport, SprtVerdict, sprt_race};
@@ -116,7 +113,9 @@ fn gauss(rng: &mut SplitMix64) -> f64 {
 pub struct Spec {
     /// The campaign whose private seed slab this climb draws from.
     pub campaign: String,
-    pub beam: Beam,
+    /// The registered bot the walk starts from and mutates — must be a
+    /// beam + CC2 bot; its weights are the campaign origin.
+    pub subject: String,
     pub format: VersusFormat,
     /// Screen block size (rotate) / fixed train set size (non-rotate).
     pub screen_seeds: usize,
@@ -143,7 +142,7 @@ impl Default for Spec {
     fn default() -> Self {
         Self {
             campaign: "scratch".to_string(),
-            beam: Beam::default(),
+            subject: "attack-tuned".to_string(),
             format: VersusFormat {
                 max_plies: 240,
                 rain_period: 8,
@@ -160,6 +159,26 @@ impl Default for Spec {
             anchor_matches: 800,
         }
     }
+}
+
+/// The resolved climb subject: the search shape the walk keeps and the CC2
+/// weights whose board params it mutates.
+struct Subject {
+    base: tetr_core::ai::Cc2Weights,
+    width: usize,
+    depth: u8,
+}
+
+fn resolve_subject(name: &str) -> Subject {
+    let spec = bots::find(name)
+        .unwrap_or_else(|| panic!("climb subject {name:?} is not a registered bot"));
+    let SearchSpec::Beam { width, depth } = spec.search else {
+        panic!("climb subject {name:?} must be a beam bot");
+    };
+    let EvalSpec::Cc2(base) = spec.eval else {
+        panic!("climb subject {name:?} must use the CC2 evaluator");
+    };
+    Subject { base, width, depth }
 }
 
 /// Default wall-clock budget (`--budget-secs` overrides).
@@ -186,8 +205,8 @@ struct ClimbState {
     consumed_secs: u64,
 }
 
-fn fresh_state(campaign: &Campaign, sigma: f64, climb_seed: u64) -> ClimbState {
-    let origin = Cc2Weights::attack_tuned().board_params();
+fn fresh_state(campaign: &Campaign, subject: &Subject, sigma: f64, climb_seed: u64) -> ClimbState {
+    let origin = subject.base.board_params();
     ClimbState {
         schema_version: 1,
         campaign: campaign.id.clone(),
@@ -206,10 +225,10 @@ fn fresh_state(campaign: &Campaign, sigma: f64, climb_seed: u64) -> ClimbState {
 
 fn bot(
     params: &BoardParams,
-    beam: Beam,
+    subject: &Subject,
 ) -> impl Fn(u64) -> Box<dyn tetr_core::player::PlayerController> + Send + Sync + 'static {
-    BotSpec::beam(beam.width, beam.depth)
-        .cc2(Cc2Weights::attack_tuned().with_board_params(params))
+    BotSpec::beam(subject.width, subject.depth)
+        .cc2(subject.base.with_board_params(params))
         .factory()
 }
 
@@ -220,12 +239,12 @@ fn bot(
 fn objective(
     params: &BoardParams,
     incumbent_params: &BoardParams,
-    beam: Beam,
+    subject: &Subject,
     seeds: &[u64],
     format: VersusFormat,
 ) -> f64 {
-    let cand = bot(params, beam);
-    let incumbent = bot(incumbent_params, beam);
+    let cand = bot(params, subject);
+    let incumbent = bot(incumbent_params, subject);
 
     let fwd = evaluate_versus_format(&cand, &incumbent, seeds, format);
     let rev = evaluate_versus_format(&incumbent, &cand, seeds, format);
@@ -249,14 +268,15 @@ fn race(
     cand_params: &BoardParams,
     incumbent_params: &BoardParams,
     spec: &Spec,
+    subject: &Subject,
     seed_base: usize,
     max_matches: u32,
     alpha: f64,
     deadline: Instant,
 ) -> SprtReport {
     sprt_race(
-        &bot(cand_params, spec.beam),
-        &bot(incumbent_params, spec.beam),
+        &bot(cand_params, subject),
+        &bot(incumbent_params, subject),
         spec.format,
         SprtConfig {
             alpha,
@@ -268,25 +288,16 @@ fn race(
     )
 }
 
-fn report_json(r: &SprtReport) -> serde_json::Value {
-    json!({
-        "verdict": format!("{:?}", r.verdict),
-        "wins": r.wins,
-        "losses": r.losses,
-        "pairs": r.pairs,
-        "llr": r.llr,
-    })
-}
-
 /// Run (or continue) the walk until the budget or `max_iters` ends this
 /// invocation. Returns the final state and the exit reason.
 fn run_climb(
     spec: &Spec,
+    subject: &Subject,
     campaign: &Campaign,
     budget: std::time::Duration,
     max_iters: u32,
     mut state: ClimbState,
-    mut ledger: Option<&mut RunLedger>,
+    checkpoint: Option<&RunDir>,
 ) -> (ClimbState, &'static str) {
     let start = Instant::now();
     let deadline = start + budget;
@@ -304,7 +315,7 @@ fn run_climb(
         objective(
             &state.best_params,
             &state.origin_params,
-            spec.beam,
+            subject,
             &train_seeds,
             spec.format,
         )
@@ -333,8 +344,6 @@ fn run_climb(
         state.rng_raw = rng.into_raw();
 
         let mut accepted;
-        let mut confirm_report = None;
-        let mut anchor_action = None;
         if spec.rotate {
             // Fresh disjoint block this iteration; incumbent and proposal race
             // on it head-to-head (paired CRN within the iteration, no reuse
@@ -343,14 +352,14 @@ fn run_climb(
             let incumbent_score = objective(
                 &state.best_params,
                 &state.origin_params,
-                spec.beam,
+                subject,
                 &block_seeds,
                 spec.format,
             );
             let proposal_score = objective(
                 &proposal,
                 &state.origin_params,
-                spec.beam,
+                subject,
                 &block_seeds,
                 spec.format,
             );
@@ -371,6 +380,7 @@ fn run_climb(
                     &proposal,
                     &state.best_params,
                     spec,
+                    subject,
                     campaign.confirm_base(state.iter, confirm_stride),
                     spec.confirm_matches,
                     spec.confirm_alpha,
@@ -391,13 +401,12 @@ fn run_climb(
                     report.llr,
                     if accepted { "adopting" } else { "discarding" },
                 );
-                confirm_report = Some(report);
             }
         } else {
             let score = objective(
                 &proposal,
                 &state.origin_params,
-                spec.beam,
+                subject,
                 &train_seeds,
                 spec.format,
             );
@@ -440,6 +449,7 @@ fn run_climb(
                     &state.best_params,
                     &state.anchored_params,
                     spec,
+                    subject,
                     campaign.anchor_base(event, anchor_stride),
                     spec.anchor_matches,
                     0.05,
@@ -461,28 +471,15 @@ fn run_climb(
                     "iter {} | anchor #{event} {action} | decisive {}-{} of {} pairs | LLR {:+.2}",
                     state.iter, report.wins, report.losses, report.pairs, report.llr
                 );
-                anchor_action = Some((report, action));
             }
         } else {
             state.sigma = (state.sigma * 0.95).max(0.02);
         }
 
-        if let Some(l) = ledger.as_deref_mut() {
-            let _ = l.append_outcome(&json!({
-                "iter": state.iter,
-                "accepted": accepted,
-                "sigma": state.sigma,
-                "confirm": confirm_report.as_ref().map(report_json),
-                "anchor": anchor_action.as_ref().map(|(r, action)| {
-                    let mut v = report_json(r);
-                    v["action"] = json!(action);
-                    v
-                }),
-                "params": accepted.then_some(state.best_params.as_slice()),
-            }));
-            let mut checkpoint = state.clone();
-            checkpoint.consumed_secs += start.elapsed().as_secs();
-            let _ = l.write_checkpoint(serde_json::to_value(&checkpoint).unwrap());
+        if let Some(dir) = checkpoint {
+            let mut snapshot = state.clone();
+            snapshot.consumed_secs += start.elapsed().as_secs();
+            let _ = dir.write_checkpoint(serde_json::to_value(&snapshot).unwrap());
         }
     };
 
@@ -490,23 +487,20 @@ fn run_climb(
     (state, exit_reason)
 }
 
-pub fn run(spec: &Spec, rt: &Runtime, ledger: &mut RunLedger) -> std::io::Result<()> {
+pub fn run(spec: &Spec, rt: &Runtime, run_dir: &RunDir) -> std::io::Result<()> {
+    let subject = resolve_subject(&spec.subject);
     let campaign = Campaign::derive(&spec.campaign);
-    let state = fresh_state(&campaign, spec.sigma, spec.climb_seed);
-    drive(spec, rt, campaign, state, ledger)
+    let state = fresh_state(&campaign, &subject, spec.sigma, spec.climb_seed);
+    drive(spec, &subject, rt, campaign, state, run_dir)
 }
 
 /// Continue an interrupted walk from `prior` (a run directory with a
 /// checkpoint). The registry-drift check happened in `main`; the campaign
 /// assert below is the in-checkpoint belt to that suspender.
-pub fn resume(
-    spec: &Spec,
-    rt: &Runtime,
-    prior: &Path,
-    ledger: &mut RunLedger,
-) -> std::io::Result<()> {
+pub fn resume(spec: &Spec, rt: &Runtime, prior: &Path, run_dir: &RunDir) -> std::io::Result<()> {
+    let subject = resolve_subject(&spec.subject);
     let campaign = Campaign::derive(&spec.campaign);
-    let checkpoint = RunLedger::read_checkpoint(prior)?;
+    let checkpoint = RunDir::read_checkpoint(prior)?;
     let state: ClimbState = serde_json::from_value(checkpoint).map_err(std::io::Error::other)?;
     assert_eq!(
         state.campaign, campaign.id,
@@ -514,15 +508,16 @@ pub fn resume(
         state.campaign, campaign.id
     );
     eprintln!("RESUMED from {} at iter {}", prior.display(), state.iter);
-    drive(spec, rt, campaign, state, ledger)
+    drive(spec, &subject, rt, campaign, state, run_dir)
 }
 
 fn drive(
     spec: &Spec,
+    subject: &Subject,
     rt: &Runtime,
     campaign: Campaign,
     state: ClimbState,
-    ledger: &mut RunLedger,
+    run_dir: &RunDir,
 ) -> std::io::Result<()> {
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
     eprintln!(
@@ -530,21 +525,28 @@ fn drive(
          {} train seeds x2, rain {}, {} plies | budget {}s",
         campaign.id,
         campaign.slot,
-        spec.beam.depth,
-        spec.beam.width,
+        subject.depth,
+        subject.width,
         spec.screen_seeds,
         spec.format.rain_period,
         spec.format.max_plies,
         budget.as_secs(),
     );
 
-    let (state, exit_reason) =
-        run_climb(spec, &campaign, budget, rt.max_iters, state, Some(ledger));
+    let (state, exit_reason) = run_climb(
+        spec,
+        subject,
+        &campaign,
+        budget,
+        rt.max_iters,
+        state,
+        Some(run_dir),
+    );
     eprintln!(
         "climb stopped ({exit_reason}): {} iters, {} accepts | continue with `resume {}`",
         state.iter,
         state.accepts,
-        ledger.dir().display()
+        run_dir.dir().display()
     );
     println!(
         "best_params {}",
@@ -558,8 +560,8 @@ fn drive(
 
     // Held-out validation: the honest verdict on DISJOINT campaign seeds.
     let val_seeds = seed_set_from(campaign.validation(spec.val_seeds), spec.val_seeds);
-    let cand = bot(&state.best_params, spec.beam);
-    let incumbent = bot(&state.origin_params, spec.beam);
+    let cand = bot(&state.best_params, subject);
+    let incumbent = bot(&state.origin_params, subject);
     let fwd = evaluate_versus_format(&cand, &incumbent, &val_seeds, spec.format);
     let rev = evaluate_versus_format(&incumbent, &cand, &val_seeds, spec.format);
     let (mut dw, mut dl, mut margin) = (0u32, 0u32, 0.0f64);
@@ -598,19 +600,7 @@ fn drive(
     println!("val_death_losses {dl}");
     println!("val_mean_margin {margin:+.3}");
 
-    ledger.write_summary(json!({
-        "exit_reason": exit_reason,
-        "iter": state.iter,
-        "accepts": state.accepts,
-        "anchor_events": state.anchor_events,
-        "consumed_secs": state.consumed_secs,
-        "best_params": state.best_params.as_slice(),
-        "validation": {
-            "death_wins": dw, "death_losses": dl,
-            "cap_wins": cw, "cap_losses": cl,
-            "mean_margin": margin,
-        },
-    }))
+    Ok(())
 }
 
 #[cfg(test)]
@@ -621,7 +611,7 @@ mod tests {
     fn tiny_spec() -> Spec {
         Spec {
             campaign: "resume-bit-identity-test".to_string(),
-            beam: Beam { width: 4, depth: 1 },
+            subject: "attack-tuned-tiny".to_string(),
             format: VersusFormat {
                 max_plies: 16,
                 rain_period: 4,
@@ -647,6 +637,7 @@ mod tests {
         let campaign = Campaign::derive(&spec.campaign);
         run_climb(
             spec,
+            &resolve_subject(&spec.subject),
             &campaign,
             Duration::from_secs(3600),
             max_iters,
@@ -664,6 +655,7 @@ mod tests {
         let fresh = || {
             fresh_state(
                 &Campaign::derive(&spec.campaign),
+                &resolve_subject(&spec.subject),
                 spec.sigma,
                 spec.climb_seed,
             )
@@ -692,6 +684,7 @@ mod tests {
             2,
             fresh_state(
                 &Campaign::derive(&spec.campaign),
+                &resolve_subject(&spec.subject),
                 spec.sigma,
                 spec.climb_seed,
             ),

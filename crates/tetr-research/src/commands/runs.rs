@@ -39,24 +39,17 @@ pub fn list(root: Option<&Path>, last: usize) -> std::io::Result<()> {
         let spec: Option<Value> = File::open(dir.join("spec.json"))
             .ok()
             .and_then(|f| serde_json::from_reader(f).ok());
-        let summary: Option<Value> = File::open(dir.join("summary.json"))
-            .ok()
-            .and_then(|f| serde_json::from_reader(f).ok());
         let experiment = spec
             .as_ref()
-            .and_then(|s| field(s, &["extra", "experiment"]))
+            .and_then(|s| field(s, &["experiment"]))
             .unwrap_or("?");
         let created = spec
             .as_ref()
             .and_then(|s| field(s, &["created_utc"]))
             .unwrap_or("?");
-        let status = summary
-            .as_ref()
-            .and_then(|s| field(s, &["exit_reason"]))
-            .unwrap_or("unfinished");
         let resumable = dir.join("checkpoint.json").exists();
         println!(
-            "{created}  {experiment:<24} {status:<12}{} {}",
+            "{created}  {experiment:<24}{} {}",
             if resumable { " [checkpoint]" } else { "" },
             dir.file_name().and_then(|n| n.to_str()).unwrap_or("?"),
         );

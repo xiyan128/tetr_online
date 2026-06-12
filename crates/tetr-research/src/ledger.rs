@@ -1,86 +1,52 @@
-//! Machine-readable manifests for reproducible research runs.
+//! Run receipts and resume checkpoints — the ONLY persistence in the crate.
+//!
+//! Tracking is deliberately not a participant in experiments: commands never
+//! see this module. The runner writes one `spec.json` RECEIPT per run (the
+//! reproducibility coordinates: experiment name, typed spec, runtime, git
+//! state) before dispatch, and the climb persists its resumable state into
+//! `checkpoint.json` (atomic replace). Anything richer — metrics sinks,
+//! wandb-style dashboards — belongs in an observer that reads receipts and
+//! the commands' stdout machine lines, not in here.
 
-use std::fs::{self, File, OpenOptions};
-use std::io::{self, Write};
+use std::fs::{self, File};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::Serialize;
-use serde_json::{Map, Value, json};
+use serde_json::{Value, json};
 
-const SCHEMA_VERSION: u64 = 1;
+const SCHEMA_VERSION: u64 = 2;
 
-/// A run directory containing its specification, per-seed outcomes, and summary.
-pub struct RunLedger {
+/// One run's directory: a receipt, plus a checkpoint for experiments that
+/// resume.
+pub struct RunDir {
     dir: PathBuf,
-    outcomes: File,
 }
 
-impl RunLedger {
-    /// Create `<runs-root>/<YYYYMMDD-HHMMSS>-<bin>-<pid>/` and write `spec.json`.
-    pub fn create(bin: &str, extra_spec: Value) -> io::Result<RunLedger> {
-        Self::create_at(&runs_root(), bin, extra_spec)
-    }
-
-    /// Create a run ledger under an explicit root directory.
-    pub fn create_at(root: &Path, bin: &str, extra_spec: Value) -> io::Result<RunLedger> {
-        validate_bin(bin)?;
+impl RunDir {
+    /// Create `<root>/<YYYYMMDD-HHMMSS>-<experiment>-<pid>/` (root defaults
+    /// to [`runs_root`]) and write the `spec.json` receipt.
+    pub fn create(root: Option<&Path>, experiment: &str, receipt: Value) -> io::Result<RunDir> {
+        validate_name(experiment)?;
+        let root = root.map_or_else(runs_root, Path::to_path_buf);
         let now = SystemTime::now();
-        let run_id = format!("{}-{bin}-{}", compact_utc(now)?, std::process::id());
+        let run_id = format!("{}-{experiment}-{}", compact_utc(now)?, std::process::id());
         let dir = root.join(&run_id);
-        fs::create_dir_all(root)?;
+        fs::create_dir_all(&root)?;
         fs::create_dir(&dir)?;
 
-        let git = git_metadata();
-        let spec = json!({
+        let mut spec = json!({
             "schema_version": SCHEMA_VERSION,
             "run_id": run_id,
-            "bin": bin,
             "created_utc": rfc3339_utc(now)?,
-            "git": git,
-            "host": {
-                "hostname": hostname(),
-                "cores": std::thread::available_parallelism().map(usize::from).unwrap_or(1),
-                "os": std::env::consts::OS,
-            },
-            "extra": extra_spec,
+            "git": git_metadata(),
         });
+        if let (Value::Object(spec), Value::Object(receipt)) = (&mut spec, receipt) {
+            spec.extend(receipt);
+        }
         write_json(&dir.join("spec.json"), &spec)?;
-
-        let outcomes = OpenOptions::new()
-            .create_new(true)
-            .append(true)
-            .open(dir.join("outcomes.jsonl"))?;
-        Ok(Self { dir, outcomes })
-    }
-
-    /// Append one JSON object as one line of `outcomes.jsonl`.
-    pub fn append_outcome(&mut self, outcome: &impl Serialize) -> io::Result<()> {
-        serde_json::to_writer(&mut self.outcomes, outcome).map_err(io::Error::other)?;
-        self.outcomes.write_all(b"\n")?;
-        self.outcomes.flush()
-    }
-
-    /// Write `summary.json`, adding the mandatory completion metadata.
-    pub fn write_summary(&self, summary: Value) -> io::Result<()> {
-        let mut fields = match summary {
-            Value::Object(fields) => fields,
-            other => {
-                let mut fields = Map::new();
-                fields.insert("result".to_string(), other);
-                fields
-            }
-        };
-        fields.insert("schema_version".to_string(), SCHEMA_VERSION.into());
-        fields.insert(
-            "finished_utc".to_string(),
-            rfc3339_utc(SystemTime::now())?.into(),
-        );
-        fields
-            .entry("exit_reason".to_string())
-            .or_insert_with(|| "complete".into());
-        write_json(&self.dir.join("summary.json"), &Value::Object(fields))
+        Ok(Self { dir })
     }
 
     /// Atomically write or replace `checkpoint.json` within the run directory.
@@ -112,9 +78,9 @@ pub fn runs_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("runs"))
 }
 
-fn validate_bin(bin: &str) -> io::Result<()> {
-    if !bin.is_empty()
-        && bin
+fn validate_name(name: &str) -> io::Result<()> {
+    if !name.is_empty()
+        && name
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
     {
@@ -122,7 +88,7 @@ fn validate_bin(bin: &str) -> io::Result<()> {
     } else {
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("invalid ledger bin name {bin:?}"),
+            format!("invalid run name {name:?}"),
         ))
     }
 }
@@ -130,7 +96,7 @@ fn validate_bin(bin: &str) -> io::Result<()> {
 fn write_json(path: &Path, value: &Value) -> io::Result<()> {
     let mut file = File::create(path)?;
     serde_json::to_writer_pretty(&mut file, value).map_err(io::Error::other)?;
-    file.write_all(b"\n")?;
+    io::Write::write_all(&mut file, b"\n")?;
     file.sync_all()
 }
 
@@ -150,16 +116,6 @@ fn git_metadata() -> Value {
         .ok()
         .and_then(|output| output.status.success().then_some(!output.stdout.is_empty()));
     json!({ "commit": commit, "dirty": dirty })
-}
-
-fn hostname() -> String {
-    Command::new("hostname")
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .map(|output| String::from_utf8_lossy(&output.stdout).trim().to_string())
-        .filter(|hostname| !hostname.is_empty())
-        .unwrap_or_else(|| "unknown".to_string())
 }
 
 fn compact_utc(time: SystemTime) -> io::Result<String> {
@@ -219,7 +175,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn tempdir_round_trip() {
+    fn receipt_and_checkpoint_round_trip() {
         let root = std::env::temp_dir().join(format!(
             "tetr-research-ledger-test-{}-{}",
             std::process::id(),
@@ -229,30 +185,24 @@ mod tests {
             fs::remove_dir_all(&root).unwrap();
         }
 
-        let mut ledger =
-            RunLedger::create_at(&root, "ledger-test", json!({"format": "test"})).unwrap();
-        ledger.append_outcome(&json!({"seed": 1})).unwrap();
-        ledger.append_outcome(&json!({"seed": 2})).unwrap();
-        ledger.append_outcome(&json!({"seed": 3})).unwrap();
-        ledger.write_checkpoint(json!({"step": 1})).unwrap();
-        ledger.write_checkpoint(json!({"step": 2})).unwrap();
-        ledger
-            .write_summary(json!({"exit_reason": "complete", "games": 3}))
-            .unwrap();
+        let run = RunDir::create(
+            Some(&root),
+            "ledger-test",
+            json!({"experiment": "ledger-test", "spec": {"kind": "test"}}),
+        )
+        .unwrap();
+        run.write_checkpoint(json!({"step": 1})).unwrap();
+        run.write_checkpoint(json!({"step": 2})).unwrap();
 
-        let dir = ledger.dir().to_path_buf();
+        let dir = run.dir().to_path_buf();
         assert!(dir.join("spec.json").is_file());
-        assert!(dir.join("outcomes.jsonl").is_file());
-        assert!(dir.join("checkpoint.json").is_file());
-        assert!(dir.join("summary.json").is_file());
-        let outcomes = fs::read_to_string(dir.join("outcomes.jsonl")).unwrap();
-        assert_eq!(outcomes.lines().count(), 3);
-        assert_eq!(RunLedger::read_checkpoint(&dir).unwrap()["step"], 2);
+        assert_eq!(RunDir::read_checkpoint(&dir).unwrap()["step"], 2);
         let spec: Value =
             serde_json::from_reader(File::open(dir.join("spec.json")).unwrap()).unwrap();
-        assert_eq!(spec["extra"]["format"], "test");
+        assert_eq!(spec["experiment"], "ledger-test");
+        assert_eq!(spec["spec"]["kind"], "test");
+        assert!(spec["git"].is_object());
 
-        drop(ledger);
         fs::remove_dir_all(root).unwrap();
     }
 

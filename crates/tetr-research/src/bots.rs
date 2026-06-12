@@ -19,6 +19,14 @@
 //! pre-spec factory functions are gone — this crate carries no compatibility
 //! surface; recorded run records cite settings, which a spec expresses
 //! completely. A new evaluator gets a new [`EvalSpec`] arm, not a bypass.)
+//!
+//! # The bot registry
+//!
+//! Instances are NAMED ([`bots`]): an experiment binding references bots
+//! purely by name, and a name is registered exactly once — so a climbed
+//! candidate added here is immediately raceable, panelable, and
+//! benchmarkable everywhere with no per-command plumbing. Like experiment
+//! names, bot names with recorded runs are immutable: new weights, new name.
 
 use std::time::Duration;
 
@@ -207,4 +215,57 @@ mod tests {
             (o2.score, o2.pieces, o2.lines)
         );
     }
+}
+
+/// The climb's v3 accept (see the climb command's RUN RECORD v3) — judged and
+/// REJECTED by the race run record; registered so the records stay runnable.
+pub const V3_CANDIDATE: [f32; Cc2Weights::BOARD_PARAM_COUNT] = [
+    -0.003_662_888_2,
+    -1.573_386_2,
+    -0.195_788_15,
+    -0.349_775_85,
+    -1.538_758_6,
+    -5.149_458,
+    0.357_563_6,
+    0.096_651_86,
+    1.550_793,
+    4.478_138_4,
+    3.782_923,
+];
+
+/// The bot registry: every named instance, as code. Names are kebab-case and
+/// permanent once a run cites them.
+pub fn bots() -> Vec<(&'static str, BotSpec)> {
+    vec![
+        ("greedy", BotSpec::greedy()),
+        ("dt20", BotSpec::beam(16, 2)),
+        ("cc2-default", BotSpec::beam(16, 2).cc2(Cc2Weights::DEFAULT)),
+        (
+            "attack-tuned",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "attack-tuned-blind",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned()).blind(),
+        ),
+        (
+            "bf-192",
+            BotSpec::best_first(192, 6).cc2(Cc2Weights::DEFAULT),
+        ),
+        (
+            "v3-candidate",
+            BotSpec::beam(16, 2).cc2(Cc2Weights::attack_tuned().with_board_params(&V3_CANDIDATE)),
+        ),
+        // Toy-sized twins for the smoke gate (seconds, not minutes).
+        (
+            "attack-tuned-tiny",
+            BotSpec::beam(4, 1).cc2(Cc2Weights::attack_tuned()),
+        ),
+        ("dt20-tiny", BotSpec::beam(4, 1)),
+    ]
+}
+
+/// Look a registered bot up by name.
+pub fn find(name: &str) -> Option<BotSpec> {
+    bots().into_iter().find(|(n, _)| *n == name).map(|(_, b)| b)
 }

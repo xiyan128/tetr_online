@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
 # End-to-end smoke of the agent research loop, driven purely by registry
-# names: a tiny climb writes its run ledger, stops at an iteration cap,
+# names: a tiny climb writes its receipt + checkpoint, stops at a cap,
 # RESUMEs from the checkpoint, the promotion panel renders a verdict, the
 # metric parse contract holds, and an unknown name is refused. Debug build,
 # ~a minute. Run before unleashing autonomous campaigns and after touching
-# the climb / ledger / sprt / registry plumbing.
+# the climb / ledger / sprt / registry / bots plumbing.
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
@@ -16,7 +16,7 @@ CLIMB_LOG=$(tr_run run smoke-climb --max-iters 2 2>&1) ||
     fail "first climb run errored: $CLIMB_LOG"
 RUN_DIR=$(sed -n 's/.*continue with `resume \(.*\)`.*/\1/p' <<<"$CLIMB_LOG")
 [[ -n "$RUN_DIR" ]] || fail "no resume hint in climb output"
-for f in spec.json outcomes.jsonl checkpoint.json summary.json; do
+for f in spec.json checkpoint.json; do
     [[ -f "$RUN_DIR/$f" ]] || fail "ledger artifact missing: $RUN_DIR/$f"
 done
 grep -q '"experiment": "smoke-climb"' "$RUN_DIR/spec.json" ||
@@ -30,13 +30,13 @@ grep -q "RESUMED from $RUN_DIR at iter 2" <<<"$RESUME_LOG" ||
     fail "resume did not continue from iter 2"
 grep -Eq 'iter 4 \| screen' <<<"$RESUME_LOG" || fail "resume did not reach iter 4"
 
-echo "== promotion panel (null check: smoke-promote must NOT promote)"
-PROMOTE_LOG=$(tr_run run smoke-promote 2>&1) || fail "promote errored: $PROMOTE_LOG"
-grep -q '^promote_verdict REJECT' <<<"$PROMOTE_LOG" ||
+echo "== promotion panel (null check: smoke-panel must NOT promote)"
+PROMOTE_LOG=$(tr_run run smoke-panel 2>&1) || fail "promote errored: $PROMOTE_LOG"
+grep -q '^panel_verdict REJECT' <<<"$PROMOTE_LOG" ||
     fail "null-check candidate was not rejected"
 
-echo "== metric parse contract (smoke-metric)"
-METRIC_LOG=$(tr_run run smoke-metric 2>/dev/null) || fail "metric errored"
+echo "== metric parse contract (smoke-downstack)"
+METRIC_LOG=$(tr_run run smoke-downstack 2>/dev/null) || fail "metric errored"
 grep -q '^downstack_pieces_censored ' <<<"$METRIC_LOG" || fail "censored line missing"
 grep -q '^downstack_clear_rate ' <<<"$METRIC_LOG" || fail "clear-rate line missing"
 
