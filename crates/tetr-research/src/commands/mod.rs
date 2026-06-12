@@ -18,8 +18,6 @@
 use std::path::PathBuf;
 use std::time::Duration;
 
-use tetr_core::ai::Cc2Weights;
-
 pub mod cc2_baseline;
 pub mod climb_app;
 pub mod downstack;
@@ -45,6 +43,3 @@ impl Runtime {
         Duration::from_secs(self.budget_secs.unwrap_or(default_secs))
     }
 }
-
-/// CC2 board-parameter vector (the climb's search space).
-pub type BoardParams = [f32; Cc2Weights::BOARD_PARAM_COUNT];

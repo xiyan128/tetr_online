@@ -22,6 +22,9 @@
 //! [`SearchState`](crate::ai::SearchState)). The T-slot `cutout_count` (needs
 //! bag/reserve) is approximated as a single cutout. These gaps affect *offense
 //! bookkeeping*, not the board-shaping that defines CC2's style.
+//!
+//! One deliberate **extension** on top of the port: [`Cc2Weights::attack`]
+//! (default `0.0` = pure CC2), the engine-true attack reward — see the field doc.
 
 use super::{EvalContext, Evaluator, Reward, Value};
 use crate::engine::{

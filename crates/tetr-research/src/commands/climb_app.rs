@@ -1,4 +1,4 @@
-//! `app-climb`: hill-climb a Cc2 beam bot's full weight surface on censored APP.
+//! `app-climb`: hill-climb a Cc2 search bot's full weight surface on censored APP.
 //!
 //! The optimizer the search teardown promised back "wrapping the primitives":
 //! a (1+1)-ES over the subject's **board + reward** parameters
@@ -106,14 +106,16 @@ impl Default for Spec {
     }
 }
 
-/// The subject's climbable surface: its beam config + Cc2 weights.
-fn subject_surface(subject: &Bot) -> io::Result<(usize, u8, Cc2Weights)> {
+/// The subject's climbable surface: its search config (carried verbatim —
+/// beam, tp-beam, or best-first) + its Cc2 weights. Greedy subjects are
+/// rejected with the rest: greedy ignores custom evaluators by design.
+fn subject_surface(subject: &Bot) -> io::Result<(SearchSpec, Cc2Weights)> {
     match (subject.spec.search, subject.spec.eval) {
-        (SearchSpec::Beam { width, depth }, EvalSpec::Cc2(w)) => Ok((width, depth, w)),
-        _ => Err(io::Error::other(format!(
-            "app-climb needs a beam + Cc2 subject; {} is {:?}",
+        (SearchSpec::Greedy, _) | (_, EvalSpec::Linear(_)) => Err(io::Error::other(format!(
+            "app-climb needs a Cc2 search subject (beam / tp-beam / best-first); {} is {:?}",
             subject.name, subject.spec
         ))),
+        (search, EvalSpec::Cc2(w)) => Ok((search, w)),
     }
 }
 
@@ -166,16 +168,19 @@ fn perturb(
     }
 }
 
-/// One fitness evaluation: the subject's beam over `weights`, censored APP per
-/// seed (`total_attack / max_pieces` — a top-out keeps its denominator).
+/// One fitness evaluation: the subject's search over `weights`, censored APP
+/// per seed (`total_attack / max_pieces` — a top-out keeps its denominator).
 fn evaluate(
-    width: usize,
-    depth: u8,
+    search: SearchSpec,
     weights: &Cc2Weights,
     seeds: &[u64],
     max_pieces: u32,
 ) -> (Vec<f64>, Vec<MarathonOutcome>) {
-    let bot = BotSpec::beam(width, depth).cc2(*weights);
+    let bot = BotSpec {
+        search,
+        eval: EvalSpec::Cc2(*weights),
+        blind: false,
+    };
     let stats = evaluate_capped(&bot.factory(), seeds, DEFAULT_MAX_FRAMES, max_pieces);
     let fits = stats
         .outcomes
@@ -205,7 +210,7 @@ fn mean(xs: &[f64]) -> f64 {
 }
 
 pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
-    let (width, depth, origin) = subject_surface(subject)?;
+    let (search, origin) = subject_surface(subject)?;
     let campaign = Campaign::derive(spec.campaign);
     let budget = rt.budget(DEFAULT_BUDGET_SECS);
     let start = Instant::now();
@@ -236,8 +241,7 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
                 spec.seeds_per_block,
             );
             let (fits, outcomes) = evaluate(
-                width,
-                depth,
+                search,
                 &to_weights(&origin, &cur),
                 &block_seeds,
                 spec.max_pieces,
@@ -248,8 +252,7 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
         let cand = perturb(&cur, &scales, sigma, &mut rng);
         let (cand_fits, outcomes) = evaluate(
-            width,
-            depth,
+            search,
             &to_weights(&origin, &cand),
             &block_seeds,
             spec.max_pieces,
@@ -288,11 +291,10 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
     // Self-validation on the campaign's held-out region: the honest readout.
     let val_seeds = seed_set_from(campaign.validation(spec.val_seeds), spec.val_seeds);
-    let (val_origin, o1) = evaluate(width, depth, &origin, &val_seeds, spec.max_pieces);
+    let (val_origin, o1) = evaluate(search, &origin, &val_seeds, spec.max_pieces);
     emit_games("val-origin", iter, &o1);
     let (val_best, o2) = evaluate(
-        width,
-        depth,
+        search,
         &to_weights(&origin, &cur),
         &val_seeds,
         spec.max_pieces,
@@ -301,7 +303,7 @@ pub fn run(spec: &Spec, subject: &Bot, rt: &Runtime) -> io::Result<Value> {
 
     let final_weights = to_weights(&origin, &cur);
     eprintln!(
-        "app-climb {} @ beam({width},{depth}) cap={} | {iter} iters {accepts} accepts | \
+        "app-climb {} @ {search:?} cap={} | {iter} iters {accepts} accepts | \
          validation APP {:.4} -> {:.4} ({} held-out seeds){}",
         subject.name,
         spec.max_pieces,

@@ -220,7 +220,16 @@ mod tests {
     /// renaming them breaks scripts silently — fail here instead.
     #[test]
     fn load_bearing_names_exist() {
-        for name in ["smoke-downstack", "marathon", "downstack", "versus", "race"] {
+        for name in [
+            "smoke-downstack",
+            "smoke-app-climb",
+            "marathon",
+            "marathon-holdout",
+            "downstack",
+            "versus",
+            "race",
+            "app-climb",
+        ] {
             assert!(find(name).is_some(), "missing load-bearing entry {name}");
         }
     }
