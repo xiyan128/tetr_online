@@ -6,7 +6,7 @@
 set -euo pipefail
 cd "$(git rev-parse --show-toplevel)"
 
-tr_run() { cargo run -q -p tetr-research -- "$@"; }
+tr_run() { cargo run -q -p tetr-research -- "$@" --allow-dirty; }
 fail() { echo "research-smoke: FAIL — $*" >&2; exit 1; }
 
 echo "== metric parse contract (smoke-downstack)"

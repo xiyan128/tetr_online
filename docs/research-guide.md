@@ -87,7 +87,10 @@ mutate a name with recorded runs; `resume` refuses a drifted spec and
 dirty-tree runs are stamped in the receipt. The search side
 (climbs, promotion panels) was removed pending a first-principles redesign;
 its history and run records live in git (`aa7bda9` and earlier). The only
-flags are machine-local: `--budget-secs`, `--cc2-bin`, `--runs-root`.
+flags are machine-local: `--budget-secs`, `--cc2-bin`, `--runs-root`, and
+`--allow-dirty` — runs REFUSE a dirty tree (or no git checkout) by default,
+because such runs are not re-runnable from `(commit, eval, bots…)`; the
+bypass records an exploratory run, stamped `git.dirty` in its receipt.
 Tracking is not a participant: the runner writes the receipt and installs
 the event sink before dispatch; commands never see either.
 

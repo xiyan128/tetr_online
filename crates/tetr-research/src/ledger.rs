@@ -53,6 +53,17 @@ impl RunDir {
     }
 }
 
+/// Working-tree dirtiness: `Some(true)` = uncommitted changes, `None` = not
+/// a git checkout. Both mean a run is not re-runnable from
+/// `(commit, eval, bots…)` — the runner gates on this unless bypassed.
+pub fn dirty() -> Option<bool> {
+    Command::new("git")
+        .args(["status", "--porcelain"])
+        .output()
+        .ok()
+        .and_then(|output| output.status.success().then_some(!output.stdout.is_empty()))
+}
+
 /// The default run-directory root: `<git-toplevel>/runs`, falling back to
 /// `./runs` outside git.
 pub fn runs_root() -> PathBuf {

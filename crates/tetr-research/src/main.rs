@@ -49,6 +49,11 @@ struct RuntimeArgs {
     /// Run-directory root (default: `<git toplevel>/runs`).
     #[arg(long)]
     runs_root: Option<PathBuf>,
+    /// Run despite a dirty tree (or no git checkout). The receipt still
+    /// stamps `git.dirty`; such runs are exploratory — not re-runnable from
+    /// `(commit, eval, bots…)` — and analysis filters them by default.
+    #[arg(long)]
+    allow_dirty: bool,
 }
 
 #[derive(Subcommand, Debug)]
@@ -99,6 +104,13 @@ fn execute(
             entry.name,
             entry.experiment.usage(),
         ));
+    }
+    if !args.allow_dirty && tetr_research::ledger::dirty() != Some(false) {
+        die(
+            "refusing to run: the working tree is dirty (or not a git checkout), so this \
+             run would not be re-runnable from (commit, eval, bots…).\n\
+             commit first, or pass --allow-dirty to record an exploratory run.",
+        );
     }
     let bots: Vec<Bot> = bot_names.iter().map(|n| bot_or_die(n)).collect();
     let rt = Runtime {
