@@ -7,24 +7,28 @@
 //! budget truncates only **between** games, so a budget-cut run is an honest
 //! prefix of the unbounded one.
 //!
-//! # RUN RECORD (2026-06-12, the PC campaign — codex-worktree screening)
+//! # RUN RECORD (2026-06-12, the PC campaign — worktree screen, reproduced)
 //!
 //! Goal: PPC on a clean board. The control says reward shaping is NOT enough:
-//! general search with a dominating PC reward sits at 0.0100–0.0125 PPC
-//! (tp128d9, bf2k-pc40, and a tp256d12 with perfect_clear=1000+override —
-//! TRAIN, 8×100 pieces). Scenario-coverage search moves it: on the 4-seed
-//! 20-piece opener screen, scenario coverage (s8w2) 0.050; reveal coverage
-//! 0.075 (s14w8) / **0.0875 (s28w8, the screen winner)** / 0.075 (s56w8); on
-//! the 100-piece screen reveal s14w2 reached 0.0340 vs tp128d9's 0.0125.
-//! Probed and rejected: PC-shape ranking (0.025), reveal+mass tiebreak
-//! (0.0625), per-reveal robustness (0.0625) — dropped from the planner (its
-//! header carries the record). Cost note: a scenario_cap×width=256 arm could
-//! not finish ONE 100-piece game in 300 s — budget before you widen.
+//! in the codex-worktree screening, general search with a dominating PC reward
+//! sat at 0.0100–0.0125 PPC (tp128d9, bf2k-pc40, and tp256d12 with
+//! perfect_clear=1000+override — TRAIN, 8×100 pieces). Scenario-coverage
+//! search moves it. REPRODUCED here under receipts on the 4-seed opener
+//! screen: **pc-reveal-s28w8 0.0875 PPC** (7 PCs / 80 pieces, APP 1.05,
+//! `20260612-212339-pc-opener-screen-v1-4726`) and pc-scenario-s8w2 0.0500
+//! (`20260612-212848-pc-opener-screen-v1-8832`) — both play the worktree's
+//! recorded games seed-for-seed, so its wider ladder transfers: reveal
+//! coverage 0.075 (s14w8) / 0.075 (s56w8), and 0.0340 on the 100-piece screen
+//! (s14w2) vs tp128d9's 0.0125. Probed and rejected there: PC-shape ranking
+//! (0.025), reveal+mass tiebreak (0.0625), per-reveal robustness (0.0625) —
+//! dropped from the planner (its header carries the record). Cost notes: the
+//! s28w8 opener read costs ~80 s/game release — the default 180 s budget
+//! truncates it, pass `--budget-secs 420` for all four seeds; the worktree's
+//! scenario_cap×width=256 arm could not finish ONE 100-piece game in 300 s.
 //!
-//! CAVEATS: those numbers are the worktree's claims — receipt-less, 4–8 TRAIN
-//! seeds, ≤7 PCs per arm — screening signal only, reproduced here under full
-//! discipline before any is quoted. `pc-validation-v1` (held-out) has NOT
-//! been read; read it once per promoted candidate.
+//! CAVEATS: 4–8 TRAIN seeds, ≤7 PCs per arm — screening signal only.
+//! `pc-validation-v1` (held-out) has NOT been read; read it once per promoted
+//! candidate.
 
 use std::time::Instant;
 
