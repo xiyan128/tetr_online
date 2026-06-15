@@ -461,6 +461,10 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             }),
         ),
         // Scenario coverage: each sampled continuation counts once.
+        // (Semantics note, 2026-06-12: `horizon` took over the scan depth the
+        // session's max_depth used to set — every registered arm pins it to
+        // its old depth, and budget/commitment stay off, so recorded games
+        // are byte-identical across the node-grain refactor.)
         (
             "pc-scenario-s8w2",
             BotSpec::pc_coverage(
@@ -470,6 +474,10 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
                     min_coverage_percent: 25,
                     fallback_width: 64,
                     unit: PcCoverageUnit::Scenarios,
+                    horizon: 10,
+                    scan_node_budget: 0,
+                    commit_lines: false,
+                    shared_prefix: false,
                 },
                 10,
             )
@@ -485,8 +493,74 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
                     min_coverage_percent: 25,
                     fallback_width: 64,
                     unit: PcCoverageUnit::Reveals,
+                    horizon: 10,
+                    scan_node_budget: 0,
+                    commit_lines: false,
+                    shared_prefix: false,
                 },
                 10,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The pre-budget in-game arm (cap 14, width 2, full scan every piece,
+        // depth-10 fallback): the baseline the budgeted+committed pc-watch
+        // arm is judged against (the old catalog entry was never screened).
+        (
+            "probe-pc-watch-unbudgeted",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 14,
+                    width_per_root: 2,
+                    min_coverage_percent: 25,
+                    fallback_width: 32,
+                    unit: PcCoverageUnit::Reveals,
+                    horizon: 10,
+                    scan_node_budget: 0,
+                    commit_lines: false,
+                    shared_prefix: false,
+                },
+                10,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
+        // pc-watch-v1 minus the line commitment: isolates how much of the
+        // watch arm's PPC delta comes from the budget vs the commitment.
+        (
+            "probe-pc-watch-uncommitted",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 14,
+                    width_per_root: 2,
+                    min_coverage_percent: 25,
+                    fallback_width: 32,
+                    unit: PcCoverageUnit::Reveals,
+                    horizon: 10,
+                    scan_node_budget: 60_000,
+                    commit_lines: false,
+                    shared_prefix: false,
+                },
+                3,
+            )
+            .cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The in-game PC Hunter's exact operating point (budgeted scan +
+        // committed lines + light fallback), registered so the catalog entry
+        // cites a measurable arm — see `src/ai/registry.rs`.
+        (
+            "pc-watch-v1",
+            BotSpec::pc_coverage(
+                PcCoverageConfig {
+                    scenario_cap: 14,
+                    width_per_root: 2,
+                    min_coverage_percent: 25,
+                    fallback_width: 32,
+                    unit: PcCoverageUnit::Reveals,
+                    horizon: 10,
+                    scan_node_budget: 60_000,
+                    commit_lines: true,
+                    shared_prefix: true,
+                },
+                3,
             )
             .cc2(Cc2Weights::attack_tuned()),
         ),
@@ -500,6 +574,10 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
                     min_coverage_percent: 25,
                     fallback_width: 4,
                     unit: PcCoverageUnit::Reveals,
+                    horizon: 3,
+                    scan_node_budget: 0,
+                    commit_lines: false,
+                    shared_prefix: false,
                 },
                 3,
             )

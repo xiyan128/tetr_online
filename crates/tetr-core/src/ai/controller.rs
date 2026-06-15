@@ -216,24 +216,35 @@ impl AiController {
         eval: Box<dyn crate::ai::Evaluator>,
         budget: SearchBudget,
     ) -> Self {
-        Self::interactive_with(mind, eval, budget, Handicap::default())
+        Self::interactive_with(
+            mind,
+            eval,
+            budget,
+            Handicap::default(),
+            crate::ai::runner::sliced::DEFAULT_QUANTUM,
+        )
     }
 
-    /// [`interactive`](Self::interactive) with an explicit handicap — for the
-    /// rare catalog entry whose *character* the shared dials would erase (a
-    /// perfect-clear builder dies to any imperfection: one misplaced piece
-    /// kills a whole ten-piece line, so its entry keeps the human-feel
-    /// reaction delay but plays precisely). The venue and seed conventions
-    /// stay pinned here either way.
+    /// [`interactive`](Self::interactive) with an explicit handicap and venue
+    /// quantum — for the rare catalog entry whose *character* the shared
+    /// dials would erase (a perfect-clear builder dies to any imperfection:
+    /// one misplaced piece kills a whole ten-piece line, so its entry keeps
+    /// the human-feel reaction delay but plays precisely), or whose mind's
+    /// per-node work is so much lighter than the default quantum's sizing
+    /// assumption that the default would starve it (the PC scan's eval-unit
+    /// nodes run ~100× cheaper than best-first expansions, so its quantum is
+    /// correspondingly larger). The venue and seed conventions stay pinned
+    /// here either way.
     pub fn interactive_with(
         mind: Box<dyn crate::ai::Mind>,
         eval: Box<dyn crate::ai::Evaluator>,
         budget: SearchBudget,
         handicap: Handicap,
+        quantum: u32,
     ) -> Self {
         let policy = SearchPolicy::new(mind, eval, budget, handicap.imperfection, DEFAULT_AI_SEED);
         Self::with_runner(
-            Box::new(SlicedRunner::new(Box::new(policy))),
+            Box::new(SlicedRunner::with_quantum(Box::new(policy), quantum)),
             handicap.reaction,
         )
     }

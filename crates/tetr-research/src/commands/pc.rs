@@ -26,9 +26,43 @@
 //! truncates it, pass `--budget-secs 420` for all four seeds; the worktree's
 //! scenario_cap×width=256 arm could not finish ONE 100-piece game in 300 s.
 //!
+//! # RUN RECORD (2026-06-12, the watch arm — budgeted scan + line commitment)
+//!
+//! The node-grain/commitment refactor's gate, all on the 4-seed opener
+//! screen (receipts recorded from the implementation tree, pre-commit):
+//! pc-reveal-s28w8 replays its recorded games **byte-identically** (PPC
+//! 0.0875, `20260612-223949-pc-opener-screen-v1-87254` ==
+//! `20260612-212339`'s games.jsonl) — the registered arms cross the refactor
+//! untouched. The in-game operating point **pc-watch-v1** (cap 14 × width 2,
+//! scan_node_budget 60k, commit_lines, depth-3 fallback) reads **0.025 PPC /
+//! 0.5625 APP** (`20260612-224554-…-94325`) vs the pre-budget in-game arm
+//! probe-pc-watch-unbudgeted's 0.0125 / 0.4250 (`20260612-224657-…-95275`)
+//! — twice the PC rate at ~1/100 the compute (4 seeds finish in ~3 s vs the
+//! budget truncating the unbudgeted arm). probe-pc-watch-uncommitted reads
+//! the same 0.025 (`20260612-224652-…-95078`): at this sample size the
+//! budget cut does the work and the commitment is PPC-neutral — it buys the
+//! zero-search follow-ups (in-game smoothness), not coverage.
+//!
 //! CAVEATS: 4–8 TRAIN seeds, ≤7 PCs per arm — screening signal only.
 //! `pc-validation-v1` (held-out) has NOT been read; read it once per promoted
 //! candidate.
+//!
+//! # RUN RECORD (2026-06-12, Layer 4 — shared-prefix scan)
+//!
+//! Layer 4 searches the visible queue once and forks per scenario at the first
+//! unknown draw (`PcCoverageConfig::shared_prefix`). Registered research arms
+//! keep `shared_prefix: false` so recorded games stay byte-identical; the
+//! interactive arm (`pc-watch-v1`, `shared_prefix: true`) trades a fresh PPC
+//! screen for ~2× headless scan throughput on the opener eval.
+//!
+//! With `shared_prefix: true` on the registered arm (exploratory only):
+//! PPC **0.0625** (5 PCs / 80, `20260612-231116-…-24793`) vs the pre-Layer-4
+//! **0.0875** — canonical-tail transposition during the prefix changes which
+//! futures survive truncation, so this is expected until a per-scenario-tail
+//! prefix (true byte match) is implemented. The game arm **pc-watch-v1** with
+//! Layer 4 reads **0.0375 PPC** (`20260612-231337-…-27678`) vs **0.025**
+//! without — a win at the interactive operating point despite the research-arm
+//! regression on the exploratory run.
 
 use std::time::Instant;
 

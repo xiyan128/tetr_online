@@ -41,10 +41,13 @@ pub const NATIVE_QUANTUM: u32 = 32;
 /// size against (see `controller::ATTACK_NODE_BUDGET`).
 pub const WASM_QUANTUM: u32 = 16;
 
+/// The platform default ([`NATIVE_QUANTUM`] / [`WASM_QUANTUM`]) — exposed so a
+/// venue-tuned construction seam (`AiController::interactive_with`) can name
+/// "the default" without duplicating the platform split.
 #[cfg(not(target_arch = "wasm32"))]
-const DEFAULT_QUANTUM: u32 = NATIVE_QUANTUM;
+pub(crate) const DEFAULT_QUANTUM: u32 = NATIVE_QUANTUM;
 #[cfg(target_arch = "wasm32")]
-const DEFAULT_QUANTUM: u32 = WASM_QUANTUM;
+pub(crate) const DEFAULT_QUANTUM: u32 = WASM_QUANTUM;
 
 /// A [`DecisionRunner`] that thinks one bounded quantum per poll. Owns the
 /// [`Policy`] it drives.

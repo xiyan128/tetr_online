@@ -421,6 +421,23 @@ impl SearchState {
         }
     }
 
+    /// Append a scenario's speculative continuation and, when the visible queue
+    /// was already exhausted, spawn its front piece — the fork the shared-prefix
+    /// scan performs when a per-scenario tail begins (matches a whole-scenario
+    /// search that extended the queue up front).
+    pub(crate) fn fork_scenario_queue(
+        &mut self,
+        continuation: impl IntoIterator<Item = crate::engine::PieceType>,
+    ) {
+        let spawn_next = self.queue.is_empty();
+        self.queue.extend(continuation);
+        if spawn_next {
+            if let Some(next) = self.deal_from_queue() {
+                self.spawn(next);
+            }
+        }
+    }
+
     /// Transition the Back-to-Back flag for a freshly locked placement.
     ///
     /// Delegates to the engine's own predicates — the exact transition

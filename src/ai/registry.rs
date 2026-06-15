@@ -26,6 +26,29 @@ use crate::ai::{
 const BEAM_WIDTH: usize = 16;
 const BEAM_DEPTH: u8 = 2;
 
+/// The PC Hunter's scan horizon: the PC line length the coverage scan covers.
+/// Lines complete around lock 10 (a 10-piece line fills 40 cells).
+const PC_HORIZON: u8 = 10;
+
+/// Per-decision cap on the PC Hunter's coverage scan, in evaluator-call
+/// units. At the measured release rate (~600 evals/ms) this bounds the
+/// worst-case decision near 100 ms of compute — spread at [`PC_QUANTUM`] per
+/// frame, ≈0.5 s of wall clock, the budgeted "thinking pause" a committed
+/// line then amortizes over its whole length (follow-ups are zero-search).
+const PC_SCAN_NODE_BUDGET: u32 = 60_000;
+
+/// Fallback TP-beam depth for the PC Hunter when the scan abstains —
+/// decoupled from the scan's [`PC_HORIZON`] (depth 10 cost the catalog norm
+/// ×10 for ordinary-play moves the beam decides anyway).
+const PC_FALLBACK_DEPTH: u8 = 3;
+
+/// Per-poll node quantum for the PC Hunter's sliced venue. The shared
+/// default (32) is sized for best-first node *expansions*; the PC scan
+/// meters single evaluator calls, ~100× cheaper each, so its frame slice is
+/// correspondingly larger: ≈3 ms at the measured ~600 evals/ms — same
+/// convention as `ATTACK_NODE_BUDGET`, a configured count, never a clock.
+const PC_QUANTUM: u32 = 2_000;
+
 /// One selectable AI model: a short display name (sized for a menu row), a
 /// one-line detail blurb (the picker's focus-driven description pane), and a
 /// factory for a fresh controller.
@@ -210,15 +233,19 @@ impl Default for ModelRegistry {
             || AiController::attack(Handicap::default(), DEFAULT_AI_SEED),
         ));
 
-        // The perfect-clear hunter: the research crate's coverage planner at a
-        // watchable operating point (reveal coverage, 14 scenarios, width 2 —
-        // ~0.45 s/decision on PC-active boards, hidden in the reaction delay;
-        // a scan poll can cost a frame or two, the price of the batch grain).
+        // The perfect-clear hunter: the research crate's coverage planner at
+        // the registered `pc-watch-v1` operating point (reveal coverage, 14
+        // scenarios, width 2; horizon-10 scan over a depth-3 fallback). The
+        // pace machinery: the scan is node-grain and budgeted at 60k evals
+        // (≈0.5 s worst case, sliced at PC_QUANTUM ≈ 3 ms/frame — no frame
+        // hitches), and committed PC lines serve follow-up pieces with zero
+        // search, so the full scan runs about once per line, not per piece.
         // Two deliberate deviations from the catalog's shared conventions,
         // both about the model's character: imperfection 0 (one misplaced
         // piece kills a ten-piece PC line — the shared 0.12 would erase what
-        // this entry exists to show) while the human-feel reaction stays; and
-        // a fixed depth-10 budget (PC lines complete around lock 10).
+        // this entry exists to show, and would desync the committed line)
+        // while the human-feel reaction stays; and the custom venue quantum
+        // below.
         entries.push(ModelEntry::new(
             "PC Hunter",
             "Perfect-clear builder: covers the bag's possible continuations and \
@@ -232,13 +259,18 @@ impl Default for ModelRegistry {
                         min_coverage_percent: 25,
                         fallback_width: 32,
                         unit: PcCoverageUnit::Reveals,
+                        horizon: PC_HORIZON,
+                        scan_node_budget: PC_SCAN_NODE_BUDGET,
+                        commit_lines: true,
+                        shared_prefix: true,
                     })),
                     Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(10),
+                    SearchBudget::beam(PC_FALLBACK_DEPTH),
                     Handicap {
                         reaction: Duration::from_millis(200),
                         imperfection: 0.0,
                     },
+                    PC_QUANTUM,
                 )
             },
         ));
