@@ -431,10 +431,8 @@ impl SearchState {
     ) {
         let spawn_next = self.queue.is_empty();
         self.queue.extend(continuation);
-        if spawn_next {
-            if let Some(next) = self.deal_from_queue() {
-                self.spawn(next);
-            }
+        if spawn_next && let Some(next) = self.deal_from_queue() {
+            self.spawn(next);
         }
     }
 

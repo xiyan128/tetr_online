@@ -12,7 +12,7 @@
 //!
 //! Line clears stay legal during the scan. The PC-specific pruning uses only
 //! *necessary* conditions — cell-count divisibility and a height bound from the
-//! rows that can still be cleared ([`pc_feasible`]) — so it can never prune a
+//! rows that can still be cleared (`pc_feasible`) — so it can never prune a
 //! continuation that actually reaches a PC within the horizon.
 //!
 //! # Session grain (the [`Mind`] contract)
@@ -558,17 +558,25 @@ fn fold_hit(
     }
 }
 
-/// Reconstruct a solving path (ply 2 on) by walking the scenario's line arena
-/// from the solving child's parent up to a root child.
-fn line_path(arena: &[(u32, Placement)], parent_line_id: u32, last: &Placement) -> Vec<Placement> {
-    let mut path = vec![last.clone()];
-    let mut id = parent_line_id;
+/// Walk a path arena from `line_id` up to a root child, returning the recorded
+/// placements in root-first order (empty when `line_id` is [`NO_LINE`]).
+fn arena_path(arena: &[(u32, Placement)], line_id: u32) -> Vec<Placement> {
+    let mut path = Vec::new();
+    let mut id = line_id;
     while id != NO_LINE {
         let (parent, placement) = &arena[id as usize];
         path.push(placement.clone());
         id = *parent;
     }
     path.reverse();
+    path
+}
+
+/// Reconstruct a solving path (ply 2 on) by walking the scenario's line arena
+/// from the solving child's parent up to a root child.
+fn line_path(arena: &[(u32, Placement)], parent_line_id: u32, last: &Placement) -> Vec<Placement> {
+    let mut path = arena_path(arena, parent_line_id);
+    path.push(last.clone());
     path
 }
 
@@ -585,14 +593,7 @@ fn line_path_with_prefix(
     if prefix_line_id == NO_LINE {
         return tail;
     }
-    let mut prefix = Vec::new();
-    let mut id = prefix_line_id;
-    while id != NO_LINE {
-        let (parent, placement) = &prefix_arena[id as usize];
-        prefix.push(placement.clone());
-        id = *parent;
-    }
-    prefix.reverse();
+    let mut prefix = arena_path(prefix_arena, prefix_line_id);
     prefix.extend(tail);
     prefix
 }
@@ -609,11 +610,6 @@ fn shared_prefix_depth(state: &SearchState, horizon: u8, unknown_draws: usize) -
 }
 
 impl Scan {
-    /// Whether only the speculative tail remains — time to fork a scenario.
-    fn visible_exhausted(&self, state: &SearchState) -> bool {
-        self.tail_len > 0 && state.queue.len() <= self.tail_len
-    }
-
     /// Swap the canonical tail for a scenario's continuation (and spawn when
     /// the visible queue was already exhausted at the branch).
     fn attach_scenario_tail(&self, state: &mut SearchState, continuation: &[PieceType]) {
@@ -621,13 +617,7 @@ impl Scan {
         state.queue.truncate(vis_len);
         state.fork_scenario_queue(continuation.iter().copied());
     }
-}
 
-fn pad_tail(state: &mut SearchState, tail: &[PieceType]) {
-    state.queue.extend(tail.iter().copied());
-}
-
-impl Scan {
     /// Whether every scenario has been searched (and any prefix is done).
     fn complete(&self) -> bool {
         let prefix_done = self.prefix_depth == 0 || self.prefix_frontier.is_some();
@@ -668,7 +658,7 @@ impl Scan {
             if child.board.is_empty() && !child.dead {
                 self.prefix_solved[root_index] = true;
             } else if !child.dead && pc_feasible(&child, self.horizon.saturating_sub(1)) {
-                pad_tail(&mut child, &canonical_tail);
+                child.queue.extend(canonical_tail.iter().copied());
                 frontier.push(Node {
                     score: (value + reward).0,
                     state: child,
@@ -776,7 +766,7 @@ impl Scan {
             } else {
                 NO_LINE
             };
-            pad_tail(&mut child, &canonical_tail);
+            child.queue.extend(canonical_tail.iter().copied());
             run.next.push(Node {
                 score: (value + acc).0,
                 state: child,
@@ -798,8 +788,8 @@ impl Scan {
 
         if let Some(branch) = self.prefix_frontier.as_ref() {
             let solved = self.prefix_solved.clone();
-            for root_index in 0..self.roots.len() {
-                if solved[root_index] {
+            for (root_index, &is_solved) in solved.iter().enumerate() {
+                if is_solved {
                     fold_hit(
                         self.unit,
                         &mut self.scenario_hits,
@@ -1208,6 +1198,23 @@ impl Mind for PcCoveragePlanner {
     }
 }
 
+/// Total occupied cells and stack height (topmost occupied row + 1) of `state`'s
+/// board, both read straight off the column bitboard — the two metrics the PC
+/// feasibility and candidate gates share.
+fn board_cells_and_height(state: &SearchState) -> (usize, usize) {
+    let columns = state.board.columns();
+    let cells = columns
+        .iter()
+        .map(|column| column.count_ones() as usize)
+        .sum();
+    let height = columns
+        .iter()
+        .map(|column| (u64::BITS - column.leading_zeros()) as usize)
+        .max()
+        .unwrap_or(0);
+    (cells, height)
+}
+
 /// Necessary conditions for a PC within `remaining` more pieces: some piece
 /// count makes the total cells a whole number of rows, and the current stack
 /// is no taller than the rows that would all clear. Never prunes a reachable
@@ -1216,19 +1223,7 @@ fn pc_feasible(state: &SearchState, remaining: u8) -> bool {
     if state.board.is_empty() {
         return true;
     }
-    let cells: usize = state
-        .board
-        .columns()
-        .iter()
-        .map(|column| column.count_ones() as usize)
-        .sum();
-    let height = state
-        .board
-        .columns()
-        .iter()
-        .map(|column| (u64::BITS - column.leading_zeros()) as usize)
-        .max()
-        .unwrap_or(0);
+    let (cells, height) = board_cells_and_height(state);
     let width = state.board.width();
 
     (1..=usize::from(remaining)).any(|pieces| {
@@ -1242,14 +1237,7 @@ fn pc_feasible(state: &SearchState, remaining: u8) -> bool {
 /// the coverage scan resumes when ordinary play returns to a compact
 /// construction zone.
 fn pc_candidate_state(state: &SearchState) -> bool {
-    let cells: u32 = state.board.columns().iter().map(|c| c.count_ones()).sum();
-    let height = state
-        .board
-        .columns()
-        .iter()
-        .map(|column| u64::BITS - column.leading_zeros())
-        .max()
-        .unwrap_or(0);
+    let (cells, height) = board_cells_and_height(state);
     cells <= 40 && height <= 6
 }
 

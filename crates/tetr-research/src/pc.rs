@@ -1,7 +1,7 @@
 //! Headless perfect-clear evaluation on a clean board.
 //!
 //! The headline metric is **perfect clears per piece (PPC)**, counted only when
-//! the engine's post-clear board is actually empty ([`crate::accounting`]'s
+//! the engine's post-clear board is actually empty (`crate::accounting`'s
 //! engine-true fold — never the planner's own claim). Attack per piece and
 //! top-out rate ride along as failed-attempt quality measures: a PC policy is
 //! useless if its misses destroy ordinary play. Every game also records the
