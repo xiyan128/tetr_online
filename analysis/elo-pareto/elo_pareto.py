@@ -144,6 +144,7 @@ def main() -> int:
     front = pareto_front(cfg.compute_ms.to_numpy(), cfg.elo.to_numpy())
     cfg["on_front"] = False
     cfg.loc[front, "on_front"] = True
+    cfg.to_csv(HERE / "elo.csv", index=False)  # the fitted strengths, for scaling_analysis.py
 
     # ---- summary ----
     print(f"\nfit on {len(cfg)} configs, {len(pairs)} matchups, {games} games\n")
