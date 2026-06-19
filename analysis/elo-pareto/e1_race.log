@@ -1,0 +1,15 @@
+E1 pair-GSPRT | H0 p=0.5, H1 p=0.55 | rain 8, 240 plies, arm-swapped CRN | 360s/race
+
+question (cand vs incumbent)                          verdict      W-L   cand_wr  margin    pairs
+w16d12 vs w16d9                                  inconclusive  120-85       58.5%   +5.59      200   [A1 within-family: d12 > d9 ?]
+w16d15 vs w16d9                                  inconclusive   97-88       52.4%   +6.93      184   [A2 within-family: d15 > d9 ?]
+w16d15 vs w16d12                                 inconclusive   79-78       50.3%   +0.49      152   [A3 within-family: d15 > d12 ?]
+w24d12 vs w24d9                                  inconclusive   56-35       61.5%   +6.90      120   [A4 within-family (wider): d12 > d9 ?]
+w16d12 vs w128d9                                 inconclusive    8-36       18.2%  -26.55       48   [B1 narrow-deep vs champion]
+w24d12 vs w128d9                                 inconclusive   11-40       21.6%  -18.07       48   [B2 narrow-deep(wider) vs champion]
+w16d9 vs w128d9                                    H0 no-edge    5-50        9.1%  -27.88       48   [C  calibration: w16d9 vs champion (expect champion wins)]
+
+read A (within-family): cand_wr > 50% AND H1 => depth past 9 pays; ~50% / H0 => the
+preview-horizon ceiling holds (deeper is decoration). read B: cand_wr >= ~50% means a
+config at <1/5 the champion's nodes matches/beats it. read C: champion should clearly win
+(cand_wr well under 50%), proving the test discriminates a known ~208-Elo gap.

@@ -55,6 +55,47 @@ to "close the learning loop."
 
 ---
 
+## Results (executed)
+
+Items 2.1–2.3 have been run. Raw output: `analysis/elo-pareto/{e1_race.log,f2_race.log}`;
+runners: `crates/tetr-research/examples/{depth_probe,e1_depth_race,f2_champion_depth}.rs`.
+
+**E0 (depth-stabilization probe).** Over 60 mid-game states the ply-1 decision is already
+settled by the ~d6 preview horizon for **60–77%** of states, but still flips past d9 for
+**10–18%** (p90 stabilization depth d10–11), and the value estimate keeps rising d9→d15. Not a
+clean refutation → escalated to E1.
+
+**E1 (pair-GSPRT, rain-decisive, arm-swapped + CRN).** The depth question resolves with nuance:
+- **Depth past the d9 cap IS a real lever — but modest and fast-saturating.** w16d12 beats w16d9
+  at **58.5%** and w24d12 beats w24d9 at **61.5%** (CIs exclude 50%) — the cap was a *grid*
+  choice, and a few plies past it pay. But w16d15 ≈ w16d12 (**50.3%**, dead equal): depth
+  saturates by **~d12**. Against the champion, depth ~doubles a narrow config's win-rate
+  (w16d9 9.1% → w16d12 18.2%).
+- **Depth does NOT substitute for width head-to-head.** Narrow-deep loses decisively to the wide
+  champion: w16d12 **18.2%**, w24d12 **21.6%** vs w128d9. Width is a genuine **survival hedge**
+  (one over-optimistic deep line that tops out is catastrophic) — the systems lens was right, and
+  the earlier "the champion mis-allocates on width" reading was **wrong**. (Calibration: w16d9 vs
+  champion = **9.1%**, confirming the test discriminates a ~200-Elo gap.)
+
+**2.2 (interaction + regime refit, on-disk).** The "5.2× depth" headline is an average over a
+sloped, *interacting* surface (cross term +38, R² 0.948→0.965; width buys 33 Elo/doubling at d2
+but 116 at d9). Split by the preview regime: depth/width is **6.9× in the concrete horizon (d≤6)**
+but **1.2× past it (d≥7)** — depth's dominance is a concrete-ply effect, which E0/E1 then confirmed
+dynamically.
+
+**2.3 (profile at narrow-deep).** The cost split shifts with shape: clone/memmove is only **9.5%**
+at narrow-deep (vs ~40% on the wide champion) because cloning is *width-driven*. Deep-narrow bots
+are bound by movegen (collision ~20% + the BFS-scratch TLS ~20%) and eval (~12%), not cloning — so
+the clone-deferral lever is champion-specific.
+
+**Net so far.** The current paradigm's cheapest real gain is to **lift the depth cap to ~12** (a
+modest, saturating bump). Whether the *champion itself* gains from depth, and whether at the top
+the extra compute is better as depth or width, is the F1/F2 follow-up *(running)*; §2.8's
+best-first-vs-champion is F3. The headline correction stands: the ~1411 ceiling is **not** "we ran
+out of depth" — depth saturates ~3 plies past the cap and cannot buy past width's survival role.
+
+---
+
 ## 2. Push the current paradigm (ranked)
 
 Lead with the cheapest, highest-confidence wins. Items 2.1–2.2 are zero-code
