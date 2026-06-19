@@ -68,7 +68,7 @@ use crate::ai::eval::{Cc2Evaluator, Cc2Weights};
 use crate::ai::handicap::Handicap;
 use crate::ai::plan::placement_to_inputs;
 use crate::ai::policy::{Decision, Policy, SearchPolicy};
-use crate::ai::runner::budgeted::{BUDGET_STEP, DEFAULT_BUDGET};
+use crate::ai::runner::budgeted::DEFAULT_BUDGET;
 use crate::ai::runner::{BudgetedRunner, DecisionRunner, MonotonicClock, SlicedRunner, SyncRunner};
 use crate::ai::search::{BestFirstPlanner, SearchBudget};
 use crate::ai::state::SearchState;
@@ -231,12 +231,7 @@ impl AiController {
         let handicap = Handicap::default();
         let policy = SearchPolicy::new(mind, eval, budget, handicap.imperfection, DEFAULT_AI_SEED);
         Self::with_runner(
-            Box::new(BudgetedRunner::new(
-                Box::new(policy),
-                BUDGET_STEP,
-                DEFAULT_BUDGET,
-                clock,
-            )),
+            Box::new(BudgetedRunner::new(Box::new(policy), DEFAULT_BUDGET, clock)),
             handicap.reaction,
         )
     }

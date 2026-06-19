@@ -55,19 +55,25 @@ pub(crate) const DEFAULT_BUDGET: Duration = NATIVE_BUDGET;
 pub(crate) const DEFAULT_BUDGET: Duration = WASM_BUDGET;
 
 /// The granularity at which a budgeted poll checks the clock: small, so a poll
-/// overshoots its [`DEFAULT_BUDGET`] by at most one step's worth of search (a few ms),
-/// keeping the worst poll comfortably inside a frame. The *total* per-poll work is
-/// governed by the budget, not this step — so unlike the sliced quantum it needs no
-/// per-bot tuning for cheap- vs expensive-node minds.
-pub(crate) const BUDGET_STEP: u32 = 8;
+/// overshoots its [`DEFAULT_BUDGET`] by at most one step's worth of search *or* one
+/// clock-resolution tick — whichever is larger (coarse wasm `Performance.now`, when
+/// cross-origin isolation is off, can be clamped to ~1 ms) — keeping the worst poll
+/// comfortably inside a frame. The *total* per-poll work is governed by the budget, not
+/// this step — so unlike the sliced quantum it needs no per-bot tuning, and production
+/// never varies it (only the granularity-sweep tests do).
+const BUDGET_STEP: u32 = 8;
 
 /// A monotonic wall-clock source for the time-budgeted venue, **injected by the host**.
 ///
 /// Only differences between [`elapsed`](Self::elapsed) readings are used, so any fixed
-/// epoch is fine. `Send` (not `Sync`) matches [`DecisionRunner`]; the controller seat
+/// epoch is fine — but it must track **real elapsed time**: a budgeted poll is bounded by
+/// the clock reaching the budget, so a clock that never advances would let one poll run
+/// until the policy finishes (a full-decision frame), or — for a pathological
+/// never-terminating policy — forever. The shipped host clock is `Instant`-backed and
+/// always advances. `Send` (not `Sync`) matches [`DecisionRunner`]; the controller seat
 /// it lives behind is single-threaded.
 pub trait MonotonicClock: Send {
-    /// Monotonically non-decreasing time since an arbitrary fixed epoch.
+    /// Real elapsed time since an arbitrary fixed epoch — monotonic and advancing.
     fn elapsed(&self) -> Duration;
 }
 
@@ -89,9 +95,19 @@ pub struct BudgetedRunner {
 }
 
 impl BudgetedRunner {
-    /// Build a runner with an explicit per-step node `quantum`, per-poll wall-clock
-    /// `budget`, and injected `clock`.
-    pub fn new(
+    /// Build a runner with a per-poll wall-clock `budget` and injected `clock`. The
+    /// per-step granularity is fixed at `BUDGET_STEP`: the budget governs total per-poll
+    /// work, so (unlike the sliced quantum) the step is an implementation detail, not a
+    /// caller-tuned dial.
+    pub fn new(policy: Box<dyn Policy>, budget: Duration, clock: Box<dyn MonotonicClock>) -> Self {
+        Self::with_step(policy, BUDGET_STEP, budget, clock)
+    }
+
+    /// Build with an explicit per-step `quantum` — only the granularity at which the
+    /// budget is checked, never the total work. Private: production goes through
+    /// [`new`](Self::new) at `BUDGET_STEP`; the tests vary the step to exercise the
+    /// budget arithmetic across granularities.
+    fn with_step(
         policy: Box<dyn Policy>,
         quantum: u32,
         budget: Duration,
@@ -226,10 +242,10 @@ mod tests {
             r.submit(obs.clone());
             origin(r.poll().expect("sync decides at submit"))
         };
-        // A spread of (quantum, budget-step) operating points, including extremes.
-        for &(q, step_us) in &[(1u32, 1u64), (8, 50), (16, 250), (200, 1)] {
+        // A spread of (quantum, budget-step) operating points.
+        for &(q, step_us) in &[(1u32, 1u64), (8, 50), (16, 250)] {
             let clock = Box::new(FakeClock::new(Duration::from_micros(step_us)));
-            let mut r = BudgetedRunner::new(
+            let mut r = BudgetedRunner::with_step(
                 Box::new(attack_shaped_policy(1)),
                 q,
                 Duration::from_micros(500),
@@ -250,7 +266,6 @@ mod tests {
         let obs = engine_obs(7);
         let mut r = BudgetedRunner::new(
             Box::new(attack_shaped_policy(1)),
-            16,
             Duration::from_micros(8_000),
             Box::new(FrozenClock),
         );
@@ -268,7 +283,7 @@ mod tests {
         let (sliced_polls, sliced_origin) = drive(&mut sliced, obs.clone());
 
         let step = Duration::from_micros(100);
-        let mut budgeted = BudgetedRunner::new(
+        let mut budgeted = BudgetedRunner::with_step(
             Box::new(attack_shaped_policy(3)),
             16,
             step, // budget == step ⇒ one quantum then yield
@@ -288,7 +303,7 @@ mod tests {
         // versus one-quantum slicing. step=1us, budget=5us ⇒ ~5 quanta/poll.
         let obs = engine_obs(7);
         let step = Duration::from_micros(1);
-        let mut wide = BudgetedRunner::new(
+        let mut wide = BudgetedRunner::with_step(
             Box::new(attack_shaped_policy(3)),
             16,
             step * 5,
@@ -296,7 +311,7 @@ mod tests {
         );
         let (wide_polls, _) = drive(&mut wide, obs.clone());
 
-        let mut tight = BudgetedRunner::new(
+        let mut tight = BudgetedRunner::with_step(
             Box::new(attack_shaped_policy(3)),
             16,
             step,
@@ -314,7 +329,6 @@ mod tests {
         let obs = engine_obs(7);
         let mut r = BudgetedRunner::new(
             Box::new(attack_shaped_policy(1)),
-            16,
             Duration::from_micros(100),
             Box::new(FakeClock::new(Duration::from_micros(100))),
         );

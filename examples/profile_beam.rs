@@ -48,7 +48,6 @@ fn budgeted_cadence(budget_ms: u64) {
         );
         let mut runner = BudgetedRunner::new(
             Box::new(policy),
-            8,
             budget,
             Box::new(RealClock {
                 start: Instant::now(),
