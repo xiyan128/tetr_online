@@ -88,11 +88,32 @@ at narrow-deep (vs ~40% on the wide champion) because cloning is *width-driven*.
 are bound by movegen (collision ~20% + the BFS-scratch TLS ~20%) and eval (~12%), not cloning — so
 the clone-deferral lever is champion-specific.
 
-**Net so far.** The current paradigm's cheapest real gain is to **lift the depth cap to ~12** (a
-modest, saturating bump). Whether the *champion itself* gains from depth, and whether at the top
-the extra compute is better as depth or width, is the F1/F2 follow-up *(running)*; §2.8's
-best-first-vs-champion is F3. The headline correction stands: the ~1411 ceiling is **not** "we ran
-out of depth" — depth saturates ~3 plies past the cap and cannot buy past width's survival role.
+**Champion-scale follow-up (F1–F3, thin — 32–40 pairs, champion-class games are slow, so
+directional not decisive).**
+- **F1 — deeper champion:** w128d12 vs w128d9 = **54.2%**. Pushing the champion itself deeper
+  helps only marginally — *less* than the 58.5% at w16, because depth's edge shrinks as width
+  grows (the interaction, inverted).
+- **F2 — reallocation at the top:** w128d12 vs w176d9 (iso-node ~1408) = **57.9%**. Given a
+  survival-width floor, the *marginal* compute is better spent on **depth than more width**, even
+  at the top.
+- **F3 (§2.8) — best-first:** bf(972,9) vs w128d9 = **9.4%** (H0, decisive). Best-first is **not**
+  a cheaper champion — its TRAIN-APP per-node edge collapses at versus; the beam's width (survival
+  hedge) crushes its width-poor deep lines. Resolves the standing 2.8 question.
+
+**Net.** The optimistic "narrow-deep is a cheaper champion" reading is **refuted**, and the
+corrected picture is a *floor-then-margin* law:
+1. You need a **survival-width floor** — narrow-deep loses to the wide champion (18–22%), best-first
+   (which over-spends on depth) loses worse (9%).
+2. *Above* that floor, the marginal node is better spent on **depth than width** (iso-node 57.9%),
+   but only up to **~d12** (it saturates: d15 = d12).
+3. So the optimum is **moderate-width + ~d12**, not either extreme; the champion `w128d9` is
+   near-optimal, and `w128d12` (+45% compute) is a small, real, but quickly-exhausted gain.
+
+The headline correction holds: the ~1411 ceiling is **not** "we ran out of depth." Depth saturates
+~3 plies past the cap and cannot substitute for width's survival role — so the genuine remaining
+levers are the panel's next-paradigm set (a better *eval* — the multiplier under saturated search;
+better *future-piece belief* — speculation/expectimax/a learned speculative value, which 2.7 below
+probes; or width-survival-aware allocation), **not** more raw search.
 
 ---
 

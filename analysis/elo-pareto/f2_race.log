@@ -1,0 +1,11 @@
+champion-scale follow-up | pair-GSPRT H0 p=0.5 H1 p=0.55 | rain 8, 240 plies | 600s/race
+
+cand vs incumbent                 verdict      W-L  cand_wr  margin  pairs
+w128d12 vs w128d9            inconclusive   13-11      54.2%   +4.38     32   [F1 deeper champion (1408 vs 972 nodes)]
+w128d12 vs w176d9            inconclusive   11-8       57.9%   -4.58     32   [F2 iso-node: depth vs width @ +45% compute]
+bf(972,9) vs w128d9            H0 no-edge    6-58       9.4%  -22.95     40   [F3 §2.8 best-first node-matched]
+
+read F1: cand_wr > 50% => the deeper champion is stronger (bump the depth cap; pay +45% compute).
+read F2: cand_wr > 50% => at the top the extra compute is better as DEPTH than WIDTH (champion
+under-allocates depth); < 50% => width's survival hedge wins at scale (champion is well-allocated).
+read F3: cand_wr >= ~50% => best-first matches the beam per node at versus (the cheaper-champion claim).
