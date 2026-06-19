@@ -7,15 +7,17 @@
 //!
 //! 1. **Determinism (BEAM.md §1).** Zero RNG, no clock. The only tie-breaker is
 //!    movegen's canonical placement order: children are pushed in
-//!    `(parent-order, movegen-order)` and ranked with a **stable** sort descending
-//!    by score, so a tie resolves to the earlier-enumerated node. Back-up uses `>`
-//!    (not `>=`) so the **first** maximum wins, mirroring `greedy.rs`'s rule.
+//!    `(parent-order, movegen-order)` and ranked by score descending with that
+//!    enumeration index as the ascending tie-break, so a tie resolves to the
+//!    earlier-enumerated node. Back-up uses `>` (not `>=`) so the **first** maximum
+//!    wins, mirroring `greedy.rs`'s rule.
 //! 2. **Hold-aware transition (BEAM.md §3).** A node forks the [`SearchState`] and
 //!    advances through a [`Placement`] with [`SearchState::commit_placement`], the
 //!    Step-0 transition that models a hold swap and deals the bag exactly once.
 //! 3. **One generation at a time (BEAM.md §4/§7).** Every child of a generation
-//!    is scored before any is expanded — the whole-generation grain a neural
-//!    value net needs to fold scoring into one forward pass.
+//!    is scored before any child becomes the next expandable frontier. The planner
+//!    may pause within a generation, but it publishes the next frontier only when
+//!    the whole generation is complete.
 //! 4. **Depth-1 == greedy (BEAM.md §8).** The first generation scores each
 //!    placement as a one-ply search does (clone, classify pre-lock, lock,
 //!    `value + reward`), so a `max_depth == 1` beam reproduces the greedy
@@ -30,11 +32,11 @@
 //!    value). `BeamPlanner::new` beams are byte-for-byte unchanged — every
 //!    recorded beam baseline stays reproducible.
 //!
-//! As a session the beam is **batch-grain**: [`Mind::think`] expands exactly one
-//! generation per call regardless of the quantum (a generation is scored
-//! whole, indivisible by design — pin 3) and reports
-//! [`ThinkProgress::Exhausted`] once it reaches the run's depth cap or the
-//! frontier empties. [`Mind::best`] is the backed-up ply-1 argmax at any point.
+//! As a session the beam is generation-staged but node-sliced: [`Mind::think`]
+//! expands up to `quantum` frontier nodes while accumulating a staged next
+//! generation. [`Mind::best`] remains the backed-up ply-1 argmax from completed
+//! generations only; partial generation scores commit atomically when the
+//! generation finishes.
 
 use rustc_hash::FxHashSet;
 
@@ -67,9 +69,6 @@ struct BeamNode {
     /// carries the *same* `root_index`, so the best leaf can credit the ply-1 move
     /// that owns it.
     root_index: usize,
-    /// This node's score: `(leaf_value + acc_reward).0`, in evaluator units. Cached
-    /// so sort/truncate is a field read, not a re-evaluation.
-    score: i32,
     /// A per-branch reward discount carried from speculation (BEAM.md §5). `1.0`
     /// until the branch crosses into speculative plies; multiplied by [`SPEC_DECAY`]
     /// at each speculative expansion so deeper speculative rewards count for less.
@@ -104,6 +103,9 @@ struct BeamRun {
     root_best: Vec<i32>,
     /// The current frontier (already truncated to `<= beam_width`).
     frontier: Vec<BeamNode>,
+    /// A generation currently being expanded across `think()` calls. `None` means
+    /// `frontier` is the next completed generation to expand.
+    generation: Option<GenerationWork>,
     /// Plies expanded so far (root seeding = depth 1).
     depth: u8,
     /// Identity of the state this run was seeded from — the [`Mind::reroot`]
@@ -114,6 +116,23 @@ struct BeamRun {
     /// Frontier nodes expanded so far (the [`Mind::nodes_expanded`] meter; the
     /// beam's *termination* is width × depth, never this count).
     expanded: u32,
+}
+
+/// One generation's staged expansion state. Children are scored as parents are
+/// processed, but the resulting frontier and backed-up root scores are not
+/// published to [`BeamRun`] until every parent in the generation has been consumed.
+struct GenerationWork {
+    /// Completed frontier from the prior generation, kept in canonical order.
+    parents: Vec<BeamNode>,
+    /// Next parent index to expand.
+    next_parent: usize,
+    /// Scored children for the next generation, still in canonical enumeration order.
+    nodes: Vec<Option<BeamNode>>,
+    /// Lightweight `(score, node-index)` ranking entries for `nodes`.
+    ranked: Vec<(i32, u32)>,
+    /// Root back-ups including this in-flight generation's scored children. Staged
+    /// separately so `best()` stays generation-grain while this work is partial.
+    root_best: Vec<i32>,
 }
 
 /// A deterministic, batch-shaped, time-sliced beam planner (BEAM.md §2/§4/§5/§6).
@@ -196,6 +215,7 @@ impl BeamPlanner {
             root_best: vec![i32::MIN; roots.len()],
             roots,
             frontier: Vec::new(),
+            generation: None,
             depth: 1,
             root_key: RootKey::of(state),
             max_depth,
@@ -205,37 +225,45 @@ impl BeamPlanner {
         run
     }
 
-    /// Expand one generation from the current frontier: form every child, then hand
-    /// the generation to [`score_into_frontier`](Self::score_into_frontier).
-    /// An associated fn (config passed in) so [`Mind::think`] can call it while
-    /// holding the run borrowed out of `self`.
-    fn expand_generation(
-        run: &mut BeamRun,
+    /// Start staging the next generation by moving the completed frontier out of the
+    /// run. Root back-ups are copied so partial scores do not leak through
+    /// [`Mind::best`] until the generation is fully published.
+    fn start_generation(run: &mut BeamRun) {
+        run.generation = Some(GenerationWork {
+            parents: std::mem::take(&mut run.frontier),
+            next_parent: 0,
+            nodes: Vec::new(),
+            ranked: Vec::new(),
+            root_best: run.root_best.clone(),
+        });
+    }
+
+    /// Expand one parent frontier node into staged, already-scored next-generation
+    /// nodes. The caller owns the node meter; this function only performs the work.
+    fn expand_parent(
+        parent: &BeamNode,
+        root_best: &mut [i32],
+        nodes: &mut Vec<Option<BeamNode>>,
+        ranked: &mut Vec<(i32, u32)>,
         eval: &dyn Evaluator,
-        beam_width: usize,
         speculate: bool,
-        transpose: bool,
     ) {
         let mut pending: Vec<PendingChild> = Vec::new();
-        run.expanded += run.frontier.len() as u32;
 
-        for parent in &run.frontier {
-            if parent.state.dead {
-                // A dead branch is terminal: its DEATH_SCORE back-up already
-                // credited its root; it expands to nothing (and never
-                // speculates).
-                continue;
+        if parent.state.dead {
+            // A dead branch is terminal: its DEATH_SCORE back-up already credited its
+            // root; it expands to nothing (and never speculates).
+            return;
+        }
+        if parent.state.queue.is_empty() {
+            // Past the visible queue: speculate over the bag if enabled, else this
+            // node is terminal (no concrete next piece to advance the active). A
+            // terminal node contributes no children; its `root_best` was already
+            // recorded when it entered the frontier, so the back-up keeps it.
+            if speculate {
+                Self::expand_speculative(parent, &mut pending);
             }
-            if parent.state.queue.is_empty() {
-                // Past the visible queue: speculate over the bag if enabled, else this
-                // node is terminal (no concrete next piece to advance the active). A
-                // terminal node contributes no children; its `root_best` was already
-                // recorded when it entered the frontier, so the back-up keeps it.
-                if speculate {
-                    Self::expand_speculative(parent, &mut pending);
-                }
-                continue;
-            }
+        } else {
             // Concrete: every placement of the parent's active piece. The trailing
             // `commit_placement` advances the active from the (non-empty) queue.
             // Each child is scored with the PARENT's pre-placement chain (the combo /
@@ -258,23 +286,24 @@ impl BeamPlanner {
             }
         }
 
-        Self::score_into_frontier(run, pending, eval, beam_width, transpose);
-        run.depth += 1;
+        Self::score_pending_into(root_best, pending, eval, nodes, ranked);
     }
 
-    /// Score a generation's `pending` children with `evaluate_cols` (one call per
-    /// child, BEAM.md §7) and fold the results into the next frontier: weight each
-    /// child's reward by its branch's speculative discount, accumulate the path
-    /// reward, back up `root_best`, then stable-sort / truncate to the beam width.
-    /// The shared scoring tail of [`seed`](Self::seed) (all-concrete, weight `1.0`)
-    /// and [`expand_generation`](Self::expand_generation).
-    fn score_into_frontier(
-        run: &mut BeamRun,
+    /// Score `pending` children with `evaluate_cols` (one call per child, BEAM.md
+    /// §7), append their nodes in canonical order, and append compact rank entries.
+    /// `root_best` may be the live run backup (seeding) or a generation-staged backup
+    /// (sliced expansion).
+    fn score_pending_into(
+        root_best: &mut [i32],
         pending: Vec<PendingChild>,
         eval: &dyn Evaluator,
-        beam_width: usize,
-        transpose: bool,
+        nodes: &mut Vec<Option<BeamNode>>,
+        ranked: &mut Vec<(i32, u32)>,
     ) {
+        if pending.is_empty() {
+            return;
+        }
+
         // Score each child on the hot path directly. (No batch seam here on
         // purpose: a batched value-net backend belongs AT the Evaluator trait,
         // not in the search loop — docs/value-net-postmortem.md has the history.)
@@ -283,7 +312,8 @@ impl BeamPlanner {
             .map(|p| eval.evaluate_cols(&p.lock, p.state.board.view(), p.t_spin, p.ctx))
             .collect();
 
-        let mut next: Vec<BeamNode> = Vec::with_capacity(pending.len());
+        nodes.reserve(pending.len());
+        ranked.reserve(pending.len());
         for (p, (value, reward)) in pending.into_iter().zip(scores) {
             // Death is absolute: override the batched eval (the truncated board
             // it scored is a death remnant, not a position).
@@ -304,32 +334,69 @@ impl BeamPlanner {
             let acc = p.parent_acc + weighted_reward;
             let score = (value + acc).0;
             // `>`: keep the first maximum (canonical order), matching greedy.
-            if score > run.root_best[p.root_index] {
-                run.root_best[p.root_index] = score;
+            if score > root_best[p.root_index] {
+                root_best[p.root_index] = score;
             }
-            next.push(BeamNode {
+            debug_assert!(u32::try_from(nodes.len()).is_ok());
+            ranked.push((score, nodes.len() as u32));
+            nodes.push(Some(BeamNode {
                 state: p.state,
                 acc_reward: acc,
                 root_index: p.root_index,
-                score,
                 spec_weight: p.spec_weight,
-            });
+            }));
         }
+    }
 
-        // Stable sort descending by score, then truncate: ties keep canonical order.
-        // With transposition pruning, equal (root, future-state, bag) nodes first
-        // collapse to their best (therefore first-seen) derivation — a sound
-        // max-merge, since identical states share identical futures and only the
-        // accumulated reward differs (header pin 5).
-        sort_desc_by_score(&mut next);
-        if transpose {
-            let mut seen = FxHashSet::default();
-            next.retain(|node| {
-                seen.insert((node.root_index, RootKey::of(&node.state), node.state.bag))
-            });
+    /// Rank/dedup/truncate a completed generation into the next frontier.
+    fn ranked_frontier(
+        mut nodes: Vec<Option<BeamNode>>,
+        mut ranked: Vec<(i32, u32)>,
+        beam_width: usize,
+        transpose: bool,
+    ) -> Vec<BeamNode> {
+        // Rank by score descending, ties by canonical index ascending — the exact
+        // order the old stable descending node-sort produced (header pin 1).
+        ranked.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+
+        // Gather the top `beam_width` survivors in rank order, collapsing
+        // transpositions as we go — first-seen wins, i.e. the highest-scoring
+        // derivation of an equal `(root, future-state, bag)` (header pin 5). This is
+        // identical to the old dedup-then-truncate, but keying stops the moment the
+        // frontier is full instead of hashing the whole discarded tail. Each survivor
+        // moves out of `nodes` exactly once.
+        let mut frontier: Vec<BeamNode> = Vec::with_capacity(beam_width.min(nodes.len()));
+        let mut seen = transpose.then(FxHashSet::default);
+        for &(_, i) in &ranked {
+            let i = i as usize;
+            if let Some(seen) = seen.as_mut() {
+                let node = nodes[i].as_ref().expect("ranking indexes every node once");
+                if !seen.insert((node.root_index, RootKey::of(&node.state), node.state.bag)) {
+                    continue;
+                }
+            }
+            frontier.push(nodes[i].take().expect("each survivor index is unique"));
+            if frontier.len() == beam_width {
+                break;
+            }
         }
-        next.truncate(beam_width);
-        run.frontier = next;
+        frontier
+    }
+
+    /// Score a generation's `pending` children and fold the completed generation
+    /// into the next frontier. Used by [`seed`](Self::seed), which is intentionally
+    /// still one immediate generation so `best()` is valid right after `reroot()`.
+    fn score_into_frontier(
+        run: &mut BeamRun,
+        pending: Vec<PendingChild>,
+        eval: &dyn Evaluator,
+        beam_width: usize,
+        transpose: bool,
+    ) {
+        let mut nodes: Vec<Option<BeamNode>> = Vec::with_capacity(pending.len());
+        let mut ranked: Vec<(i32, u32)> = Vec::with_capacity(pending.len());
+        Self::score_pending_into(&mut run.root_best, pending, eval, &mut nodes, &mut ranked);
+        run.frontier = Self::ranked_frontier(nodes, ranked, beam_width, transpose);
     }
 
     /// Speculative expansion of an empty-queue `parent` (BEAM.md §5): for each piece
@@ -381,7 +448,7 @@ impl BeamPlanner {
 /// holds the best score each ply-1 root ever achieved, so [`Mind::best`] is
 /// correct even if a root's descendants were all pruned (BEAM.md §4).
 fn exhausted(run: &BeamRun) -> bool {
-    run.depth >= run.max_depth || run.frontier.is_empty()
+    run.generation.is_none() && (run.depth >= run.max_depth || run.frontier.is_empty())
 }
 
 impl Mind for BeamPlanner {
@@ -401,10 +468,11 @@ impl Mind for BeamPlanner {
         self.run = Some(self.seed(state, eval, max_depth));
     }
 
-    /// **Batch-grain**: one whole generation per call, regardless of `quantum` —
-    /// a generation is scored as one indivisible whole (BEAM.md §7, the grain a
-    /// neural value net needs).
-    fn think(&mut self, _quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
+    /// **Generation-staged, node-sliced**: spend up to `quantum` parent frontier
+    /// nodes, but publish the next frontier only after the whole generation has
+    /// been consumed. This keeps generation-level semantics while making the
+    /// interactive runner's node quantum meaningful.
+    fn think(&mut self, quantum: u32, eval: &dyn Evaluator) -> ThinkProgress {
         let (beam_width, speculate, transpose) = (self.beam_width, self.speculate, self.transpose);
         let Some(run) = self.run.as_mut() else {
             return ThinkProgress::Exhausted; // never rooted: nothing to think about
@@ -412,7 +480,47 @@ impl Mind for BeamPlanner {
         if exhausted(run) {
             return ThinkProgress::Exhausted;
         }
-        Self::expand_generation(run, eval, beam_width, speculate, transpose);
+        if quantum == 0 {
+            return ThinkProgress::Working;
+        }
+
+        let mut spent = 0u32;
+        while spent < quantum && !exhausted(run) {
+            if run.generation.is_none() {
+                Self::start_generation(run);
+            }
+
+            let mut generation = run.generation.take().expect("generation is started above");
+            while spent < quantum && generation.next_parent < generation.parents.len() {
+                let parent = &generation.parents[generation.next_parent];
+                Self::expand_parent(
+                    parent,
+                    &mut generation.root_best,
+                    &mut generation.nodes,
+                    &mut generation.ranked,
+                    eval,
+                    speculate,
+                );
+                generation.next_parent += 1;
+                run.expanded += 1;
+                spent += 1;
+            }
+
+            if generation.next_parent == generation.parents.len() {
+                run.root_best = generation.root_best;
+                run.frontier = Self::ranked_frontier(
+                    generation.nodes,
+                    generation.ranked,
+                    beam_width,
+                    transpose,
+                );
+                run.depth += 1;
+            } else {
+                run.generation = Some(generation);
+                break;
+            }
+        }
+
         if exhausted(run) {
             ThinkProgress::Exhausted
         } else {
@@ -431,12 +539,6 @@ impl Mind for BeamPlanner {
     fn nodes_expanded(&self) -> u32 {
         self.run.as_ref().map_or(0, |run| run.expanded)
     }
-}
-
-/// Stable sort of beam nodes by descending score (ties keep canonical enumeration
-/// order, the determinism rule of BEAM.md §1).
-fn sort_desc_by_score(nodes: &mut [BeamNode]) {
-    nodes.sort_by_key(|n| std::cmp::Reverse(n.score));
 }
 
 #[cfg(test)]
@@ -568,33 +670,59 @@ mod tests {
     }
 
     #[test]
-    fn beam_thinks_one_generation_per_call() {
-        // The batch-grain session contract (BEAM.md §4): seeding is generation 1
-        // and makes `best()` immediately valid; each `think` is one generation; a
-        // depth-3 run takes exactly two thinks to exhaust — and `best()` stays a
-        // valid plan at every point in between (the anytime contract).
+    fn beam_honors_quantum_and_preserves_final_decision() {
         let state = engine_snapshot_state(11);
+        let eval = linear();
         let mut beam = BeamPlanner::new(16);
 
-        beam.reroot(&state, &linear(), 3);
+        beam.reroot(&state, &eval, 3);
         let seeded = beam.best().expect("best is valid right after seeding");
 
         assert_eq!(
-            beam.think(u32::MAX, &linear()),
+            beam.think(1, &eval),
             ThinkProgress::Working,
-            "after generation 2 of 3 the beam still has work"
+            "one parent is not enough to finish the next generation"
         );
-        assert!(beam.best().is_some(), "anytime best between generations");
-
+        assert_eq!(beam.nodes_expanded(), 1, "beam should honor think(1)");
+        let after_one = beam.best().expect("partial generation keeps a valid best");
         assert_eq!(
-            beam.think(u32::MAX, &linear()),
-            ThinkProgress::Exhausted,
-            "generation 3 reaches the depth cap"
+            (after_one.placement.origin(), after_one.score),
+            (seeded.placement.origin(), seeded.score),
+            "partial generation scores stay staged until the generation completes"
         );
-        let final_plan = beam.best().expect("final best");
 
-        // Deeper search may refine the choice but never invalidates it: both are
-        // legal root placements (the seeded one was checked by construction here).
+        let mut wider = BeamPlanner::new(16);
+        wider.reroot(&state, &eval, 3);
+        assert_eq!(wider.think(16, &eval), ThinkProgress::Working);
+        assert!(
+            wider.nodes_expanded() > beam.nodes_expanded(),
+            "larger quantum should spend more work in one call"
+        );
+
+        for _ in 0..10_000 {
+            if beam.think(1, &eval) == ThinkProgress::Exhausted {
+                break;
+            }
+        }
+        let final_plan = beam.best().expect("final best");
+        let one_shot = drive(
+            &mut BeamPlanner::new(16),
+            &state,
+            &eval,
+            SearchBudget::beam(3),
+        )
+        .unwrap();
+
+        assert_eq!(final_plan.placement.origin(), one_shot.placement.origin());
+        assert_eq!(
+            final_plan.placement.rotation(),
+            one_shot.placement.rotation()
+        );
+        assert_eq!(final_plan.placement.path, one_shot.placement.path);
+        assert_eq!(final_plan.score, one_shot.score);
+
+        // Deeper search may refine the choice but never invalidates it: the seeded
+        // and final plans are both legal root placements.
         let legal = hold_placements(&state);
         for plan in [&seeded, &final_plan] {
             assert!(

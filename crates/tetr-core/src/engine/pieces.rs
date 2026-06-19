@@ -58,6 +58,54 @@ impl PieceType {
     }
 }
 
+/// Per-`(type, rotation)` mino offsets, precomputed at compile time. [`Piece::cells`]
+/// reads this instead of re-deriving the rotation on every call — it sits in the
+/// movegen BFS's inner loop (through [`Piece::collide_with`]), where the recompute
+/// was measurable. First index is [`PieceType::render_index`] (the stable colour
+/// order, never the enum's declaration order); second is the rotation (`0..4`).
+static CELLS: [[[(isize, isize); 4]; 4]; PieceType::LEN] = build_cells_table();
+
+const fn build_cells_table() -> [[[(isize, isize); 4]; 4]; PieceType::LEN] {
+    let mut table = [[[(0isize, 0isize); 4]; 4]; PieceType::LEN];
+    let mut i = 0;
+    while i < PieceType::LEN {
+        let pt = PieceType::ALL[i];
+        let idx = pt.render_index() as usize;
+        let mut rot = 0u8;
+        while rot < 4 {
+            table[idx][rot as usize] = cells_for(pt, rot);
+            rot += 1;
+        }
+        i += 1;
+    }
+    table
+}
+
+/// The four mino offsets of `pt` after `rot` quarter-turns within its bounding box —
+/// the compile-time body behind [`CELLS`]. Mirrors the former `get_shape` +
+/// `rotate_shape`: the O piece is rotation-invariant; the rest rotate within a box
+/// whose height is their `board_size` (4 for I, 3 otherwise).
+const fn cells_for(pt: PieceType, rot: u8) -> [(isize, isize); 4] {
+    let mut shape = Piece::get_shape(pt);
+    if !matches!(pt, PieceType::O) {
+        let height: isize = match pt {
+            PieceType::I => 4,
+            _ => 3,
+        };
+        let mut n = 0;
+        while n < rot {
+            let mut k = 0;
+            while k < 4 {
+                let (x, y) = shape[k];
+                shape[k] = (y, height - 1 - x);
+                k += 1;
+            }
+            n += 1;
+        }
+    }
+    shape
+}
+
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum PieceRotation {
     R0 = 0,
@@ -133,14 +181,18 @@ impl Piece {
     }
 
     pub fn board_size(&self) -> (usize, usize) {
-        match self.piece_type {
+        Self::board_size_for(self.piece_type)
+    }
+
+    const fn board_size_for(piece_type: PieceType) -> (usize, usize) {
+        match piece_type {
             PieceType::I => (4, 4),
             PieceType::O => (4, 3),
             _ => (3, 3),
         }
     }
 
-    fn get_shape(piece_type: PieceType) -> [(isize, isize); 4] {
+    const fn get_shape(piece_type: PieceType) -> [(isize, isize); 4] {
         use crate::engine::constants::shapes::*;
         match piece_type {
             PieceType::I => I,
@@ -197,23 +249,11 @@ impl Piece {
     }
 
     pub fn cells(&self) -> [(isize, isize); 4] {
-        let mut shape = Self::get_shape(self.piece_type);
-        if self.piece_type != PieceType::O {
-            let (_, height) = self.board_size();
-            Self::rotate_shape(height, &mut shape, self.rotation as u8);
-        }
-        shape
-    }
-
-    fn rotate_shape(height: usize, shape: &mut [(isize, isize)], n: u8) {
-        for _ in 0..n {
-            for (x, y) in shape.iter_mut() {
-                let new_x = *y;
-                let new_y = height as isize - 1 - *x;
-                *x = new_x;
-                *y = new_y;
-            }
-        }
+        // A compile-time table read (see `CELLS`): this sits in the movegen BFS's
+        // inner loop via `collide_with`, so re-running the rotation per probe showed
+        // up in profiles. Indexed by the stable colour-order `render_index` (never the
+        // enum's declaration order) and the rotation.
+        CELLS[self.piece_type.render_index() as usize][self.rotation as usize]
     }
 
     pub fn collide_with<B: Occupancy>(&self, board: &B, offset: (isize, isize)) -> bool {

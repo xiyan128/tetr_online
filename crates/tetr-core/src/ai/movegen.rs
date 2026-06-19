@@ -44,6 +44,7 @@
 //! always yields the same placement list in the same order — a search built on top
 //! stays reproducible.
 
+use std::cell::RefCell;
 use std::collections::VecDeque;
 
 use rustc_hash::FxHashSet;
@@ -181,6 +182,24 @@ pub fn generate_with_hold<B: Occupancy>(
 
 /// Core BFS. `used_hold` is stamped onto every emitted placement and, when set,
 /// prefixes each path with [`Move::Hold`].
+/// Reused breadth-first scratch for [`enumerate`]. The BFS runs once per candidate
+/// parent — W times per beam generation — and re-allocating its two visited sets
+/// and the frontier deque on every call showed up in allocation profiles. A
+/// thread-local workhorse keeps their capacity across calls (thread-local, not a
+/// shared global, so the rayon-parallel research path stays contention- and
+/// data-race-free). Each [`enumerate`] clears them on entry, so the visit order —
+/// and therefore the emitted placement list — is identical to allocating fresh.
+#[derive(Default)]
+struct BfsScratch {
+    visited: FxHashSet<(PoseKey, u8)>,
+    emitted: FxHashSet<(PoseKey, u8)>,
+    frontier: VecDeque<(ActivePiece, SmallVec<[Move; 16]>)>,
+}
+
+thread_local! {
+    static BFS_SCRATCH: RefCell<BfsScratch> = RefCell::new(BfsScratch::default());
+}
+
 fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> Vec<Placement> {
     // Normalize the start pose: the search re-derives reachable poses from scratch,
     // so it begins from a clean piece at the start origin AND rotation, with
@@ -188,50 +207,57 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
     // kick state that could mis-flag a T-spin on the *start* pose itself.
     let start = ActivePiece::at_pose(start.piece_type(), start.origin(), start.rotation());
 
-    // A node's identity is its pose PLUS its spin rank: two paths to the same
-    // `(x, y, rotation)` are interchangeable for geometry, but NOT for scoring —
-    // T-spin classification reads the action history, so a shift-final arrival
-    // must not shadow a rotate-final (spin) arrival at the same pose.
-    let mut visited: FxHashSet<(PoseKey, u8)> = FxHashSet::default();
-    // Emission is deduplicated separately, per (pose, classification): ranks are
-    // search bookkeeping, but two resting nodes whose lock would *classify*
-    // identically are interchangeable placements — keep the first (BFS-shortest).
-    let mut emitted: FxHashSet<(PoseKey, u8)> = FxHashSet::default();
-    let mut frontier: VecDeque<(ActivePiece, SmallVec<[Move; 16]>)> = VecDeque::new();
-    let mut placements: Vec<Placement> = Vec::new();
+    BFS_SCRATCH.with_borrow_mut(|scratch| {
+        // `visited`: a node's identity is its pose PLUS its spin rank — two paths to
+        // the same `(x, y, rotation)` are interchangeable for geometry, but NOT for
+        // scoring (T-spin classification reads the action history, so a shift-final
+        // arrival must not shadow a rotate-final spin arrival at the same pose).
+        // `emitted`: deduplicates *emissions* per `(pose, classification)` instead —
+        // two resting nodes that would classify identically are interchangeable
+        // placements, so keep the first (BFS-shortest).
+        let BfsScratch {
+            visited,
+            emitted,
+            frontier,
+        } = scratch;
+        visited.clear();
+        emitted.clear();
+        frontier.clear();
+        let mut placements: Vec<Placement> = Vec::new();
 
-    visited.insert((pose_key(&start), spin_rank(&start)));
-    frontier.push_back((start, SmallVec::new()));
+        visited.insert((pose_key(&start), spin_rank(&start)));
+        frontier.push_back((start, SmallVec::new()));
 
-    while let Some((piece, path)) = frontier.pop_front() {
-        // If this pose rests on ground, it is a candidate final placement.
-        if is_resting(board, &piece)
-            && emitted.insert((pose_key(&piece), classification_key(&piece, board)))
-        {
-            let mut full_path = path.clone();
-            if used_hold {
-                full_path.insert(0, Move::Hold);
-            }
-            placements.push(Placement {
-                piece: piece.clone(),
-                path: full_path,
-                used_hold,
-            });
-        }
-
-        // Expand neighbours: lateral shifts, both rotations, and a soft-drop.
-        for mv in [Move::Left, Move::Right, Move::Cw, Move::Ccw, Move::SoftDrop] {
-            if let Some(next) = apply_move(board, &piece, mv)
-                && visited.insert((pose_key(&next), spin_rank(&next)))
+        while let Some((piece, path)) = frontier.pop_front() {
+            // If this pose rests on ground, it is a candidate final placement.
+            if is_resting(board, &piece)
+                && emitted.insert((pose_key(&piece), classification_key(&piece, board)))
             {
-                let mut next_path = path.clone();
-                next_path.push(mv);
-                frontier.push_back((next, next_path));
+                let mut full_path = path.clone();
+                if used_hold {
+                    full_path.insert(0, Move::Hold);
+                }
+                placements.push(Placement {
+                    piece: piece.clone(),
+                    path: full_path,
+                    used_hold,
+                });
+            }
+
+            // Expand neighbours: lateral shifts, both rotations, and a soft-drop.
+            for mv in [Move::Left, Move::Right, Move::Cw, Move::Ccw, Move::SoftDrop] {
+                if let Some(next) = apply_move(board, &piece, mv)
+                    && visited.insert((pose_key(&next), spin_rank(&next)))
+                {
+                    let mut next_path = path.clone();
+                    next_path.push(mv);
+                    frontier.push_back((next, next_path));
+                }
             }
         }
-    }
 
-    placements
+        placements
+    })
 }
 
 /// The T-spin-relevant component of a search node's identity beyond its pose.

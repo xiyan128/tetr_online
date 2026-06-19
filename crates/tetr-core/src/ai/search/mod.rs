@@ -56,17 +56,16 @@ use crate::engine::{LockOutcome, PieceType, TSpinKind, classify_t_spin};
 /// How much total work one decision may spend.
 ///
 /// `max_depth` caps lookahead plies for every mind. `nodes` caps total node
-/// expansions per decision for the node-metered mind ([`BestFirstPlanner`]); the
-/// minds that bound their work another way effectively ignore it — greedy thinks
-/// in one shot, and the beam is bounded by its width × depth. The budget is the
-/// **caller's** meter (checked against [`Mind::nodes_expanded`], as
-/// [`think_to_completion`] does): the mind itself never sees it, only the
-/// per-call think quantum.
+/// expansions per decision for node-budgeted operating points; `SearchBudget::beam`
+/// leaves it uncapped because the beam is bounded by its width × depth. The budget
+/// is the **caller's** meter (checked against [`Mind::nodes_expanded`], as
+/// [`think_to_completion`] does): the mind itself never sees it, only the per-call
+/// think quantum.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct SearchBudget {
     /// Total node expansions per decision for node-metered minds (best-first).
     /// `0` means uncapped — the depth cap / frontier exhaustion alone terminates.
-    /// Effectively ignored by greedy and the beam.
+    /// `SearchBudget::beam` sets this to `0`; beam work is bounded by width × depth.
     pub nodes: u32,
     /// Maximum lookahead plies (current piece = depth 1).
     pub max_depth: u8,
@@ -86,9 +85,8 @@ impl SearchBudget {
     }
 
     /// A budget for a multi-ply beam search up to `max_depth` plies. The beam is
-    /// bounded by its *width* (a [`BeamPlanner`]
-    /// field) × depth and ignores `nodes`. `beam(1)` reproduces the greedy
-    /// single-ply decision.
+    /// bounded by its *width* (a [`BeamPlanner`] field) × depth, so this leaves
+    /// `nodes` uncapped. `beam(1)` reproduces the greedy single-ply decision.
     pub fn beam(max_depth: u8) -> Self {
         Self {
             nodes: 0,
@@ -171,8 +169,8 @@ pub(crate) fn commit_child(
 /// [`score_placement`]), the imperfection sampler in `policy::search` (likewise), and
 /// best-first's `children` all route through it, so they can never silently disagree on
 /// what a placement is worth (the DRY/SRP fix the SOLID review flagged). The beam instead
-/// builds its children with [`commit_child`] and scores a whole generation together
-/// (one [`Evaluator::evaluate_cols`] per child) — the grain the neural value net needs.
+/// builds its children with [`commit_child`] and stages a generation before publishing
+/// the next frontier.
 pub(crate) fn score_child(
     parent: &SearchState,
     placement: &Placement,
@@ -317,12 +315,11 @@ pub trait Mind: Send + Sync {
 
     /// Advance the current root's search by up to `quantum` node expansions.
     ///
-    /// Node-grain minds honor `quantum` exactly; batch-grain minds may overshoot
-    /// by design (the beam expands one whole generation per call) and say so in
-    /// their docs. The quantum only chooses *suspension points*: schedules with
-    /// equal total work reach the identical [`best`](Self::best) regardless of
-    /// slicing. Without a rooted run this is a no-op reporting
-    /// [`ThinkProgress::Exhausted`].
+    /// Minds should treat `quantum` as an upper bound on node expansions. A mind may
+    /// still choose coarser publication points for [`best`](Self::best), but the
+    /// quantum itself only chooses *suspension points*: schedules with equal total
+    /// work reach the identical final answer regardless of slicing. Without a
+    /// rooted run this is a no-op reporting [`ThinkProgress::Exhausted`].
     fn think(&mut self, quantum: u32, eval: &dyn Evaluator) -> ThinkProgress;
 
     /// The best ply-1 plan for the current root **right now** (anytime — backed

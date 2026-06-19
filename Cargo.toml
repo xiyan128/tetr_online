@@ -94,6 +94,12 @@ bloom = ["bevy/bevy_post_process"]
 # Enables the in-game ECS inspector overlay (dev tooling). Off by default so it
 # never touches release builds. Usage: `cargo run --features dev`.
 dev = ["dep:bevy-inspector-egui", "dep:bevy_egui"]
+# On-screen FPS counter + frame-time graph + console frame-time logging, opt-in
+# for measuring the REAL game (the shipping `--profile web` build has
+# `debug_assertions` off, so the always-on debug diagnostics are compiled out).
+# Pulls Bevy's `bevy_dev_tools`. Usage: `cargo run --features fps` or build the
+# wasm bundle with it. Off by default — never in a normal release.
+fps = ["bevy/bevy_dev_tools"]
 
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
 directories = "6"

@@ -32,14 +32,15 @@ pub(crate) static DEFAULT_KICKS: [[Kick; 5]; 8] = [
 type Shape = [(isize, isize); 4];
 pub mod shapes {
     use super::Shape;
-    //
-    pub static I: Shape = [(0, 2), (1, 2), (2, 2), (3, 2)];
-    pub static J: Shape = [(0, 1), (1, 1), (2, 1), (0, 2)];
-    pub static L: Shape = [(0, 1), (1, 1), (2, 1), (2, 2)];
-    pub static O: Shape = [(1, 1), (1, 2), (2, 1), (2, 2)];
-    pub static S: Shape = [(0, 1), (1, 1), (1, 2), (2, 2)];
-    pub static T: Shape = [(0, 1), (1, 1), (1, 2), (2, 1)];
-    pub static Z: Shape = [(0, 2), (1, 2), (1, 1), (2, 1)];
+    // `const` (not `static`) so `pieces.rs` can fold these into a compile-time
+    // `cells()` rotation table; every caller copies them out by value anyway.
+    pub const I: Shape = [(0, 2), (1, 2), (2, 2), (3, 2)];
+    pub const J: Shape = [(0, 1), (1, 1), (2, 1), (0, 2)];
+    pub const L: Shape = [(0, 1), (1, 1), (2, 1), (2, 2)];
+    pub const O: Shape = [(1, 1), (1, 2), (2, 1), (2, 2)];
+    pub const S: Shape = [(0, 1), (1, 1), (1, 2), (2, 2)];
+    pub const T: Shape = [(0, 1), (1, 1), (1, 2), (2, 1)];
+    pub const Z: Shape = [(0, 2), (1, 2), (1, 1), (2, 1)];
 }
 
 pub mod avatar_shapes {

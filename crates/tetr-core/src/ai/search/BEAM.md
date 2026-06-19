@@ -1,11 +1,11 @@
-# BEAM.md — Deterministic, batch-shaped beam search behind the `Planner` trait
+# BEAM.md — Deterministic beam search behind the `Mind` trait
 
 > Status: **shipped — design record, maintained**. This was the contract the Colder
 > Clear strike implemented; `beam.rs` is the implementation and, where the two
 > disagree, **the code is the source of truth** (this file records the design
 > rationale and the load-bearing invariants, and is updated when they change).
 > Scope: a CC2-style **deterministic beam** Tier-2 planner behind the existing
-> [`Planner`] trait, gated on `bench-marathon`. Notable post-design evolution folded
+> [`Mind`] trait, gated on `bench-marathon`. Notable post-design evolution folded
 > in below: the search board is now the `Copy` `BitBoard` (locking via
 > `BitBoard::lock_piece`, the differential-tested mirror of `lock_and_clear`), the
 > evaluator seam takes a `ColumnView` + `EvalContext`, the queue is a `SmallVec`,
@@ -16,13 +16,12 @@
 > this record was written against became the anytime session trait `Mind`
 > (`reroot` / `think(quantum)` / `best` / `nodes_expanded`); see
 > `docs/adr-ai-compute-architecture.md` for the layering and rationale. Mapping
-> for readers of the sections below: "one generation per `plan` call, yielding
-> `NeedMoreBudget`" is now "one generation per `think` call (batch-grain),
-> reporting `Working`/`Exhausted`"; seeding moved into `reroot` (which
-> fingerprints the root + depth cap and makes `best()` immediately valid); the
-> drain-loop `SearchPolicy::plan_best` became the fused `Policy::decide` over the
-> verbs; and the cooperative venue this design anticipated exists
-> (`SlicedRunner`). Every determinism/back-up/speculation invariant recorded
+> for readers of the sections below: `think(quantum)` now processes up to that
+> many parent frontier nodes, reporting `Working`/`Exhausted`; seeding moved into
+> `reroot` (which fingerprints the root + depth cap and makes `best()` immediately
+> valid); the drain-loop became `Policy::decide` over the verbs; and the
+> cooperative venue this design anticipated exists (`SlicedRunner`). Every
+> determinism/back-up/speculation invariant recorded
 > below is unchanged and still pinned by the same tests.
 
 ---
@@ -36,21 +35,22 @@ multi-ply search is a **pure backend swap**. Nothing below the search changes:
 |---|---|---|
 | Engine rules | `crates/tetr-core/src/engine/*` | **ADR-7 boundary.** The search clones a `SearchState` and locks through `BitBoard::lock_piece` — the bitboard mirror of [`lock_and_clear`], differential-tested against it — so it never re-encodes rules. |
 | Controller | `crates/tetr-core/src/ai/controller.rs` | Holds a `Box<dyn Policy>`; never names a planner. |
-| `SearchPolicy` | `crates/tetr-core/src/ai/policy/search.rs` | `plan_best` (lines 86–95) **already** loops `while NeedMoreBudget`. A beam that yields `NeedMoreBudget` per generation runs here with **zero change**. The imperfection softmax (`score_candidates`) re-scores ply-1 placements with the same evaluator — also unchanged. |
+| `SearchPolicy` | `crates/tetr-core/src/ai/policy/search.rs` | Drives `Mind::think(quantum)` until `PolicyProgress::Ready`. The imperfection softmax (`score_candidates`) re-scores ply-1 placements with the same evaluator — unchanged by beam internals. |
 | `plan.rs` (plan→input) | `crates/tetr-core/src/ai/plan.rs` | Consumes a `Placement.path`. The beam returns a **ply-1** `Placement` whose path is exactly what movegen produced (incl. a leading `Move::Hold`). Identical shape to greedy's output. |
-| `DecisionRunner` / `SyncRunner` | `crates/tetr-core/src/ai/runner/mod.rs` | `submit`/`poll`. The cooperative time-slicing the beam needs is expressed entirely through `PlannerStep::NeedMoreBudget`, which the policy already drives. No new runner is required for v1. |
+| `DecisionRunner` / `SyncRunner` | `crates/tetr-core/src/ai/runner/mod.rs` | `submit`/`poll`. The cooperative runner supplies the per-poll node quantum; the sync runner drains the same `Mind` to completion. |
 | Movegen | `crates/tetr-core/src/ai/movegen.rs` | [`generate_with_hold`] already emits hold-aware placements. The beam only *consumes* it. |
 
 The beam is **purely additive**: one new method on `SearchState`
-(`commit_placement`), one new default method on `Evaluator` (`evaluate_batch`), and
-one new planner (`BeamPlanner`). Everything else is a re-use.
+(`commit_placement`), the evaluator fast paths it consumes, and one new planner
+(`BeamPlanner`). Everything else is a re-use.
 
 ---
 
 ## 1. Determinism rule (non-negotiable)
 
-The [`Planner`] contract (`search/mod.rs` docs) promises a planner is a deterministic
-function of `(state, evaluator, budget)`: **no RNG, no clock**. The beam upholds this:
+The [`Mind`] contract (`search/mod.rs` docs) promises a planner is deterministic for
+the same `(state, evaluator, budget/work)`: **no RNG, no clock**. The beam upholds
+this:
 
 1. **Zero RNG in the planner.** Any randomness the AI wants (imperfection) lives in
    `SearchPolicy`'s seeded `StdRng`, downstream of and oblivious to the beam.
@@ -88,9 +88,6 @@ struct BeamNode {
     /// subtree carries the *same* `root_index`, so the best leaf can credit the
     /// ply-1 move that owns it.
     root_index: usize,
-    /// This node's score: `(leaf_value + acc_reward).0`, in evaluator units. Cached
-    /// so sort/truncate is a field read, not a re-evaluation.
-    score: i32,
     /// The branch's speculative reward discount (§5): `1.0` on concrete branches,
     /// multiplied by `SPEC_DECAY` at each speculative expansion.
     spec_weight: f32,
@@ -222,10 +219,12 @@ This keeps `BagState` faithful to the engine across hold transitions.
 
 ## 4. The per-call generation loop (cooperative time-slicing)
 
-`BeamPlanner::plan` processes **exactly one generation per call**, then yields. The
-policy's `plan_best` loop (search.rs:88) re-invokes until `Done`, so on native this
-finishes in one `decide()`; on threadless WASM a cooperative runner can call it once
-per frame (the seam already exists; v1 needs no new runner).
+`BeamPlanner::think` processes up to the caller's node quantum of parent frontier
+nodes, then yields. A generation may therefore span many calls on the interactive
+runner. Children are scored as their parent is processed, but the next frontier and
+its backed-up `root_best` are published only after the entire generation has been
+consumed. This keeps the beam's generation semantics intact while making the
+browser-sized quantum a real frame-budget bound.
 
 State carried between calls lives on the planner (`&mut self`):
 
@@ -245,6 +244,8 @@ struct BeamRun {
     root_best: Vec<i32>,
     /// The current frontier (already truncated to <= beam_width).
     frontier: Vec<BeamNode>,
+    /// A partially expanded generation, when `think()` yielded mid-generation.
+    generation: Option<GenerationWork>,
     /// Plies expanded so far (root seeding = depth 1).
     depth: u8,
     /// Identity of the state this run was seeded from, to detect a stale run
@@ -266,24 +267,28 @@ for (i, p) in roots.enumerate():
     pending.push(PendingChild { state: child, lock, t_spin: t,
                                 ctx: decision point's (combo, b2b),
                                 root_index: i, parent_acc: Reward(0), spec_weight: 1.0 })
-score `pending` as ONE batch and fold into the frontier   // shared with later
+score `pending` and fold into the frontier                // shared with later
                                                           // generations: back-up
-                                                          // root_best, stable-sort
-                                                          // desc, truncate to width
+                                                          // root_best, rank desc,
+                                                          // truncate to width
 depth := 1
 if depth >= budget.max_depth OR frontier empty:
-    return Done(best ply-1 placement by root_best)        // single-ply == greedy
+    return Exhausted                                      // single-ply == greedy
 else:
-    return NeedMoreBudget
+    return Working
 ```
 
-### Subsequent calls (expand one generation)
+### Subsequent calls (expand up to the quantum)
 
 ```text
-pending := []          // Vec<PendingChild>: { state, lock, t_spin, ctx, root_index,
-                       //   parent_acc, spec_weight } — ONE struct per child, so the
-                       //   batch inputs and the node build can't fall out of lockstep
-for parent in frontier:             // already canonical (stable-sorted, ties by enum order)
+if no generation is in progress:
+    parents := take(frontier)       // completed prior generation, canonical order
+    staged_root_best := root_best
+    staged_nodes := []
+    staged_ranked := []
+
+while spent < quantum AND parents remain:
+    parent := parents[next_parent]
     children := generate_with_hold(parent.state.board, parent.state.active,
                                    parent.state.hold, parent.state.queue.front(), spawn_for)
     for p in children:              // canonical movegen order
@@ -296,23 +301,26 @@ for parent in frontier:             // already canonical (stable-sorted, ties by
 
     // §5: if speculate AND parent.queue is empty, also branch over the bag here
     //     (see "Speculation" — same shape, commit_placement_with_next, decay).
+    // Dead/terminal parents consume one node of quantum and produce no children.
 
-scores := eval.evaluate_batch(pending as (lock, board-view, t_spin, ctx) borrows)
-for (p, (value, reward)) in zip(pending, scores):   // ONE forward for the generation
-    weighted := reward scaled by p.spec_weight       // identity on concrete branches
-    acc   := p.parent_acc + weighted                 // Reward + Reward
-    score := (value + acc).0                         // Value + Reward
-    push BeamNode { state, acc_reward: acc, root_index, score, spec_weight } to next
-    root_best[root_index] := max(root_best[root_index], score)
+    scores := evaluate_cols for each pending child
+    for (p, (value, reward)) in zip(pending, scores):
+        weighted := reward scaled by p.spec_weight       // identity on concrete branches
+        acc   := p.parent_acc + weighted                 // Reward + Reward
+        score := (value + acc).0                         // Value + Reward
+        staged_nodes.push(BeamNode { state, acc_reward: acc, root_index, spec_weight })
+        staged_ranked.push((score, staged_nodes index))
+        staged_root_best[root_index] := max(staged_root_best[root_index], score)
 
-stable-sort next descending by score; truncate to beam_width
-frontier := next
+if parents remain:
+    store the generation and return Working
+
+sort staged_ranked by (score desc, enumeration index asc)
+gather the first beam_width nodes, optionally skipping duplicate transposition keys
+root_best := staged_root_best
+frontier := gathered nodes
 depth += 1
-if depth >= budget.max_depth OR frontier empty:
-    let best_i := argmax_stable(root_best)          // first max wins (determinism)
-    return Done(Some(PlacementPlan { placement: roots[best_i], score: root_best[best_i] }))
-else:
-    return NeedMoreBudget
+return Exhausted if depth >= budget.max_depth OR frontier empty, else Working
 ```
 
 ### Budget semantics
@@ -320,11 +328,9 @@ else:
 - `budget.max_depth` caps plies; **depth 1 reproduces greedy exactly** (one generation,
   one batch, pick the best root). The bench must show beam@depth-1 == greedy to prove
   the seam is faithful before depth is raised.
-- The beam **ignores `budget.nodes`**: its work is already bounded by
-  `beam_width × ~34` children per generation, and its time-slice unit is the
-  generation (one per `plan` call). `nodes` is the *total* per-decision expansion
-  budget of the node-counted planner (`SearchBudget::best_first`, honored by
-  `BestFirstPlanner`).
+- `SearchBudget::beam(depth)` leaves `budget.nodes` uncapped: total beam work is
+  bounded by `beam_width × depth`, while the runner's per-call `quantum` controls
+  how many parent frontier nodes are expanded before yielding.
 - `SearchBudget::beam(depth)` sits beside `greedy()` and `best_first(nodes, depth)`;
   the beam *width* is a `BeamPlanner` field, not part of the budget.
 
@@ -417,14 +423,15 @@ fn update_b2b(&mut self, outcome: &LockOutcome, t_spin: Option<TSpinKind>) {
 
 ---
 
-## 7. The batch-evaluation seam: `Evaluator::evaluate_batch`
+## 7. The evaluation seam
 
-A multi-ply beam scores a whole generation of children at once. For the integer
-evaluators this is a loop; for a batched backend (the design's target was the
-since-pruned neural value net) it is **one forward pass** over the stacked inputs.
-The seam is a defaulted trait method, so it is backward compatible and object-safe.
-As shipped (`eval/mod.rs` — the evolved signature, with the bitboard `ColumnView`
-and the `EvalContext` chain state this design predated):
+A multi-ply beam scores each child through the evaluator's bitboard fast path
+(`evaluate_cols`) while staging the current generation. The original design also
+kept an object-safe `evaluate_batch` seam for a batched backend; the neural value
+net that motivated that seam was later pruned, but the determinism rule for any
+future batched implementation remains the same. As shipped (`eval/mod.rs` — the
+evolved signature, with the bitboard `ColumnView` and the `EvalContext` chain state
+this design predated):
 
 ```rust
 pub trait Evaluator: Send + Sync {
@@ -479,9 +486,9 @@ score_placement(state, p, eval, ctx):        // greedy / imperfection path
 ```
 
 The beam's depth-1 child builds the same `commit_child` output into a `PendingChild`
-and scores it through `evaluate_batch` — whose default maps `evaluate_cols`, so a
-single-element batch equals the scalar call exactly. **Therefore beam@depth-1 and
-greedy pick the same placement** — the bench asserts this before depth rises.
+and scores it through `evaluate_cols`, the same evaluator basis as the scalar path.
+**Therefore beam@depth-1 and greedy pick the same placement** — the tests assert
+this before depth rises.
 
 For depth > 1, the leaf score is `(leaf_value + Σ path_rewards).0` — the Cold Clear
 value-with-folded-reward, summed over the branch and met at the leaf. This is the
@@ -497,13 +504,13 @@ design the `eval` module docs (lines 11–16) promised and the reason `Reward: A
   active-and-locked, and (empty-hold case) consumes the queue front; bag is dealt
   exactly once (assert `BagState` equals a hand-rolled expected after a hold + a normal
   commit); b2b transitions (Tetris sets, single clears, no-clear preserves).
-- `evaluate_batch` (STEP 1): default loop equals per-item scoring; each impl's
-  `evaluate_cols` equals `evaluate` on the equivalent dense board (the per-impl
-  differential); order preserved; empty input → empty output.
+- `Evaluator` (STEP 1): each impl's `evaluate_cols` equals `evaluate` on the
+  equivalent dense board (the per-impl differential); `evaluate_batch`, where used,
+  must preserve order and match per-item scoring.
 - `BeamPlanner` (STEP 2): determinism (same state twice → same plan); beam@depth-1 ==
   greedy on the Tetris-well fixture and on a random snapshot; `Done(None)` on a topped
-  board; `NeedMoreBudget` then `Done` across calls for depth ≥ 2; speculation path
-  triggers only with an empty queue and stays deterministic.
+  board; quantum-sized calls preserve the same final decision as a one-shot drain;
+  speculation path triggers only with an empty queue and stays deterministic.
 - Bench (STEP 2/3): `bench-marathon` prints score/sec for greedy vs beam contenders;
   beam@depth-1(linear) must match greedy's score/sec within noise (it is the same
   decisions); deeper beam is the experiment.
@@ -512,13 +519,12 @@ design the `eval` module docs (lines 11–16) promised and the reason `Reward: A
 
 ## 10. Out of scope for v1 (documented, deferred)
 
-- Transposition de-duplication / node hashing **for the beam** — beam truncation +
-  canonical enumeration already give determinism, so the table stays a deliberate
-  omission *here*. (The sibling `BestFirstPlanner` ships exactly such a per-root
-  transposition table — `best_first.rs` — sharing this file's `RootKey` identity.)
+- Transposition de-duplication is now available as the opt-in
+  `BeamPlanner::transposing` path: per-root future-state keys collapse equal states
+  before width truncation. Plain `BeamPlanner::new` remains the historical baseline.
 - Probability-weighted / expectimax bag speculation (v2 behind the same node shape).
-- Time-based `SearchBudget` and a dedicated cooperative WASM runner — the
-  `NeedMoreBudget` seam suffices for native; the WASM runner is a separate task.
+- Time-based `SearchBudget` remains out of scope; the shipped cooperative runner is
+  node-quantum based for deterministic native/wasm behavior.
 - Search-tree introspection (frontier size, pruned counts) — additive, not required to
   beat the bench.
 - Bidirectional soft-drop / movegen ordering refinements — movegen is unchanged.

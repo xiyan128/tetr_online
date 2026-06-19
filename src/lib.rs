@@ -11,8 +11,10 @@
 //! tests and host build against.
 
 use bevy::app::App;
-#[cfg(debug_assertions)]
+#[cfg(any(debug_assertions, feature = "fps"))]
 use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
+#[cfg(feature = "fps")]
+use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 #[cfg(feature = "dev")]
@@ -132,11 +134,32 @@ impl Plugin for GamePlugin {
             // Render-pipeline visual effects (bloom, on opt-in builds only).
             .add_plugins(crate::postfx::PostFxPlugin);
 
-        #[cfg(debug_assertions)]
+        // Frame-time diagnostics: always in debug builds, and opt-in for the
+        // size-optimized release/wasm build via `--features fps` (that build has
+        // `debug_assertions` off, so this is the only way to read FPS in the real
+        // game). `LogDiagnosticsPlugin` prints fps / frame-time / frame-count to
+        // the log — the browser console on wasm.
+        #[cfg(any(debug_assertions, feature = "fps"))]
         {
             app.add_plugins(FrameTimeDiagnosticsPlugin::default())
                 .add_plugins(LogDiagnosticsPlugin::default());
         }
+
+        // On-screen FPS counter + frame-time graph (the graph's spikes are the
+        // per-frame AI-poll stalls). Opt-in via `--features fps`; pulls Bevy's
+        // `bevy_dev_tools`. It re-adds `FrameTimeDiagnosticsPlugin` only if absent,
+        // so it composes with the block above.
+        #[cfg(feature = "fps")]
+        app.add_plugins(FpsOverlayPlugin {
+            config: FpsOverlayConfig {
+                frame_time_graph_config: FrameTimeGraphConfig {
+                    enabled: true,
+                    min_fps: 30.0,
+                    target_fps: 60.0,
+                },
+                ..default()
+            },
+        });
 
         // Dev-only ECS inspector overlay (egui). Behind the `dev` cargo feature
         // (not `debug_assertions`) so release builds never compile egui — keeps

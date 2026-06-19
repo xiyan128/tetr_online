@@ -38,6 +38,9 @@ cargo check --features dev --locked
 step "check (bloom feature)"
 cargo check --features bloom --locked
 
+step "check (fps feature)"
+cargo check --features fps --locked
+
 step "build (embed, wasm32)"
 cargo build -p tetr-embed --target wasm32-unknown-unknown --locked
 
