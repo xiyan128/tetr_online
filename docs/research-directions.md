@@ -112,8 +112,35 @@ corrected picture is a *floor-then-margin* law:
 The headline correction holds: the ~1411 ceiling is **not** "we ran out of depth." Depth saturates
 ~3 plies past the cap and cannot substitute for width's survival role — so the genuine remaining
 levers are the panel's next-paradigm set (a better *eval* — the multiplier under saturated search;
-better *future-piece belief* — speculation/expectimax/a learned speculative value, which 2.7 below
+better *future-piece belief* — speculation/expectimax/a learned speculative value, which 2.7
 probes; or width-survival-aware allocation), **not** more raw search.
+
+**2.7 (speculation ablation, via the new `BotSpec::no_speculation()`).** Speculation is **hugely
+load-bearing**: w16d12 spec-ON beats spec-OFF at **89.8%** and w32d12 at **92.2%** (both H1) — the
+deep search's value *is* the `SPEC_DECAY` bag-rollout past the 6-ply preview, not raw plies. (The
+mechanistic check S2 was muddier than predicted — spec-OFF-d12 ran a bit *worse* than a clean d6,
+29.1%, a beam terminal-node interaction — but the ablation itself is decisive.) Combined with E1's
+saturation: the ceiling is **speculation's decaying per-ply value** (it pays for the first few
+speculative plies d6→d12, then stops). The most-localized in-paradigm lever is therefore **better
+belief over future pieces** — an expectimax (bag-mean) backup instead of optimistic-max, `SPEC_DECAY`
+tuning, or a raised preview — a **code-only** change, not a model.
+
+**Dispositions (eval-side items, gated behind 2.1 and now deprioritized by the evidence).**
+- **2.4 / 2.5 (eval-term restorations / spike term):** not run. The panel established the CC2 eval
+  is near a local optimum for APP (every single-lever probe tied or lost; even putting the *true*
+  objective in the search lost), and 2.5's load-bearing gate is not computable at the eval seam
+  (`EvalContext` carries only `{combo, b2b}`). Single-term tweaks most likely tie; the real eval
+  lever is the **whole-eval next paradigm** (§4.1, NNUE-style), not a term.
+- **2.6 (Value/Reward calibration):** refuted — `cc2.rs` builds both halves in the same weight
+  space at the same `SCALE`; there is no unit to calibrate.
+
+**§2 VERDICT — the current paradigm is near its ceiling on raw search.** Depth is real but small and
+saturates ~d12; width is a survival floor you cannot go below; best-first is not a shortcut; the
+eval is locally optimal. The two genuine in-paradigm levers left are both about *belief and value,
+not search size*: **(a) better future-piece speculation** (2.7 — code-only, the cheapest untested
+win) and **(b) a better whole-eval** (the §4.1 next-paradigm anchor). This is exactly the panel's
+thesis — the eval/speculation is the multiplier under saturated search — now confirmed by
+experiment rather than asserted.
 
 ---
 

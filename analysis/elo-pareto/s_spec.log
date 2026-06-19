@@ -1,0 +1,11 @@
+2.7 speculation ablation | pair-GSPRT | rain 8, 240 plies | 300s/race
+
+cand vs incumbent                         verdict      W-L  cand_wr  margin  pairs
+w16d12 spec-ON vs spec-OFF            H1 cand>inc   53-6       89.8%  +20.12     40   [S1 does speculation help at d12?]
+w16d12 spec-OFF vs w16d6               H0 no-edge   25-61      29.1%   -6.96     56   [S2 mechanistic: OFF == concrete d6?]
+w32d12 spec-ON vs spec-OFF            H1 cand>inc   47-4       92.2%  +18.64     40   [S3 does speculation help at d12 (wider)?]
+
+read: ON >> OFF (S1/S3) AND OFF ~= d6 (S2, ~50%) => the deep search IS speculation, and it
+is load-bearing (not noise). Combined with E1 (depth saturates ~d12), this localizes the
+ceiling at speculation's decaying per-ply value -- the real lever is better belief over
+future pieces (expectimax / a learned speculative value / a raised preview), not raw plies.
