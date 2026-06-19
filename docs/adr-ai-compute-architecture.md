@@ -143,3 +143,23 @@ supplies Bevy's web-time-backed `Instant`) **and** the budgeting is deterministi
 testable with a fake clock. The *decision* is invariant under the budget — the budget
 moves only which poll it lands on, pinned by tests. Only `AiController::interactive`
 (the catalog beams) switched; `attack`/embed/PC/benches are untouched.
+
+### Parked alternative: an off-thread native venue (`ThreadRunner`)
+
+An off-thread venue was prototyped alongside the budgeted one and parked in its
+favour. `ThreadRunner` runs the policy on a dedicated worker thread (`submit` /
+non-blocking `poll` / `cancel`, epoch-tagged stale-discard, `Drop`-joins the worker),
+so the search costs the render thread **nothing** — the worker computes the full
+decision in parallel and the controller acts at its reaction deadline. Like the
+budgeted venue it is decision-identical to blocking (the worker drives to `Ready`),
+timing-nondeterministic, and benchmark-banned.
+
+We shipped the budgeted venue instead because it fixes **both native and wasm in one
+venue** (the curated wasm build has no worker thread) and is simpler / lower-risk; the
+thread venue's zero-main-thread-cost edge is native-only and a speculative win while
+the renderer is cheap. **Revive it if main-thread contention ever bites** — a much
+heavier renderer, many bot seats, or a native-only high-performance build. It drops in
+behind the same `DecisionRunner` seam: branch `feat/native-thread-runner` (the
+`ThreadRunner` commit `b8801b7`, off `perf/ai-search-perf`), gate-green, including the
+per-platform venue selection and the `attack_policy` split / embed cooperative-venue
+pin it needs.
