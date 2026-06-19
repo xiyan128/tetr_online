@@ -75,6 +75,23 @@ has not saturated. The ~1411 "ceiling" is therefore a **lower bound at depth ≤
 d12–d15 would extend the steep part of the law. **The cheapest way to a stronger bot is more
 depth, not more width** — until you run out of depth, which is exactly where this grid stops.
 
+> **Correction (regime split).** A follow-up expert review (`docs/research-directions.md`)
+> showed the `5.2×` is an *average that masks a collapse*. Re-fitting the depth coefficient
+> by regime — the bot has a 5-piece preview, so only ~6 plies are *concrete* and the rest are
+> `SPEC_DECAY`-discounted speculation:
+>
+> | regime | depth Elo/doubling | depth/width |
+> |---|---|---|
+> | concrete (d ≤ 6) | **421** | **6.9×** |
+> | speculative (d ≥ 7) | **199** | **1.9×** |
+>
+> Depth's dominance is almost entirely *inside the preview horizon*; past it, speculative
+> depth is barely better than width (per-ply ΔElo falls to +20–40 at d7→d9). So the apparent
+> "depth-cap ceiling" is more likely a **preview/speculation-quality ceiling** — and a deeper
+> config (`w16d12`) may land *below* `w16d9`. The single experiment to settle it (register
+> `w16d12/d15` past the grid wall — zero code, `max_depth` is an unbounded `u8`) is item **E1**
+> of the roadmap.
+
 ## Reproduce
 
 ```bash
