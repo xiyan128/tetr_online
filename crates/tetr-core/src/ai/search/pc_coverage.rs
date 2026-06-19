@@ -1608,4 +1608,56 @@ mod tests {
             "a mismatch must fall through to a fresh scan, not serve the line"
         );
     }
+
+    #[test]
+    fn the_shipping_config_serves_a_prefix_stitched_line() {
+        // The exact in-game / pc-watch-v1 flag combo — commit_lines AND
+        // shared_prefix ON together (Reveals, min_coverage 25) — which no other
+        // test exercises. With a visible queue and an unknown draw the scan runs
+        // a real prefix phase (prefix_depth = min(queue, horizon-1) = 1), so the
+        // committed line is stitched across the prefix arena and the scenario
+        // arena (`line_path_with_prefix`). The follow-up must be served with
+        // zero search and complete the perfect clear.
+        let mut board = Board::new(4, 8);
+        for y in 0..4 {
+            for x in 0..2 {
+                board.set(x, y, CellKind::Some(PieceType::O));
+            }
+        }
+        let active = spawn_piece(PieceType::I, 4, 8);
+        let state = SearchState::for_test(board, active, None, [PieceType::I]);
+        let eval = LinearEvaluator::default();
+        let shipping = PcCoverageConfig {
+            commit_lines: true,
+            shared_prefix: true,
+            min_coverage_percent: 25,
+            ..config(PcCoverageUnit::Reveals, 2)
+        };
+
+        let mut planner = PcCoveragePlanner::new(shipping);
+        let first = think_to_completion(&mut planner, &state, &eval, SearchBudget::beam(2))
+            .expect("the opening move of the 2-move PC");
+
+        let mut next_state = state.clone();
+        next_state.commit_placement(&first.placement);
+        assert!(
+            !next_state.board.is_empty(),
+            "the PC needs the second move still"
+        );
+        next_state.queue.push(PieceType::T); // the newest reveal
+
+        planner.reroot(&next_state, &eval, 2);
+        assert_eq!(
+            planner.think(1, &eval),
+            ThinkProgress::Exhausted,
+            "the prefix-stitched committed line must serve the follow-up with zero search"
+        );
+        let second = planner.best().expect("the committed step");
+        let mut done = next_state.clone();
+        done.commit_placement(&second.placement);
+        assert!(
+            done.board.is_empty(),
+            "the committed step must complete the perfect clear"
+        );
+    }
 }
