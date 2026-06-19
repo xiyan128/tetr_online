@@ -15,7 +15,7 @@
 //! Mechanics: candidate = incumbent + sparse Gaussian perturbation (per-dim
 //! scale frozen at the origin's magnitudes); accept on a paired per-seed
 //! t-gate (`mean Δ > k·SE`, common random numbers); step size follows a
-//! 1/5th-style rule (×1.3 on accept, ×0.92 on reject). Screening seeds rotate
+//! 1/5th-style rule (×1.3 on accept, ×`sigma_decay` on reject). Screening seeds rotate
 //! every `block_iters` iterations through the campaign's rotation sub-slab, so
 //! no fixed seed set is climbed into; the run ends with a self-validation of
 //! origin vs final params on the campaign's held-out validation region — the

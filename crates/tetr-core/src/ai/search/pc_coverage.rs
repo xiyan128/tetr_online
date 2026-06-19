@@ -673,7 +673,7 @@ impl Scan {
 
         let (branch, active): (Vec<_>, Vec<_>) = frontier
             .into_iter()
-            .partition(|node| self.tail_len > 0 && node.state.queue.len() <= self.tail_len);
+            .partition(|node| at_branch_boundary(node, self.tail_len));
         self.prefix_branch = branch;
 
         if self.prefix_depth == 1
@@ -711,13 +711,11 @@ impl Scan {
 
         if run.parent_cursor >= run.frontier.len() {
             truncate_per_root(&mut run.next, roots_len, width_per_root);
-            run.frontier = std::mem::take(&mut run.next);
             run.parent_cursor = 0;
             run.depth += 1;
-            let (branch, active): (Vec<_>, Vec<_>) = run
-                .frontier
-                .drain(..)
-                .partition(|node| tail_len > 0 && node.state.queue.len() <= tail_len);
+            let (branch, active): (Vec<_>, Vec<_>) = std::mem::take(&mut run.next)
+                .into_iter()
+                .partition(|node| at_branch_boundary(node, tail_len));
             self.prefix_branch.extend(branch);
             run.frontier = active;
             if run.depth >= prefix_depth
@@ -738,7 +736,7 @@ impl Scan {
         if run.solved[parent.root_index] || parent.state.dead {
             return 0;
         }
-        if tail_len > 0 && parent.state.queue.len() <= tail_len {
+        if at_branch_boundary(&parent, tail_len) {
             self.prefix_branch.push(parent);
             return 0;
         }
@@ -1239,6 +1237,15 @@ fn pc_feasible(state: &SearchState, remaining: u8) -> bool {
 fn pc_candidate_state(state: &SearchState) -> bool {
     let (cells, height) = board_cells_and_height(state);
     cells <= 40 && height <= 6
+}
+
+/// A node sits on the shared-prefix branch boundary when its remaining queue has
+/// shrunk to the unknown tail (`tail_len`) — past the last known reveal, the
+/// continuation is speculative, so the node is parked on `prefix_branch` rather
+/// than expanded further. `tail_len == 0` means there is no unknown tail, so no
+/// node is ever a boundary.
+fn at_branch_boundary(node: &Node, tail_len: usize) -> bool {
+    tail_len > 0 && node.state.queue.len() <= tail_len
 }
 
 /// Keep the best `width` nodes **per root** (stable order: ties keep canonical

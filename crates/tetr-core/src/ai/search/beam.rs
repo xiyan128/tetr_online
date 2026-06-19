@@ -262,8 +262,8 @@ impl BeamPlanner {
         run.depth += 1;
     }
 
-    /// Score a generation's `pending` children in **one** [`Evaluator::evaluate_batch`]
-    /// call (BEAM.md §7) and fold the results into the next frontier: weight each
+    /// Score a generation's `pending` children with `evaluate_cols` (one call per
+    /// child, BEAM.md §7) and fold the results into the next frontier: weight each
     /// child's reward by its branch's speculative discount, accumulate the path
     /// reward, back up `root_best`, then stable-sort / truncate to the beam width.
     /// The shared scoring tail of [`seed`](Self::seed) (all-concrete, weight `1.0`)

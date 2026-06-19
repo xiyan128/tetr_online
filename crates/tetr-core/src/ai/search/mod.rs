@@ -171,8 +171,8 @@ pub(crate) fn commit_child(
 /// [`score_placement`]), the imperfection sampler in `policy::search` (likewise), and
 /// best-first's `children` all route through it, so they can never silently disagree on
 /// what a placement is worth (the DRY/SRP fix the SOLID review flagged). The beam instead
-/// builds its children with [`commit_child`] and scores a whole generation in one
-/// [`Evaluator::evaluate_batch`] — the seam the neural value net needs.
+/// builds its children with [`commit_child`] and scores a whole generation together
+/// (one [`Evaluator::evaluate_cols`] per child) — the grain the neural value net needs.
 pub(crate) fn score_child(
     parent: &SearchState,
     placement: &Placement,
