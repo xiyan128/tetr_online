@@ -5,9 +5,10 @@
 //! Cold Clear 2 attack evaluator, on greedy / beam / best-first search.
 //! **Adding a model is one entry in [`ModelRegistry::default`].**
 //!
-//! The setup screens (`crate::screens`) render [`labels`](ModelRegistry::labels)
-//! and write the selection; the session's seat spawner builds a controller per
-//! bot seat when a session starts. Difficulty is the shared `beatable()` handicap
+//! The setup screens (`crate::screens`) render per-seat rows via
+//! [`len`](ModelRegistry::len) / [`label`](ModelRegistry::label); the session's
+//! seat spawner builds a controller via [`build`](ModelRegistry::build) per bot
+//! seat when a session starts. Difficulty is the shared `beatable()` handicap
 //! for every entry: only the *model* (the planner + board evaluator) differs, so
 //! picks compare like-for-like: greedy vs beam, linear eval vs ported CC2 eval.
 
@@ -82,61 +83,31 @@ impl ModelEntry {
 /// [`GamePlugin`](crate::GamePlugin); read by the setup screens and the
 /// session's seat spawner.
 ///
-/// Invariant: `entries` is non-empty ([`Default`] always populates it) and
-/// `selected` is always in bounds (it starts at 0 and [`select`](Self::select)
-/// bounds-checks) — so the accessors index directly instead of carrying dead
-/// fallback arms.
+/// Invariant: `entries` is non-empty ([`Default`] always populates it), so the
+/// index accessors ([`label`](Self::label) / [`detail`](Self::detail) /
+/// [`build`](Self::build)) treat any in-range index as present.
 #[derive(Resource)]
 pub struct ModelRegistry {
     entries: Vec<ModelEntry>,
-    selected: usize,
 }
 
 impl ModelRegistry {
-    /// Display labels in registry order — what the picker renders, one row each.
-    pub fn labels(&self) -> Vec<String> {
-        self.entries.iter().map(|e| e.label.clone()).collect()
-    }
-
-    /// Select model `index` (out-of-range indices are ignored).
-    pub fn select(&mut self, index: usize) {
-        if index < self.entries.len() {
-            self.selected = index;
-        }
-    }
-
-    /// The currently selected index (the picker opens focused here).
-    pub fn selected_index(&self) -> usize {
-        self.selected
-    }
-
-    /// The selected model's label (for the log line / HUD).
-    pub fn selected_label(&self) -> &str {
-        &self.entries[self.selected].label
-    }
-
     /// The one-line description of model `index` (the picker's detail pane).
-    /// Out-of-range reads as empty rather than panicking — the picker's focus
-    /// cursor is bounded by `labels().len()`, but a text pane never needs to.
+    /// Out-of-range reads as empty rather than panicking — a seat row's focus
+    /// cursor is bounded by [`len`](Self::len), but a text pane never needs to.
     pub fn detail(&self, index: usize) -> &str {
         self.entries.get(index).map_or("", |e| e.detail.as_str())
     }
 
-    /// Build a fresh [`AiController`] for the selected model.
-    pub fn selected_controller(&self) -> AiController {
-        (self.entries[self.selected].build)()
-    }
-
     /// The label of model `index` (out of range reads empty — same contract as
-    /// [`detail`](Self::detail)). Versus seat HUDs and pickers read this.
+    /// [`detail`](Self::detail)). Seat HUDs and pickers read this.
     pub fn label(&self, index: usize) -> &str {
         self.entries.get(index).map_or("", |e| e.label.as_str())
     }
 
-    /// Build a fresh [`AiController`] for model `index`, if it exists. The
-    /// versus mode builds *two* controllers (possibly the same model twice), so
-    /// it addresses the catalog directly instead of going through the single
-    /// `selected` cursor the Watch-AI flow uses.
+    /// Build a fresh [`AiController`] for model `index`, if it exists. Each bot
+    /// seat addresses the catalog by index (a versus match builds *two*, possibly
+    /// the same model twice), so the catalog has no single "selected" cursor.
     pub fn build(&self, index: usize) -> Option<AiController> {
         self.entries.get(index).map(|e| (e.build)())
     }
@@ -275,10 +246,45 @@ impl Default for ModelRegistry {
             },
         ));
 
-        Self {
-            entries,
-            selected: 0,
-        }
+        // The APP champion's brain, watchable: the transposition-pruned attack
+        // beam — the mechanism behind our strongest headless bot (TP dedup lets
+        // width buy DISTINCT futures). Width 32 / depth 4 keeps each generation a
+        // frame-safe chunk in-browser; the headless champion runs w128 / depth 9.
+        entries.push(ModelEntry::new(
+            "Beam Attack TP",
+            "Transposition-pruned beam over the attack-tuned CC2 evaluator — the \
+             search mechanism behind our strongest headless APP bot, at a \
+             browser-watchable width and depth.",
+            || {
+                search_model(
+                    Box::new(BeamPlanner::transposing(32)),
+                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                    SearchBudget::beam(4),
+                )
+            },
+        ));
+
+        // The literal session champion: TP-beam width 128 / depth 9 over the
+        // attack-tuned CC2 evaluator — 0.8225 APP on the held-out marathon (the
+        // research arm `probe-tp128d9`). Deliberately heavy: the beam is
+        // batch-grain (one whole generation per frame), so at this width it
+        // deliberates a beat per move — here to WATCH the strongest bot think,
+        // not for a snappy opponent.
+        entries.push(ModelEntry::new(
+            "APP Champion",
+            "The strongest headless bot, verbatim: transposition-pruned beam \
+             (width 128, depth 9) over the attack-tuned CC2 evaluator, 0.8225 \
+             APP held-out. Thinks a beat per move — built to watch, not race.",
+            || {
+                search_model(
+                    Box::new(BeamPlanner::transposing(128)),
+                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                    SearchBudget::beam(9),
+                )
+            },
+        ));
+
+        Self { entries }
     }
 }
 
@@ -287,33 +293,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn select_clamps_to_the_catalog() {
-        let mut reg = ModelRegistry::default();
-        let last = reg.labels().len() - 1;
-        reg.select(last);
-        assert_eq!(reg.selected, last);
-        reg.select(usize::MAX); // out of range: ignored, selection unchanged
-        assert_eq!(reg.selected, last);
-    }
-
-    #[test]
-    fn selected_label_tracks_selection() {
-        let mut reg = ModelRegistry::default();
-        for (i, label) in reg.labels().into_iter().enumerate() {
-            reg.select(i);
-            assert_eq!(reg.selected_label(), label);
-            assert_eq!(reg.selected_index(), i);
-        }
-    }
-
-    #[test]
     fn labels_fit_a_menu_row() {
         // The picker renders labels in a 320 px row, and the pixel font runs ~15 px
         // per glyph at the button size — so 17 characters (~255 px + padding) is the
         // budget. Longer names wrap onto a second line inside the fixed-height row
         // (the original overflow bug); descriptions belong in the detail pane.
         let reg = ModelRegistry::default();
-        for label in reg.labels() {
+        for i in 0..reg.len() {
+            let label = reg.label(i);
             assert!(
                 label.len() <= 17,
                 "label {label:?} ({} chars) would wrap in the 320px menu row",
@@ -325,7 +312,7 @@ mod tests {
     #[test]
     fn every_entry_has_a_detail() {
         let reg = ModelRegistry::default();
-        for i in 0..reg.labels().len() {
+        for i in 0..reg.len() {
             assert!(
                 !reg.detail(i).is_empty(),
                 "entry {i} is missing its detail blurb"
@@ -338,10 +325,13 @@ mod tests {
     fn every_entry_builds_a_controller() {
         // Each factory must construct without panicking — the registry-level smoke
         // test that a catalog edit cannot ship an unbuildable model.
-        let mut reg = ModelRegistry::default();
-        for i in 0..reg.labels().len() {
-            reg.select(i);
-            let _ = reg.selected_controller();
+        let reg = ModelRegistry::default();
+        for i in 0..reg.len() {
+            assert!(reg.build(i).is_some(), "entry {i} failed to build");
         }
+        assert!(
+            reg.build(usize::MAX).is_none(),
+            "out of range builds nothing"
+        );
     }
 }
