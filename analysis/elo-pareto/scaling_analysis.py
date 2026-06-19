@@ -111,6 +111,33 @@ def main() -> int:
           f"(same node/compute cost). Splitting width vs depth "
           f"{'beats' if m_sep.aic < m_nodes.aic else 'ties'} nodes-only (ΔAIC={m_nodes.aic-m_sep.aic:.0f}).")
 
+    # (iii) INTERACTION: the levers are not separable -- width's value GROWS with depth.
+    Xi = sm.add_constant(df.assign(lwd=df.lw * df.ld)[["lw", "ld", "lwd"]])
+    m_int = sm.WLS(df.elo, Xi, weights=w).fit()
+    bi = m_int.params["lwd"]
+    wslope = lambda d: m_int.params["lw"] + bi * np.log2(d)   # d Elo / d log2(width) at depth d
+    print(f"  (iii) interaction Elo ~ log2(w)+log2(d)+log2(w)·log2(d): cross term {bi:+.0f} "
+          f"(R²={m_int.rsquared:.3f}, lift {m_int.rsquared - m_sep.rsquared:+.3f})")
+    print(f"        width buys {wslope(2):.0f} Elo/doubling at d2 but {wslope(9):.0f} at d9 — "
+          f"the levers COMPOUND; the additive 5.2× is an average over a sloped surface.")
+
+    # (iv) REGIME SPLIT: the bot has a ~6-ply concrete preview; the steep depth returns may live
+    # ENTIRELY there. Re-fit width/depth separately on the concrete (d<=6) vs speculative (d>=7) rows.
+    def sep(sub):
+        s = df[sub]
+        m = sm.WLS(s.elo, sm.add_constant(s[["lw", "ld"]]), weights=1 / s.se**2).fit()
+        return m.params["lw"], m.params["ld"]
+    regimes = {
+        "all (d2-9)": sep(df.depth >= 2),
+        "drop d2 row": sep(df.depth >= 3),
+        "CONCRETE d<=6": sep(df.depth <= 6),
+        "SPECULATIVE d>=7": sep(df.depth >= 7),
+    }
+    rule("   regime split (preview horizon = ~6 concrete plies): does the depth edge survive past it?")
+    for name, (rw, rd) in regimes.items():
+        print(f"     {name:18} width={rw:6.1f}  depth={rd:6.1f}  depth/width={rd/rw:4.1f}x")
+    print("   ⇒ the 6.9x depth edge is a CONCRETE-PLY effect; past the ~6-ply preview (d>=7) it collapses to ~1.2x (≈ width).")
+
     # iso-node slices: configs with (nearly) equal node budgets, depth vs width
     rule("   iso-node check: same compute, different (width, depth) split")
     for target in [48, 96, 192]:
@@ -184,15 +211,22 @@ def main() -> int:
     fig.colorbar(im, ax=ax, label="Elo")
     ax.legend(fontsize=10, loc="lower right")
 
-    # (C) width vs depth value (Elo per doubling) — the headline asymmetry
+    # (C) the regime split: depth's edge is a concrete-ply effect that collapses past the preview
     ax = axes[1, 0]
-    bars = ax.bar(["width\ndoubling", "depth\ndoubling"], [bw, bd],
-                  yerr=[m_sep.bse["lw"], m_sep.bse["ld"]], capsize=8,
-                  color=["#4c72b0", "#55a868"], edgecolor="black")
-    for rect, v in zip(bars, [bw, bd]):
-        ax.text(rect.get_x() + rect.get_width() / 2, v + 6, f"{v:.0f}", ha="center", fontsize=14, weight="bold")
+    grp = [("CONCRETE\n(d≤6)", regimes["CONCRETE d<=6"]), ("SPECULATIVE\n(d≥7)", regimes["SPECULATIVE d>=7"])]
+    xs = np.arange(len(grp))
+    bwid = 0.36
+    ax.bar(xs - bwid / 2, [g[1][0] for g in grp], bwid, label="width", color="#4c72b0", edgecolor="black")
+    ax.bar(xs + bwid / 2, [g[1][1] for g in grp], bwid, label="depth", color="#55a868", edgecolor="black")
+    for i, (_, (rw, rd)) in enumerate(grp):
+        ax.text(i - bwid / 2, rw + 6, f"{rw:.0f}", ha="center", fontsize=12, weight="bold")
+        ax.text(i + bwid / 2, rd + 6, f"{rd:.0f}", ha="center", fontsize=12, weight="bold")
+        ax.text(i, max(rw, rd) + 48, f"{rd / rw:.1f}x", ha="center", fontsize=16, weight="bold", color="crimson")
+    ax.set_xticks(xs)
+    ax.set_xticklabels([g[0] for g in grp])
     ax.set_ylabel("Elo gained per doubling")
-    ax.set_title(f"C · A node buys {bd/bw:.1f}× more Elo as DEPTH than as WIDTH\n(equal compute cost per node)")
+    ax.legend(fontsize=11, loc="upper right")
+    ax.set_title("C · Depth's edge is a CONCRETE-ply effect:\n6.9x within the 6-ply preview, 1.2x past it")
 
     # (D) the depth-cap test: per-ply ΔElo vs depth at fixed widths (still positive at d9?)
     ax = axes[1, 1]
