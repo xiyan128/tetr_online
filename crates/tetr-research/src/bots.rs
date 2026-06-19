@@ -93,6 +93,11 @@ pub struct BotSpec {
     /// blind arm of awareness experiments, and currently the stronger versus
     /// configuration (the mispricing record).
     pub blind: bool,
+    /// Beam speculation past the visible queue (the 7-bag remainder rollout under
+    /// `SPEC_DECAY`). On by default — the knob exists to ablate whether the
+    /// speculative tail (which dominates deep search past the ~6-ply preview) buys
+    /// strength or just adds discounted noise. No effect on non-beam searches.
+    pub speculate: bool,
 }
 
 impl BotSpec {
@@ -102,6 +107,7 @@ impl BotSpec {
             search: SearchSpec::Greedy,
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -111,6 +117,7 @@ impl BotSpec {
             search: SearchSpec::Beam { width, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -120,6 +127,7 @@ impl BotSpec {
             search: SearchSpec::TpBeam { width, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -129,6 +137,7 @@ impl BotSpec {
             search: SearchSpec::BestFirst { budget, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -138,6 +147,7 @@ impl BotSpec {
             search: SearchSpec::PcCoverage { config, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -159,6 +169,14 @@ impl BotSpec {
         self
     }
 
+    /// Turn OFF beam speculation past the visible queue (ablation; no effect on
+    /// non-beam searches). Deep search past the ~6-ply preview is otherwise all
+    /// `SPEC_DECAY`-discounted bag rollout.
+    pub fn no_speculation(mut self) -> Self {
+        self.speculate = false;
+        self
+    }
+
     /// Build a fresh controller for this spec (the policy RNG seeded by `seed`).
     pub fn controller(&self, seed: u64) -> Box<dyn PlayerController> {
         let inner: Box<dyn PlayerController> = match self.search {
@@ -174,13 +192,13 @@ impl BotSpec {
                 Box::new(AiController::new(Handicap::perfect(), seed))
             }
             SearchSpec::Beam { width, depth } => full_strength(
-                Box::new(BeamPlanner::new(width)),
+                Box::new(BeamPlanner::new(width).with_speculation(self.speculate)),
                 self.eval.build(),
                 SearchBudget::beam(depth),
                 seed,
             ),
             SearchSpec::TpBeam { width, depth } => full_strength(
-                Box::new(BeamPlanner::transposing(width)),
+                Box::new(BeamPlanner::transposing(width).with_speculation(self.speculate)),
                 self.eval.build(),
                 SearchBudget::beam(depth),
                 seed,
