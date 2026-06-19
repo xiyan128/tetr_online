@@ -451,6 +451,18 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             "probe-tp128d9",
             BotSpec::tp_beam(128, 9).cc2(Cc2Weights::attack_tuned()),
         ),
+        // The depth-cap follow-up (analysis/elo-pareto + docs/research-directions.md):
+        // depth past the d9 grid wall pays modestly to ~d12 then saturates. tp128d12 is the
+        // marginally-stronger deeper champion (+45% compute); tp16d12 is the narrow-deep
+        // efficient config (a survival-width floor + depth to the knee).
+        (
+            "probe-tp128d12",
+            BotSpec::tp_beam(128, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp16d12",
+            BotSpec::tp_beam(16, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
         // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
         // saturates" lesson predates this engine), and PC-hunting where the
         // search can actually see 7-piece PC lines.

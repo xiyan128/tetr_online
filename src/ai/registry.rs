@@ -284,6 +284,44 @@ impl Default for ModelRegistry {
             },
         ));
 
+        // The deeper champion from the depth-cap study (docs/research-directions.md):
+        // TP-beam width 128 / DEPTH 12. Depth past the d9 grid wall buys a little
+        // head-to-head survival (it sees further and plays safer) but trades a touch of
+        // raw attack for it — APP 0.81 vs the champion's 0.83. The heaviest model: thinks
+        // an even longer beat per move. Here to watch the deepest search reason.
+        entries.push(ModelEntry::new(
+            "Deep Champion",
+            "A beat deeper than the APP champion: transposition-pruned beam at width 128, \
+             depth 12. Slightly safer head-to-head, slightly less raw attack — the \
+             heaviest model, built to watch think.",
+            || {
+                search_model(
+                    Box::new(BeamPlanner::transposing(128)),
+                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                    SearchBudget::beam(12),
+                )
+            },
+        ));
+
+        // The efficient narrow-deep config from the scaling study: a small survival-width
+        // floor (16) + depth to the knee (12) — roughly 1/5 the champion's search, so it
+        // plays SNAPPILY (no champion-style deliberation pause) while still searching deep.
+        // Less raw attack than the wide bots (APP ~0.69), but the responsive "go narrow,
+        // go deep" pick — a strong opponent you don't wait on.
+        entries.push(ModelEntry::new(
+            "Efficient Deep",
+            "Narrow but deep (width 16, depth 12) — the scaling study's efficient corner. \
+             Searches deep at a fraction of the champion's cost, so it plays snappily; \
+             less raw attack than the wide bots.",
+            || {
+                search_model(
+                    Box::new(BeamPlanner::transposing(16)),
+                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+                    SearchBudget::beam(12),
+                )
+            },
+        ));
+
         Self { entries }
     }
 }
