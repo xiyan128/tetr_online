@@ -55,7 +55,7 @@ pub use handicap::Handicap;
 pub use movegen::{Move, Placement, generate, generate_with_hold};
 pub use plan::placement_to_inputs;
 pub use policy::{Decision, Observation, Policy, SearchPolicy};
-pub use runner::{DecisionRunner, SlicedRunner, SyncRunner};
+pub use runner::{BudgetedRunner, DecisionRunner, MonotonicClock, SlicedRunner, SyncRunner};
 pub use search::{
     BeamPlanner, BestFirstPlanner, Mind, PcCoverageConfig, PcCoveragePlanner, PcCoverageUnit,
     PlacementPlan, SearchBudget, ThinkProgress, think_to_completion,

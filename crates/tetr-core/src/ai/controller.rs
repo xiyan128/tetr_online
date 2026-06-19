@@ -68,7 +68,8 @@ use crate::ai::eval::{Cc2Evaluator, Cc2Weights};
 use crate::ai::handicap::Handicap;
 use crate::ai::plan::placement_to_inputs;
 use crate::ai::policy::{Decision, Policy, SearchPolicy};
-use crate::ai::runner::{DecisionRunner, SlicedRunner, SyncRunner};
+use crate::ai::runner::budgeted::{BUDGET_STEP, DEFAULT_BUDGET};
+use crate::ai::runner::{BudgetedRunner, DecisionRunner, MonotonicClock, SlicedRunner, SyncRunner};
 use crate::ai::search::{BestFirstPlanner, SearchBudget};
 use crate::ai::state::SearchState;
 use crate::engine::{EngineSnapshot, InputFrame, PieceType};
@@ -207,21 +208,36 @@ impl AiController {
     }
 
     /// The interactive-catalog construction: a (mind, evaluator, budget) triple
-    /// under the **default** (beatable) handicap and AI seed, in the cooperative
-    /// venue. One home for the menu-bot convention — beside [`attack`](Self::attack),
-    /// the strongest model's same-venue home — so no game surface can fork the
-    /// operating conventions from the core's.
+    /// under the **default** (beatable) handicap and AI seed, in the
+    /// **time-budgeted** cooperative venue ([`BudgetedRunner`]). One home for the
+    /// menu-bot convention so no game surface can fork the operating conventions from
+    /// the core's.
+    ///
+    /// Unlike [`attack`](Self::attack)'s node-bounded best-first (which finishes inside
+    /// its reaction window at one quantum per frame), the catalog's open-ended beams
+    /// need *many* quanta — far more than the window's worth — so a fixed one-quantum
+    /// venue would throttle them to the frame loop (the champion: ~30 frames ≈ 0.5 s
+    /// per piece, most of each frame idle). The budgeted venue instead spends the idle
+    /// frame budget, landing the decision in a handful of frames at full strength. The
+    /// `clock` is injected by the host (the core never reads a platform clock); the
+    /// venue is timing-adaptive and therefore **game-only** — benchmarks and research
+    /// stay on the blocking venue.
     pub fn interactive(
         mind: Box<dyn crate::ai::Mind>,
         eval: Box<dyn crate::ai::Evaluator>,
         budget: SearchBudget,
+        clock: Box<dyn MonotonicClock>,
     ) -> Self {
-        Self::interactive_with(
-            mind,
-            eval,
-            budget,
-            Handicap::default(),
-            crate::ai::runner::sliced::DEFAULT_QUANTUM,
+        let handicap = Handicap::default();
+        let policy = SearchPolicy::new(mind, eval, budget, handicap.imperfection, DEFAULT_AI_SEED);
+        Self::with_runner(
+            Box::new(BudgetedRunner::new(
+                Box::new(policy),
+                BUDGET_STEP,
+                DEFAULT_BUDGET,
+                clock,
+            )),
+            handicap.reaction,
         )
     }
 

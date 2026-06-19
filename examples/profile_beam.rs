@@ -11,14 +11,71 @@
 //! `cargo run --release --example profile_beam`         → the evidence table
 //! `cargo run --release --example profile_beam profile` → ~12s busy-loop for sampling
 
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use tetr_online::ai::{
-    AiController, BeamPlanner, BestFirstPlanner, Cc2Evaluator, Cc2Weights, Evaluator, Handicap,
-    Mind, SearchBudget, SearchPolicy, SearchState, ThinkProgress, think_to_completion,
+    AiController, BeamPlanner, BestFirstPlanner, BudgetedRunner, Cc2Evaluator, Cc2Weights,
+    DecisionRunner, Evaluator, Handicap, Mind, MonotonicClock, SearchBudget, SearchPolicy,
+    SearchState, ThinkProgress, think_to_completion,
 };
 use tetr_online::engine::{CellKind, Engine, EngineConfig, EngineEvent, InputFrame, PieceType};
 use tetr_online::player::drive_engine;
+
+/// Real wall-clock for the budgeted venue (native harness only — `std::time::Instant`
+/// is fine off-wasm). Mirrors the host's `FrameClock`.
+struct RealClock {
+    start: Instant,
+}
+impl MonotonicClock for RealClock {
+    fn elapsed(&self) -> Duration {
+        self.start.elapsed()
+    }
+}
+
+/// Drive the champion through the real `BudgetedRunner` at a per-frame wall-clock
+/// `budget` and report frames-to-decide vs the one-quantum-per-frame sliced cadence.
+fn budgeted_cadence(budget_ms: u64) {
+    let budget = Duration::from_millis(budget_ms);
+    println!("\n== BudgetedRunner champion cadence (budget {budget_ms}ms/frame, step 8 nodes) ==");
+    for (sname, stack) in [("empty", false), ("holey6", true)] {
+        let state = make_state(stack);
+        let policy = SearchPolicy::new(
+            Box::new(BeamPlanner::transposing(128)),
+            Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+            SearchBudget::beam(9),
+            0.0,
+            SEED,
+        );
+        let mut runner = BudgetedRunner::new(
+            Box::new(policy),
+            8,
+            budget,
+            Box::new(RealClock {
+                start: Instant::now(),
+            }),
+        );
+        runner.submit(state.clone());
+        let mut polls = 0u32;
+        let mut max_poll = 0.0f64;
+        let total = Instant::now();
+        loop {
+            let t = Instant::now();
+            let done = runner.poll();
+            max_poll = max_poll.max(t.elapsed().as_secs_f64() * 1e3);
+            polls += 1;
+            if done.is_some() {
+                break;
+            }
+            assert!(polls < 10_000, "decision must land");
+        }
+        let compute = total.elapsed().as_secs_f64() * 1e3;
+        let wall = polls as f64 * (1000.0 / 60.0);
+        println!(
+            "  {sname:<8} polls={polls:>3}  compute={compute:>6.1}ms  worst poll {max_poll:>5.2}ms  => {wall:>5.0}ms/piece in-game ({:.1}/s)",
+            1000.0 / wall,
+        );
+    }
+}
 
 const SEED: u64 = 0xB007_5EED;
 /// The per-poll node quanta the sliced runner uses in-game (one poll per
@@ -203,7 +260,10 @@ fn champion_game(target: usize) {
     decisions.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let pct = |p: f64| decisions[((decisions.len() as f64 * p) as usize).min(decisions.len() - 1)];
     println!("== APP Champion (w128/d9 TP beam) — headless, blocking, {placed} pieces ==");
-    println!("  mean wall / piece : {:.1} ms", total / placed.max(1) as f64);
+    println!(
+        "  mean wall / piece : {:.1} ms",
+        total / placed.max(1) as f64
+    );
     println!(
         "  decision frame    : p50 {:.1} ms   p90 {:.1} ms   max {:.1} ms",
         pct(0.5),
@@ -222,6 +282,11 @@ fn main() {
     let eval = Cc2Evaluator::new(Cc2Weights::attack_tuned());
     if std::env::args().any(|a| a == "game") {
         champion_game(60);
+        return;
+    }
+    if std::env::args().any(|a| a == "budget") {
+        budgeted_cadence(8); // native default budget
+        budgeted_cadence(4); // wasm default budget
         return;
     }
     let profile_mode = std::env::args().any(|a| a == "profile");

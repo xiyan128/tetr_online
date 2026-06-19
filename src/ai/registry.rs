@@ -18,7 +18,8 @@ use std::time::Duration;
 
 use crate::ai::{
     AiController, BeamPlanner, Cc2Evaluator, Cc2Weights, DEFAULT_AI_SEED, Evaluator, Handicap,
-    LinearEvaluator, Mind, PcCoverageConfig, PcCoveragePlanner, PcCoverageUnit, SearchBudget,
+    LinearEvaluator, Mind, MonotonicClock, PcCoverageConfig, PcCoveragePlanner, PcCoverageUnit,
+    SearchBudget,
 };
 
 /// Beam settings for the in-game Tier-2 bots. Depth 2 is smooth per piece (a few ms
@@ -126,15 +127,38 @@ impl ModelRegistry {
 
 /// Wire a mind + evaluator into a fresh controller — the core's
 /// [`AiController::interactive`] convention (default handicap + AI seed +
-/// cooperative venue), so an entry differs only by the (mind, evaluator,
-/// budget) triple it names and the game can never fork the operating
-/// conventions from the core's.
+/// time-budgeted cooperative venue), so an entry differs only by the (mind,
+/// evaluator, budget) triple it names and the game can never fork the operating
+/// conventions from the core's. The host supplies the venue's [`FrameClock`] — the
+/// core stays clock-free.
 fn search_model(
     mind: Box<dyn Mind>,
     eval: Box<dyn Evaluator>,
     budget: SearchBudget,
 ) -> AiController {
-    AiController::interactive(mind, eval, budget)
+    AiController::interactive(mind, eval, budget, Box::new(FrameClock::new()))
+}
+
+/// The host clock for the time-budgeted venue. The engine-agnostic core defines the
+/// [`MonotonicClock`] contract but reads no platform clock itself; Bevy's
+/// `platform::time::Instant` is web-time-backed, so this one source works on native
+/// and wasm alike.
+struct FrameClock {
+    start: bevy::platform::time::Instant,
+}
+
+impl FrameClock {
+    fn new() -> Self {
+        Self {
+            start: bevy::platform::time::Instant::now(),
+        }
+    }
+}
+
+impl MonotonicClock for FrameClock {
+    fn elapsed(&self) -> Duration {
+        self.start.elapsed()
+    }
 }
 
 impl Default for ModelRegistry {

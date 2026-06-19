@@ -4,17 +4,24 @@
 //! over an [`Observation`]) from *where* that decision is computed. The controller
 //! submits an observation and polls for the [`Decision`]; it never blocks.
 //!
-//! Two venues ship, one per regime:
+//! Three venues ship, one per regime:
 //!
 //! - **[`SyncRunner`]** — blocking direct-drive: the policy runs inline, to
 //!   completion, in [`submit`](DecisionRunner::submit). The venue for headless
 //!   benchmarks and tests, where exact budgets and zero pacing matter and a
 //!   frame doesn't exist to hitch.
-//! - **[`SlicedRunner`]** — cooperative interactive: each
+//! - **[`SlicedRunner`]** — cooperative interactive, **deterministic**: each
 //!   [`poll`](DecisionRunner::poll) spends one bounded node quantum on the
 //!   policy's in-flight thinking, so a heavy search spreads across frames
-//!   instead of stalling the one that submitted it. The venue for the game and
-//!   the wasm embed.
+//!   instead of stalling the one that submitted it. Reproducible from
+//!   `(seed, quantum, cadence)` — the venue the venue-equivalence gate pins.
+//! - **[`BudgetedRunner`]** — cooperative interactive, **responsive**: each poll
+//!   spends node quanta until a per-frame wall-clock budget is hit, so a bot that
+//!   needs far more than a reaction-window's worth of quanta (an open-ended beam)
+//!   isn't throttled to one quantum per frame. It reads an injected clock, so it
+//!   is timing-nondeterministic by design (the same trade the thread venue makes)
+//!   and is the *game's* venue only — never benchmarks. The decision is unchanged;
+//!   only the poll it lands on moves.
 //!
 //! The trait shape (submit / non-blocking poll / cancel) is exactly Cold Clear's
 //! own off-thread `request` / `poll` / cancel model, so the remaining venues — a
@@ -33,9 +40,11 @@
 //! [`SlicedRunner`]'s quantum is a *configured node count*, never a measured
 //! time, so a sliced game is reproducible from `(seed, quantum, poll cadence)`.
 
+pub mod budgeted;
 pub mod sliced;
 pub mod sync;
 
+pub use budgeted::{BudgetedRunner, MonotonicClock};
 pub use sliced::SlicedRunner;
 pub use sync::SyncRunner;
 
