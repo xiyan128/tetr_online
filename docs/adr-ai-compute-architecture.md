@@ -117,3 +117,29 @@ conversation.
 - MCGS, the value net, versus pondering, and a worker venue all land behind
   existing seams rather than new ones: `Mind`, the runner trait, and the
   `Evaluator` trait, where a batched backend re-adds a batch verb.
+
+## Update 2026-06-19: the time-budgeted venue (`BudgetedRunner`, built)
+
+The deadline verb anticipated above ("trivial to re-add") shipped, for a reason the
+original sizing missed. The sliced venue spends **one node quantum per frame**, sized
+so the node-bounded best-first attack bot (192 nodes ≈ 12 quanta) finishes inside its
+12-frame reaction window. But the catalog's *open-ended beams* need far more — the APP
+champion is ~30 quanta — so at one quantum per frame the controller waits ~30 frames
+(~0.5 s/piece on native) while each poll leaves most of the frame idle. The bot was
+throttled by the frame loop, not the CPU.
+
+[`BudgetedRunner`](../crates/tetr-core/src/ai/runner/budgeted.rs) spends quanta until a
+per-frame **wall-clock** budget (8 ms native / 4 ms wasm) instead of exactly one,
+landing the champion in ~12 frames (~200 ms, inside its reaction window) at full
+strength — measured 2 → 5 pieces/s native, worst poll ~10 ms.
+
+This is the venue the "two currencies" rule forbids the *search* from being, made legal
+at the *venue* layer: the runner reads a clock, so it is **timing-nondeterministic by
+design** (a poll's quantum count depends on machine speed) and is therefore the game's
+venue only — benchmarks, research, and the venue-equivalence gate stay on the
+deterministic `SyncRunner`/`SlicedRunner`. The clock is an injected `MonotonicClock`
+trait, so the core stays clock-free (`std::time::Instant` panics on wasm; the host
+supplies Bevy's web-time-backed `Instant`) **and** the budgeting is deterministically
+testable with a fake clock. The *decision* is invariant under the budget — the budget
+moves only which poll it lands on, pinned by tests. Only `AiController::interactive`
+(the catalog beams) switched; `attack`/embed/PC/benches are untouched.
