@@ -101,6 +101,13 @@ async function buildWasm(outDir: string, optimize: boolean): Promise<void> {
   console.log(`==> wasm bundles ready in ${outDir}/`);
 }
 
+/** Short content hash of a file — for immutable, cache-busting filenames. */
+async function hashFile(path: string): Promise<string> {
+  const hasher = new Bun.CryptoHasher("sha256");
+  hasher.update(await Bun.file(path).bytes());
+  return hasher.digest("hex").slice(0, 8);
+}
+
 async function buildWeb(): Promise<void> {
   const out = "dist";
   console.log(`==> Cleaning ${out}/`);
@@ -109,14 +116,39 @@ async function buildWeb(): Promise<void> {
   // 1. wasm bundles straight into dist/.
   await buildWasm(out, /* optimize */ true);
 
-  // 2. Bundle + minify the TSX page. Bun emits dist/index.html referencing a
-  //    hashed JS chunk; the runtime-computed import() of the wasm glue stays
-  //    external, so the wasm bundles above are loaded at runtime.
+  // 2. Content-hash each renderer's glue + wasm into immutable filenames.
+  //    GitHub Pages can't set Cache-Control, so hashed names are the only
+  //    cache-bust that works there: every deploy gets fresh URLs, so a
+  //    returning browser can never pair a fresh glue with a stale-cached wasm
+  //    (the wasm-bindgen schema skew that surfaces as
+  //    `__wasm_bindgen_func_elem_* is not a function`). The names are injected
+  //    into the page bundle below.
+  const bundleFiles: Record<string, string> = {};
+  for (const renderer of RENDERERS) {
+    const name = bundleName(renderer);
+    const hash = await hashFile(`${out}/${name}_bg.wasm`);
+    const hashedWasm = `${name}_bg.${hash}.wasm`;
+    const hashedGlue = `${name}.${hash}.js`;
+    // Repoint the glue's wasm fetch, then commit both under hashed names.
+    const glue = (await Bun.file(`${out}/${name}.js`).text()).replaceAll(
+      `${name}_bg.wasm`,
+      hashedWasm,
+    );
+    await Bun.write(`${out}/${hashedGlue}`, glue);
+    await $`rm ${out}/${name}.js`;
+    await $`mv ${out}/${name}_bg.wasm ${out}/${hashedWasm}`;
+    bundleFiles[renderer] = hashedGlue;
+  }
+
+  // 3. Bundle + minify the TSX page, injecting the hashed glue filenames. Bun
+  //    emits dist/index.html -> a hashed JS chunk that imports them, so the
+  //    whole index -> chunk -> glue -> wasm chain is fresh URLs every deploy.
   console.log("==> bun build (TSX page)");
   const result = await Bun.build({
     entrypoints: ["web/index.html"],
     outdir: out,
     minify: true,
+    define: { __BUNDLE_FILES__: JSON.stringify(bundleFiles) },
   });
   if (!result.success) {
     for (const log of result.logs) console.error(log);

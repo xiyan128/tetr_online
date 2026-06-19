@@ -21,6 +21,12 @@ import { RENDERERS, bundleJs, type Renderer } from "./bundles";
 /** wasm-bindgen `--target web` module shape: default export is the async init(). */
 type WasmModule = { default: (module_or_path?: string) => Promise<unknown> };
 
+// The production build (scripts/build.ts) replaces this with a map of
+// content-hashed glue filenames per renderer, so the page imports immutable
+// URLs that bust cache on every deploy. The dev server leaves it undefined
+// (it serves fixed names out of `.wasm-dev/`); see `loadBundle`'s fallback.
+declare const __BUNDLE_FILES__: Record<Renderer, string> | undefined;
+
 /**
  * Work around the browser autoplay policy so the game's audio plays.
  *
@@ -81,7 +87,12 @@ async function loadBundle(renderer: Renderer): Promise<void> {
   // Resolve against the document base URL so the wasm bundle (which sits next to
   // index.html, NOT next to the hashed JS chunk) is found under any base path.
   // The URL is computed at runtime, so the bundler leaves this import external.
-  const url = new URL(bundleJs(renderer), document.baseURI).href;
+  // Prod injects content-hashed glue names (`__BUNDLE_FILES__`); the dev server
+  // has no such define, so fall back to the fixed name in `.wasm-dev/`.
+  const file =
+    (typeof __BUNDLE_FILES__ !== "undefined" && __BUNDLE_FILES__[renderer]) ||
+    bundleJs(renderer);
+  const url = new URL(file, document.baseURI).href;
   const mod = (await import(url)) as WasmModule;
   await mod.default();
 }

@@ -107,21 +107,24 @@ jobs:
         uses: actions/deploy-pages@v4
 
       # "Deploy succeeded" is not "site serves": fetch the page through the real
-      # URL (custom domain + CDN) and require the app shell plus a wasm bundle.
-      # Retries cover CDN propagation; failure here fails the run loudly.
-      # -L matters: page_url is the github.io address, which 301s to the
-      # custom domain; without following redirects the body is empty and the
-      # check can never pass.
+      # URL (custom domain + CDN) and require the app shell plus its entry chunk
+      # to actually serve. The wasm/glue filenames are content-hashed per deploy
+      # (scripts/build.ts), so we discover the entry chunk from the page rather
+      # than hardcoding a name. Retries cover CDN propagation; failure here fails
+      # the run loudly. -L matters: page_url is the github.io address, which 301s
+      # to the custom domain; without following redirects the body is empty and
+      # the check can never pass.
       - name: Verify the live site
         run: |
           url="${{ steps.deployment.outputs.page_url }}"
           echo "verifying $url"
           for i in $(seq 1 6); do
-            if page=$(curl -sfL "$url?cb=$(date +%s)") \
-               && grep -q 'chunk-' <<< "$page" \
-               && curl -sfLI "${url}tetr_online_webgl2_bg.wasm" >/dev/null; then
-              echo "live site verified at $url"
-              exit 0
+            if page=$(curl -sfL "$url?cb=$(date +%s)"); then
+              chunk=$(grep -oE 'chunk-[A-Za-z0-9_-]+\.js' <<< "$page" | head -1)
+              if [ -n "$chunk" ] && curl -sfLI "${url}${chunk}" >/dev/null; then
+                echo "live site verified at $url (entry chunk: $chunk)"
+                exit 0
+              fi
             fi
             echo "not serving yet (attempt $i), retrying in 10s"
             sleep 10
