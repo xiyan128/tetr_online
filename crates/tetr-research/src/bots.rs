@@ -451,17 +451,48 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
             "probe-tp128d9",
             BotSpec::tp_beam(128, 9).cc2(Cc2Weights::attack_tuned()),
         ),
-        // The depth-cap follow-up (analysis/elo-pareto + docs/research-directions.md):
-        // depth past the d9 grid wall pays modestly to ~d12 then saturates. tp128d12 is the
-        // marginally-stronger deeper champion (+45% compute); tp16d12 is the narrow-deep
-        // efficient config (a survival-width floor + depth to the knee).
+        // The depth-cap + speculation study (analysis/elo-pareto + docs/research-directions.md).
+        // Depth past the d9 grid wall pays modestly to ~d12 then saturates; width is a survival
+        // floor. Reproduce the headline comparisons with `run race <a> <b>` (pair-GSPRT, ledger-
+        // receipted) — this is the platform path, not a bespoke harness:
+        //   depth past d9 pays:  `run race probe-tp16d12 probe-tp16d9`    (~58%, modest)
+        //   saturates by d12:    `run race probe-tp16d15 probe-tp16d12`   (~50%, flat)
+        //   deeper champion:     `run race probe-tp128d12 probe-tp128d9`  (~54%, thin)
+        //   speculation is load-bearing: `run race probe-tp16d12 probe-tp16d12-nospec` (~90%)
         (
             "probe-tp128d12",
             BotSpec::tp_beam(128, 12).cc2(Cc2Weights::attack_tuned()),
         ),
         (
+            "probe-tp16d9",
+            BotSpec::tp_beam(16, 9).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
             "probe-tp16d12",
             BotSpec::tp_beam(16, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp16d15",
+            BotSpec::tp_beam(16, 15).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Speculation ablation (expectimax at the empty-queue boundary is the queued fix):
+        // `no_speculation()` makes an empty-queue node terminal, collapsing the deep tail to the
+        // ~6-ply concrete horizon — the spec-OFF arm of `run race probe-tpNd12 probe-tpNd12-nospec`.
+        (
+            "probe-tp16d12-nospec",
+            BotSpec::tp_beam(16, 12)
+                .cc2(Cc2Weights::attack_tuned())
+                .no_speculation(),
+        ),
+        (
+            "probe-tp32d12",
+            BotSpec::tp_beam(32, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp32d12-nospec",
+            BotSpec::tp_beam(32, 12)
+                .cc2(Cc2Weights::attack_tuned())
+                .no_speculation(),
         ),
         // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
         // saturates" lesson predates this engine), and PC-hunting where the

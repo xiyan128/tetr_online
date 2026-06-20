@@ -57,8 +57,12 @@ to "close the learning loop."
 
 ## Results (executed)
 
-Items 2.1–2.3 have been run. Raw output: `analysis/elo-pareto/{e1_race.log,f2_race.log}`;
-runners: `crates/tetr-research/examples/{depth_probe,e1_depth_race,f2_champion_depth}.rs`.
+Items 2.1–2.3 have been run. Raw output (first-pass receipts): `analysis/elo-pareto/{e1_race.log,
+f2_race.log,s_spec.log}`. The GSPRT comparisons reproduce through the platform's `race` eval on
+named bots (ledger-receipted) — e.g. `cargo run -p tetr-research -- run race probe-tp16d12
+probe-tp16d9`; the configs are registered in `bots.rs` (the `run race` recipes are listed there).
+The two probes with no matching eval stay as examples: `examples/{elo_pareto,depth_probe}.rs` (the
+Elo-vs-compute sweep and the E0 argmax-stabilization probe).
 
 **E0 (depth-stabilization probe).** Over 60 mid-game states the ply-1 decision is already
 settled by the ~d6 preview horizon for **60–77%** of states, but still flips past d9 for
