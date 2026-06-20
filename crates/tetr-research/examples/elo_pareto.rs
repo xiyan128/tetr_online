@@ -30,10 +30,8 @@ use std::time::{Duration, Instant};
 
 use tetr_core::ai::eval::{Cc2Evaluator, Cc2Weights};
 use tetr_core::ai::{BeamPlanner, Mind, SearchBudget, SearchState, think_to_completion};
-use tetr_core::engine::{Engine, EngineEvent};
-use tetr_core::player::drive_engine;
 use tetr_research::bots::BotSpec;
-use tetr_research::marathon::marathon_config;
+use tetr_research::fixtures::state_bank;
 use tetr_research::seeds::seed_set_from;
 use tetr_research::versus::{VersusFormat, VersusOutcome, VersusResult, evaluate_versus_format};
 
@@ -54,7 +52,6 @@ const SEEDS_PER_PAIR: usize = 12;
 const PARETO_REGION: usize = 1 << 62;
 /// States in the compute-timing bank.
 const COMPUTE_STATES: usize = 40;
-const STATE_SEED: u64 = 0x0E10_0BEE;
 
 #[derive(Clone, Copy)]
 struct Cfg {
@@ -86,39 +83,6 @@ fn grid() -> Vec<Cfg> {
         }
     }
     v
-}
-
-/// A bank of realistic mid-game states: a mid-strength bot plays a solo marathon and we
-/// snapshot the board at the start of each piece. All configs time on the SAME bank.
-fn representative_states(n: usize) -> Vec<SearchState> {
-    let mut engine = Engine::new(marathon_config(), STATE_SEED);
-    let mut bot = BotSpec::tp_beam(16, 2)
-        .cc2(Cc2Weights::attack_tuned())
-        .factory()(STATE_SEED);
-    let mut states = Vec::new();
-    'outer: while states.len() < n {
-        let snap = engine.snapshot();
-        if snap.game_over.is_some() {
-            break;
-        }
-        if let Some(s) = SearchState::from_snapshot(&snap) {
-            states.push(s);
-        }
-        for _ in 0..4000 {
-            let mut locked = false;
-            for ev in drive_engine(&mut engine, &mut *bot) {
-                match ev {
-                    EngineEvent::Locked { .. } => locked = true,
-                    EngineEvent::GameOver { .. } => break 'outer,
-                    _ => {}
-                }
-            }
-            if locked {
-                break;
-            }
-        }
-    }
-    states
 }
 
 /// Median per-decision compute (ms) and the (board-independent, width-bounded) node count.
@@ -232,7 +196,10 @@ fn main() -> std::io::Result<()> {
         "measuring compute for {} configs over {COMPUTE_STATES} states ...",
         g.len()
     );
-    let states = representative_states(COMPUTE_STATES);
+    let states = state_bank(
+        COMPUTE_STATES,
+        BotSpec::tp_beam(16, 4).cc2(Cc2Weights::attack_tuned()),
+    );
     eprintln!("  (state bank: {} realistic mid-game boards)", states.len());
     let mut cfg_csv = std::fs::File::create(format!("{out_dir}/configs.csv"))?;
     writeln!(cfg_csv, "label,width,depth,compute_ms,nodes")?;

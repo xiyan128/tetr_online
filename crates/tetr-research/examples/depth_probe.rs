@@ -1,7 +1,7 @@
 //! E0 (roadmap §2.1): does search depth past the ~6-ply preview horizon change the DECISION?
 //!
 //! The scaling sweep showed depth's Elo advantage over width collapses from 6.9x (concrete,
-//! d<=6) to 1.9x (speculative, d>=7). If the steep returns are an artifact of the concrete
+//! d<=6) to ~1.2x (speculative, d>=7). If the steep returns are an artifact of the concrete
 //! preview, the chosen ply-1 move should STABILIZE by ~d6-d7 and deeper plies should not move
 //! it. This probe runs the champion-family TP-beam at depth 1..MAX over a bank of realistic
 //! mid-game states and records, per state, the depth at which `best()`'s argmax stops changing.
@@ -16,15 +16,12 @@
 
 use tetr_core::ai::eval::{Cc2Evaluator, Cc2Weights};
 use tetr_core::ai::{BeamPlanner, SearchBudget, SearchState, think_to_completion};
-use tetr_core::engine::{Engine, EngineEvent};
-use tetr_core::player::drive_engine;
 use tetr_research::bots::BotSpec;
-use tetr_research::marathon::marathon_config;
+use tetr_research::fixtures::state_bank;
 
 const WIDTHS: &[usize] = &[8, 16, 32];
 const MAX_DEPTH: u8 = 15;
 const N_STATES: usize = 60;
-const STATE_SEED: u64 = 0x0E10_0BEE;
 
 /// The ply-1 decision identity: the chosen placement's pose + whether it used a hold swap.
 /// Two decisions are "the same move" iff these match.
@@ -43,43 +40,12 @@ fn decision(
     Some(((ox, oy, p.piece.rotation() as u8, p.used_hold), plan.score))
 }
 
-fn representative_states(n: usize) -> Vec<SearchState> {
-    let mut engine = Engine::new(marathon_config(), STATE_SEED);
-    let mut bot = BotSpec::tp_beam(16, 4)
-        .cc2(Cc2Weights::attack_tuned())
-        .factory()(STATE_SEED);
-    let mut states = Vec::new();
-    'outer: while states.len() < n {
-        let snap = engine.snapshot();
-        if snap.game_over.is_some() {
-            break;
-        }
-        if let Some(s) = SearchState::from_snapshot(&snap) {
-            // skip near-empty early boards (no real decision pressure)
-            if states.len() < n {
-                states.push(s);
-            }
-        }
-        for _ in 0..4000 {
-            let mut locked = false;
-            for ev in drive_engine(&mut engine, &mut *bot) {
-                match ev {
-                    EngineEvent::Locked { .. } => locked = true,
-                    EngineEvent::GameOver { .. } => break 'outer,
-                    _ => {}
-                }
-            }
-            if locked {
-                break;
-            }
-        }
-    }
-    states
-}
-
 fn main() {
     let eval = Cc2Evaluator::new(Cc2Weights::attack_tuned());
-    let states = representative_states(N_STATES);
+    let states = state_bank(
+        N_STATES,
+        BotSpec::tp_beam(16, 4).cc2(Cc2Weights::attack_tuned()),
+    );
     let queue_len = states.iter().map(|s| s.queue.len()).max().unwrap_or(0);
     let concrete = queue_len + 1; // active piece + revealed previews = concrete plies
     eprintln!(
@@ -145,6 +111,10 @@ fn main() {
             n_gain += 1;
         }
 
+        if stab.is_empty() {
+            println!("{width:>4}  (no usable states — every board topped out before d{MAX_DEPTH})");
+            continue;
+        }
         stab.sort_unstable();
         let n = stab.len();
         let med = stab[n / 2];

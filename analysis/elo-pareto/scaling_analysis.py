@@ -13,6 +13,17 @@ Reads elo.csv (written by elo_pareto.py) and answers:
 Fits are inverse-variance weighted by the bootstrap CIs (weak configs are noisy). Writes
 scaling_analysis.png and prints the regression tables.
 
+LIMITATIONS (this is the *preliminary* regression that motivated the GSPRT experiments in
+docs/research-directions.md; those experiments — not this fit — are the evidence):
+  - The log-linear vs saturating model comparison mixes bases: the log-linear AIC/R² are
+    statsmodels' WLS (inverse-variance weighted) while the saturating AIC/R² are unweighted,
+    so the two AICs are NOT directly comparable (treat the model selection as indicative; the
+    robust signal is the model-free declining marginal returns, not the AIC gap).
+  - The SE floor (`clip(lower=8.0)`) only guards CI==0; on this data few configs hit it, but it
+    does down-weight the very tightest CIs.
+  - The regime-split refits assume each subset still varies in both width and depth (true for
+    this grid); a future grid that caps depth could make a subset's design rank-deficient.
+
 Run:  uv run analysis/elo-pareto/scaling_analysis.py
 """
 from __future__ import annotations
@@ -52,7 +63,10 @@ def main() -> int:
     pernode_us = df.compute_ms * 1000 / df.nodes
     print(f"  nodes / [width·(depth−1)] : mean {node_ratio.mean():.3f}  "
           f"(1.0 = exact; TP pruning shaves the wide/deep corner to {node_ratio.min():.2f})")
-    # ms = c·nodes through the origin (WLS by 1/nodes so small configs aren't ignored)
+    # ms ≈ c·nodes: ordinary least-squares slope + intercept (the intercept is tiny; the slope
+    # is the per-node cost). Unweighted, so the few large-node configs dominate the slope — fine
+    # here since we only quote it as an order-of-magnitude µs/node figure, cross-checked against
+    # the per-config min/max below.
     cms = np.polyfit(df.nodes, df.compute_ms, 1)
     print(f"  compute_ms = {cms[0]*1000:.1f} µs/node · nodes + {cms[1]:.2f} ms   "
           f"(per-node cost {pernode_us.min():.0f}–{pernode_us.max():.0f} µs; "

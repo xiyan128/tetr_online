@@ -137,6 +137,17 @@ fn search_model(
     AiController::interactive(mind, eval, budget)
 }
 
+/// A transposition-pruned beam over the attack-tuned CC2 evaluator at `(width, depth)` — the
+/// shared shape of every in-game "attack" bot (the champion family). One home for the
+/// construction so a tweak (eval weights, speculation) lands once instead of per entry.
+fn tp_attack_model(width: usize, depth: u8) -> AiController {
+    search_model(
+        Box::new(BeamPlanner::transposing(width)),
+        Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+        SearchBudget::beam(depth),
+    )
+}
+
 impl Default for ModelRegistry {
     fn default() -> Self {
         let mut entries = Vec::new();
@@ -255,13 +266,7 @@ impl Default for ModelRegistry {
             "Transposition-pruned beam over the attack-tuned CC2 evaluator — the \
              search mechanism behind our strongest headless APP bot, at a \
              browser-watchable width and depth.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(32)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(4),
-                )
-            },
+            || tp_attack_model(32, 4),
         ));
 
         // The literal session champion: TP-beam width 128 / depth 9 over the
@@ -275,13 +280,7 @@ impl Default for ModelRegistry {
             "The strongest headless bot, verbatim: transposition-pruned beam \
              (width 128, depth 9) over the attack-tuned CC2 evaluator, 0.8225 \
              APP held-out. Thinks a beat per move — built to watch, not race.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(128)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(9),
-                )
-            },
+            || tp_attack_model(128, 9),
         ));
 
         // The deeper champion from the depth-cap study (docs/research-directions.md):
@@ -294,13 +293,7 @@ impl Default for ModelRegistry {
             "A beat deeper than the APP champion: transposition-pruned beam at width 128, \
              depth 12. Slightly safer head-to-head, slightly less raw attack — the \
              heaviest model, built to watch think.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(128)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(12),
-                )
-            },
+            || tp_attack_model(128, 12),
         ));
 
         // The efficient narrow-deep config from the scaling study: a small survival-width
@@ -313,13 +306,7 @@ impl Default for ModelRegistry {
             "Narrow but deep (width 16, depth 12) — the scaling study's efficient corner. \
              Searches deep at a fraction of the champion's cost, so it plays snappily; \
              less raw attack than the wide bots.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(16)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(12),
-                )
-            },
+            || tp_attack_model(16, 12),
         ));
 
         Self { entries }

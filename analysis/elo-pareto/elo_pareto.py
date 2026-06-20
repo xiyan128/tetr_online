@@ -99,10 +99,15 @@ def elbow(compute: np.ndarray, elo: np.ndarray) -> int:
     """Kneedle elbow on a concave frontier: the point farthest above the chord joining the
     cheapest and most-expensive frontier points, in normalized (log-compute, Elo) space.
     This is the diminishing-returns knee — beyond it, strength costs disproportionate compute."""
+    if len(compute) < 3:
+        return 0  # degenerate frontier (single/two points) — the cheapest is the only "knee"
     x = np.log10(compute)
     x = (x - x.min()) / max(np.ptp(x), 1e-9)
     y = (elo - elo.min()) / max(np.ptp(elo), 1e-9)
-    chord = y[0] + (y[-1] - y[0]) / (x[-1] - x[0]) * (x - x[0])
+    span = x[-1] - x[0]
+    if abs(span) < 1e-9:  # all frontier points at one compute (shouldn't happen on real data)
+        return int(np.argmax(y))
+    chord = y[0] + (y[-1] - y[0]) / span * (x - x[0])
     return int(np.argmax(y - chord))
 
 
@@ -125,8 +130,10 @@ def main() -> int:
     main_comp = np.bincount(comp).argmax()
     keep = comp == main_comp
     if not keep.all():
-        print(f"warning: {(~keep).sum()} configs not yet connected — fitting the main component "
-              f"({keep.sum()}/{len(labels)})", file=sys.stderr)
+        dropped = [labels[k] for k in range(len(labels)) if not keep[k]]
+        print(f"warning: {len(dropped)} configs not in the main connected component "
+              f"({keep.sum()}/{len(labels)} kept) — DROPPED from the fit: {', '.join(dropped)}",
+              file=sys.stderr)
     cfg = cfg[keep].reset_index(drop=True)
     labels = list(cfg.label)
     known = set(labels)
