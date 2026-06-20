@@ -68,6 +68,7 @@ pub mod cc2;
 pub mod commands;
 pub mod downstack;
 pub mod events;
+pub mod fixtures;
 pub mod ledger;
 pub mod marathon;
 pub mod pc;

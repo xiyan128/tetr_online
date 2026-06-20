@@ -93,6 +93,11 @@ pub struct BotSpec {
     /// blind arm of awareness experiments, and currently the stronger versus
     /// configuration (the mispricing record).
     pub blind: bool,
+    /// Beam speculation past the visible queue (the 7-bag remainder rollout under
+    /// `SPEC_DECAY`). On by default — the knob exists to ablate whether the
+    /// speculative tail (which dominates deep search past the ~6-ply preview) buys
+    /// strength or just adds discounted noise. No effect on non-beam searches.
+    pub speculate: bool,
 }
 
 impl BotSpec {
@@ -102,6 +107,7 @@ impl BotSpec {
             search: SearchSpec::Greedy,
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -111,6 +117,7 @@ impl BotSpec {
             search: SearchSpec::Beam { width, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -120,6 +127,7 @@ impl BotSpec {
             search: SearchSpec::TpBeam { width, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -129,6 +137,7 @@ impl BotSpec {
             search: SearchSpec::BestFirst { budget, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -138,6 +147,7 @@ impl BotSpec {
             search: SearchSpec::PcCoverage { config, depth },
             eval: EvalSpec::Linear(Weights::default()),
             blind: false,
+            speculate: true,
         }
     }
 
@@ -159,6 +169,14 @@ impl BotSpec {
         self
     }
 
+    /// Turn OFF beam speculation past the visible queue (ablation; no effect on
+    /// non-beam searches). Deep search past the ~6-ply preview is otherwise all
+    /// `SPEC_DECAY`-discounted bag rollout.
+    pub fn no_speculation(mut self) -> Self {
+        self.speculate = false;
+        self
+    }
+
     /// Build a fresh controller for this spec (the policy RNG seeded by `seed`).
     pub fn controller(&self, seed: u64) -> Box<dyn PlayerController> {
         let inner: Box<dyn PlayerController> = match self.search {
@@ -174,13 +192,13 @@ impl BotSpec {
                 Box::new(AiController::new(Handicap::perfect(), seed))
             }
             SearchSpec::Beam { width, depth } => full_strength(
-                Box::new(BeamPlanner::new(width)),
+                Box::new(BeamPlanner::new(width).with_speculation(self.speculate)),
                 self.eval.build(),
                 SearchBudget::beam(depth),
                 seed,
             ),
             SearchSpec::TpBeam { width, depth } => full_strength(
-                Box::new(BeamPlanner::transposing(width)),
+                Box::new(BeamPlanner::transposing(width).with_speculation(self.speculate)),
                 self.eval.build(),
                 SearchBudget::beam(depth),
                 seed,
@@ -432,6 +450,49 @@ pub fn bots() -> Vec<(&'static str, BotSpec)> {
         (
             "probe-tp128d9",
             BotSpec::tp_beam(128, 9).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // The depth-cap + speculation study (analysis/elo-pareto + docs/research-directions.md).
+        // Depth past the d9 grid wall pays modestly to ~d12 then saturates; width is a survival
+        // floor. Reproduce the headline comparisons with `run race <a> <b>` (pair-GSPRT, ledger-
+        // receipted) — this is the platform path, not a bespoke harness:
+        //   depth past d9 pays:  `run race probe-tp16d12 probe-tp16d9`    (~58%, modest)
+        //   saturates by d12:    `run race probe-tp16d15 probe-tp16d12`   (~50%, flat)
+        //   deeper champion:     `run race probe-tp128d12 probe-tp128d9`  (~54%, thin)
+        //   speculation is load-bearing: `run race probe-tp16d12 probe-tp16d12-nospec` (~90%)
+        (
+            "probe-tp128d12",
+            BotSpec::tp_beam(128, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp16d9",
+            BotSpec::tp_beam(16, 9).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp16d12",
+            BotSpec::tp_beam(16, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp16d15",
+            BotSpec::tp_beam(16, 15).cc2(Cc2Weights::attack_tuned()),
+        ),
+        // Speculation ablation (expectimax at the empty-queue boundary is the queued fix):
+        // `no_speculation()` makes an empty-queue node terminal, collapsing the deep tail to the
+        // ~6-ply concrete horizon — the spec-OFF arm of `run race probe-tpNd12 probe-tpNd12-nospec`.
+        (
+            "probe-tp16d12-nospec",
+            BotSpec::tp_beam(16, 12)
+                .cc2(Cc2Weights::attack_tuned())
+                .no_speculation(),
+        ),
+        (
+            "probe-tp32d12",
+            BotSpec::tp_beam(32, 12).cc2(Cc2Weights::attack_tuned()),
+        ),
+        (
+            "probe-tp32d12-nospec",
+            BotSpec::tp_beam(32, 12)
+                .cc2(Cc2Weights::attack_tuned())
+                .no_speculation(),
         ),
         // Round 3: beam width past 32 (w16→w32 was +0.07; the old "width
         // saturates" lesson predates this engine), and PC-hunting where the

@@ -161,6 +161,17 @@ impl MonotonicClock for FrameClock {
     }
 }
 
+/// A transposition-pruned beam over the attack-tuned CC2 evaluator at `(width, depth)` — the
+/// shared shape of every in-game "attack" bot (the champion family). One home for the
+/// construction so a tweak (eval weights, speculation) lands once instead of per entry.
+fn tp_attack_model(width: usize, depth: u8) -> AiController {
+    search_model(
+        Box::new(BeamPlanner::transposing(width)),
+        Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
+        SearchBudget::beam(depth),
+    )
+}
+
 impl Default for ModelRegistry {
     fn default() -> Self {
         let mut entries = Vec::new();
@@ -279,13 +290,7 @@ impl Default for ModelRegistry {
             "Transposition-pruned beam over the attack-tuned CC2 evaluator — the \
              search mechanism behind our strongest headless APP bot, at a \
              browser-watchable width and depth.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(32)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(4),
-                )
-            },
+            || tp_attack_model(32, 4),
         ));
 
         // The literal session champion: TP-beam width 128 / depth 9 over the
@@ -299,13 +304,33 @@ impl Default for ModelRegistry {
             "The strongest headless bot, verbatim: transposition-pruned beam \
              (width 128, depth 9) over the attack-tuned CC2 evaluator, 0.8225 \
              APP held-out. Thinks a beat per move — built to watch, not race.",
-            || {
-                search_model(
-                    Box::new(BeamPlanner::transposing(128)),
-                    Box::new(Cc2Evaluator::new(Cc2Weights::attack_tuned())),
-                    SearchBudget::beam(9),
-                )
-            },
+            || tp_attack_model(128, 9),
+        ));
+
+        // The deeper champion from the depth-cap study (docs/research-directions.md):
+        // TP-beam width 128 / DEPTH 12. Depth past the d9 grid wall buys a little
+        // head-to-head survival (it sees further and plays safer) but trades a touch of
+        // raw attack for it — APP 0.81 vs the champion's 0.83. The heaviest model: thinks
+        // an even longer beat per move. Here to watch the deepest search reason.
+        entries.push(ModelEntry::new(
+            "Deep Champion",
+            "A beat deeper than the APP champion: transposition-pruned beam at width 128, \
+             depth 12. Slightly safer head-to-head, slightly less raw attack — the \
+             heaviest model, built to watch think.",
+            || tp_attack_model(128, 12),
+        ));
+
+        // The efficient narrow-deep config from the scaling study: a small survival-width
+        // floor (16) + depth to the knee (12) — roughly 1/5 the champion's search, so it
+        // plays SNAPPILY (no champion-style deliberation pause) while still searching deep.
+        // Less raw attack than the wide bots (APP ~0.69), but the responsive "go narrow,
+        // go deep" pick — a strong opponent you don't wait on.
+        entries.push(ModelEntry::new(
+            "Efficient Deep",
+            "Narrow but deep (width 16, depth 12) — the scaling study's efficient corner. \
+             Searches deep at a fraction of the champion's cost, so it plays snappily; \
+             less raw attack than the wide bots.",
+            || tp_attack_model(16, 12),
         ));
 
         Self { entries }

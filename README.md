@@ -140,7 +140,7 @@ cargo run --features dev         # in-game ECS inspector overlay (egui)
 cargo bench                      # criterion benchmarks (engine + AI)
 
 # AI research harness (deterministic, never ships with the game):
-cargo run --release -p tetr-research --bin bench-marathon
+cargo run --release -p tetr-research -- run downstack dt20
 ```
 
 `scripts/gate` mirrors `.github/workflows/ci.yml` step for step (format, clippy

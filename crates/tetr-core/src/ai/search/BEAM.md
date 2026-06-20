@@ -5,7 +5,8 @@
 > disagree, **the code is the source of truth** (this file records the design
 > rationale and the load-bearing invariants, and is updated when they change).
 > Scope: a CC2-style **deterministic beam** Tier-2 planner behind the existing
-> [`Mind`] trait, gated on `bench-marathon`. Notable post-design evolution folded
+> [`Mind`] trait, built against the `bench-marathon` benchmark (and now shipped
+> in-game via `src/ai/registry.rs`). Notable post-design evolution folded
 > in below: the search board is now the `Copy` `BitBoard` (locking via
 > `BitBoard::lock_piece`, the differential-tested mirror of `lock_and_clear`), the
 > evaluator seam takes a `ColumnView` + `EvalContext`, the queue is a `SmallVec`,
@@ -63,11 +64,11 @@ this:
    hashing, no expectimax sampling in v1.
 3. **Back-up is order-stable too.** A root's score is the max leaf score reachable
    from it; on equal leaf scores the first-seen leaf wins (`>` comparison, not `>=`),
-   matching greedy's "keep the first maximum" rule (`greedy.rs:101`).
+   matching the canonical "keep the first maximum" rule (`beam.rs`; inherited from the
+   since-deleted `GreedyPlanner`).
 
 Determinism is verified by a test that plans the same `SearchState` twice and asserts
-the identical ply-1 `Placement` (origin, rotation, path) and score (mirrors
-`greedy_is_deterministic`).
+the identical ply-1 `Placement` (origin, rotation, path) and score.
 
 ---
 
@@ -458,10 +459,12 @@ pub trait Evaluator: Send + Sync {
 - **Object-safety:** the input is a slice of borrows/`Copy` views, so the trait stays
   `&dyn Evaluator`-usable (no generics on the method). The beam owns the generation's
   `PendingChild`ren and passes borrows of their locks and board views.
-- **History:** the pruned `BurnEvaluator` overrode `evaluate_batch` to stack the
-  feature vectors into one `[N, NUM_FEATURES]` tensor and forward once — the seam
-  this method exists for. It remains the integration point for any future batched
-  backend (see `docs/value-net-postmortem.md`).
+- **Status / History:** `evaluate_batch` is **not currently on the `Evaluator` trait** —
+  it was removed when the value net was pruned (the trait now has only `evaluate` +
+  `evaluate_cols`). The pruned `BurnEvaluator` had overridden it to stack the feature
+  vectors into one `[N, NUM_FEATURES]` tensor and forward once. This subsection records
+  the designed seam; the revived batched-eval plan lives in
+  `docs/learned-evaluation-roadmap.md` §5 (see also `docs/value-net-postmortem.md`).
 
 > **Determinism of the batched path.** `evaluate_batch` must produce **bit-identical**
 > results to mapping `evaluate_cols` over the same inputs, and `evaluate_cols` must be

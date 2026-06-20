@@ -185,7 +185,7 @@ criterion = { version = "0.8", features = ["html_reports"] }
 name = "engine"
 harness = false
 
-# AI benchmarks: placement movegen, the evaluator, the greedy planner, and
+# AI benchmarks: placement movegen, the evaluator, the best-first planner, and
 # end-to-end "bot plays N pieces" throughput.
 [[bench]]
 name = "ai"
