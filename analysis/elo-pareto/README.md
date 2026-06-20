@@ -87,10 +87,11 @@ depth, not more width** — until you run out of depth, which is exactly where t
 >
 > Depth's dominance is almost entirely *inside the preview horizon*; past it, speculative
 > depth is barely better than width (per-ply ΔElo falls to +20–40 at d7→d9). So the apparent
-> "depth-cap ceiling" is more likely a **preview/speculation-quality ceiling** — and a deeper
-> config (`w16d12`) may land *below* `w16d9`. The single experiment to settle it (register
-> `w16d12/d15` past the grid wall — zero code, `max_depth` is an unbounded `u8`) is item **E1**
-> of the roadmap.
+> "depth-cap ceiling" is more likely a **preview/speculation-quality ceiling**. E1 (register
+> `w16d12/d15` past the grid wall — zero code, `max_depth` is an unbounded `u8`) has since run
+> and **refuted** the "deeper lands below" guess: `w16d12` *beats* `w16d9` (58.5%, +5.6 Elo
+> margin), but the gain saturates by ~d12 (`w16d15` vs `w16d12` ≈ 50.3%) — depth past the cap
+> pays modestly and can't beat width. Receipts: `e1_race.log` in this directory.
 
 ## Reproduce
 

@@ -229,7 +229,7 @@ one unrecoverable mistake this map cannot prevent.
   have overclaimed (measured: a 60%-coupled null false-accepts at 13.7%
   under the per-game walk vs 4.5% under the pair test, both at nominal 5%).
 - **Win rate without deaths is a cap-game artifact.** Check the deaths split
-  (`garbage_ab` prints it; `VersusOutcome.a_topped/b_topped` carry it).
+  (`VersusOutcome.a_topped/b_topped` carry it; the `versus` eval reports it).
 - **Mirror matches are bland** (≤6% decisive); asymmetric-style matches are
   ~59% death-decisive without rain. Choose the format for the question.
 - **Blind beats aware today** (the mispricing record): no-garbage-world

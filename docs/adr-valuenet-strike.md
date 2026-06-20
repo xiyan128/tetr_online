@@ -31,8 +31,9 @@ Two more constraints it implies:
    tree was the real prune reason). Training framework is free; inference is hand-rolled integer.
 4. **All raw input.** The `Evaluator` trait sees only `(lock, board, t_spin, ctx{combo,b2b})` —
    *not* queue/hold/bag/pending. A raw-input net needs the full `SearchState`, available at
-   `score_child` (`search/mod.rs:154`). Integration extends the seam (a `StateEvaluator` that
-   reads the whole state), not the column-only trait.
+   `score_child` (`search/mod.rs:174`). Integration extends the seam via a default
+   `evaluate_state` method on the existing `Evaluator` trait (reading the whole state), not a
+   separate trait.
 
 ## Architecture (clean, separate subsystem)
 
@@ -42,7 +43,7 @@ crates/tetr-valuenet/            # the Rust subsystem (native research + future 
                                  #   truth, shared by export AND inference (no drift).
   src/sample.rs                  # one training record: features + (value, policy, outcome) labels
   src/dataset.rs                 # safetensors shard writer/reader (the Rust<->Python interchange)
-  src/infer.rs        (M3)       # fixed-point i32 forward pass + the StateEvaluator seam
+  src/infer.rs        (M3)       # forward pass + the evaluate_state seam
   src/lib.rs
 python/valuenet/                 # training (uv + PyTorch); reads shards, writes weights
   pyproject.toml                 # uv-managed; torch, safetensors, numpy

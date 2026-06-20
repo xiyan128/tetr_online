@@ -303,7 +303,7 @@ champion" question; a draw/win gates the speculation-port refactor.
 |---|---|
 | `π₀` (prior) | the uniform-over-legal distribution from `hold_placements()` in canonical movegen order |
 | `V` | `&dyn Evaluator` (`eval/mod.rs`) |
-| `budget` | `SearchBudget { nodes, max_depth }` (`search/mod.rs:64`) |
+| `budget` | `SearchBudget { nodes, max_depth }` (`search/mod.rs:65`) |
 | `π'(s)` (improved action) | `best()` → the argmax of `root_best` via `best_root_plan` |
 | `Improve` instantiated | `SearchPolicy` *already* holds the `(Box<dyn Mind>, Box<dyn Evaluator>, SearchBudget)` triple |
 

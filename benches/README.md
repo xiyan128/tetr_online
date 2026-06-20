@@ -31,7 +31,7 @@ or improvement.
 benches/
   common/mod.rs   shared fixtures + helpers (NOT a bench target)
   engine.rs       Engine::step, snapshot, lock_and_clear, classify_t_spin
-  ai.rs           movegen, evaluate, greedy plan, full-game throughput
+  ai.rs           movegen, evaluate, best-first plan, full-game throughput
 ```
 
 `common/` lives in a subdirectory and the package sets `autobenches = false`, so
