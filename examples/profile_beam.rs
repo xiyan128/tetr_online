@@ -203,7 +203,10 @@ fn champion_game(target: usize) {
     decisions.sort_by(|a, b| a.partial_cmp(b).unwrap());
     let pct = |p: f64| decisions[((decisions.len() as f64 * p) as usize).min(decisions.len() - 1)];
     println!("== APP Champion (w128/d9 TP beam) — headless, blocking, {placed} pieces ==");
-    println!("  mean wall / piece : {:.1} ms", total / placed.max(1) as f64);
+    println!(
+        "  mean wall / piece : {:.1} ms",
+        total / placed.max(1) as f64
+    );
     println!(
         "  decision frame    : p50 {:.1} ms   p90 {:.1} ms   max {:.1} ms",
         pct(0.5),

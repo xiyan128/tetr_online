@@ -11,10 +11,10 @@
 //! tests and host build against.
 
 use bevy::app::App;
-#[cfg(any(debug_assertions, feature = "fps"))]
-use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 #[cfg(feature = "fps")]
 use bevy::dev_tools::fps_overlay::{FpsOverlayConfig, FpsOverlayPlugin, FrameTimeGraphConfig};
+#[cfg(any(debug_assertions, feature = "fps"))]
+use bevy::diagnostic::{FrameTimeDiagnosticsPlugin, LogDiagnosticsPlugin};
 use bevy::prelude::*;
 use bevy_asset_loader::prelude::*;
 #[cfg(feature = "dev")]
