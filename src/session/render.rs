@@ -558,26 +558,39 @@ fn reconcile_locked_boards(
     }
 }
 
-/// Rebuild each seat's falling piece every frame (4 sprites; always in sync).
+/// Rebuild each seat's falling piece when its rendered cells change (4 sprites).
 fn reconcile_active_pieces(
     mut commands: Commands,
     minos: Res<MinoSkin>,
     seats: Query<(&Seat, &SeatSnapshot)>,
     layers: Query<(Entity, &VsLayer, &LayerSeat)>,
+    // A `Local` is safe across a rematch here (unlike `SeatPreviewView`, which caches on
+    // the component): the countdown reseats with `active: None`, so this observes empty
+    // cells and resets the cache before the first real piece of the next match is drawn.
+    mut cache: Local<[Option<Vec<SnapshotCell>>; 2]>,
 ) {
     for (seat, snapshot) in &seats {
+        let index = seat.index.min(1);
+        let cells: &[SnapshotCell] = snapshot
+            .0
+            .active
+            .as_ref()
+            .map_or(&[], |active| active.cells.as_slice());
+        if cache[index].as_deref() == Some(cells) {
+            continue;
+        }
         let Some(layer) = layer_for(&layers, seat.index, VsLayer::Falling) else {
             continue;
         };
         commands.entity(layer).despawn_related::<Children>();
-        let Some(active) = snapshot.0.active.as_ref() else {
+        if cells.is_empty() {
+            cache[index] = Some(Vec::new());
             continue;
-        };
+        }
         // The four cells are one piece by definition: they merge into a
         // single connected object with one shared perimeter. In flight the
         // piece is wrapped in air — every exposed corner rounds; it binds to
         // the stack only once it locks.
-        let cells = &active.cells;
         let ids: Vec<Entity> = cells
             .iter()
             .map(|cell| {
@@ -596,6 +609,7 @@ fn reconcile_active_pieces(
             })
             .collect();
         commands.entity(layer).add_children(&ids);
+        cache[index] = Some(cells.to_vec());
     }
 }
 
