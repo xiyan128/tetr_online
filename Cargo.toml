@@ -11,7 +11,7 @@ autobenches = false
 # Workspace root. The engine-agnostic core (engine + player + ai) lives in
 # `crates/tetr-core` (no Bevy); `crates/tetr-embed` adds the wasm embed component.
 [workspace]
-members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-research"]
+members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-nn", "crates/tetr-research"]
 
 # One home for the shared package metadata; member crates inherit with
 # `version.workspace = true` etc.

@@ -15,3 +15,9 @@
 # Kept locally for the agents working on the project; not part of the repo.
 /agent
 .claude/
+
+# Python (uv-managed)
+python/.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/

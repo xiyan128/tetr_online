@@ -1,0 +1,40 @@
+[project]
+name = "tetrnn"
+version = "0.1.0"
+description = "The Python half of the tetr-nn contract: the net definition + exporter that produce exactly what crates/tetr-nn loads, with runtime-checked tensor shapes."
+requires-python = ">=3.11"
+dependencies = [
+    "torch>=2.2",
+    "numpy>=1.26",
+    "safetensors>=0.4",
+    "jaxtyping>=0.2.34",
+    "beartype>=0.19",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+# jaxtyping string annotations (F722 forward-ref, F821 undefined-name) are the
+# whole point — silence exactly those, keep everything else strict.
+select = ["E", "F", "I", "UP", "B", "SIM"]
+ignore = ["F722", "F821"]
+
+[tool.pyright]
+typeCheckingMode = "standard"
+include = ["tetrnn", "tests"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
+
+[tool.uv]
+package = true
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
