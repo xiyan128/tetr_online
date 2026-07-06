@@ -235,6 +235,7 @@ fn main() -> std::io::Result<()> {
     let fmt = VersusFormat {
         max_plies: MAX_PLIES,
         rain_period: RAIN_PERIOD,
+        sudden_death: false,
     };
     let pairs = schedule(&g);
     let games_per_pair = SEEDS_PER_PAIR * 2;

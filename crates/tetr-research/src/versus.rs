@@ -90,6 +90,8 @@ pub struct VersusOutcome {
     pub attack_b: u32,
     pub a_topped: bool,
     pub b_topped: bool,
+    /// How the game ended (open play, the sudden-death clock, or the cap).
+    pub end_reason: EndReason,
 }
 
 /// Play one versus match between bot A and bot B. Both face the identical piece
@@ -115,6 +117,7 @@ pub fn play_versus(
         VersusFormat {
             max_plies,
             rain_period: 0,
+            sudden_death: false,
         },
     )
 }
@@ -122,7 +125,8 @@ pub fn play_versus(
 /// Match-format knobs for [`play_versus_format`].
 #[derive(Clone, Copy, Debug, serde::Serialize)]
 pub struct VersusFormat {
-    /// Ply cap; a capped game falls back to the net-attack tiebreak.
+    /// Ply cap. Without sudden death a capped game falls back to the
+    /// net-attack tiebreak; with it, the cap starts the escalation instead.
     pub max_plies: u32,
     /// Environmental "rain": every `rain_period` plies (`0` = off) BOTH sides
     /// get one garbage line queued through the normal rules (cancellable,
@@ -132,6 +136,58 @@ pub struct VersusFormat {
     /// decisive while staying fair — same-seeded engines even draw identical
     /// hole columns for the same rain batch.
     pub rain_period: u32,
+    /// Sudden death: past `max_plies` the rain period HALVES every
+    /// [`ESCALATION_STEP`] plies (floor 1), up to a hard cap of `2 × max_plies`
+    /// — under that pressure someone tops out, so outcomes come from death,
+    /// never from an attack tiebreak (which trains attack-spam, not play; the
+    /// tiebreak was measured anti-defensive). A game that somehow survives to
+    /// the hard cap is an honest [`EndReason::TrueCap`] draw (never observed
+    /// in 2,200+ reference-venue games).
+    ///
+    /// `false` preserves the original format byte-for-byte — every recorded
+    /// baseline stays reproducible.
+    pub sudden_death: bool,
+}
+
+/// Plies between rain-period halvings during sudden death.
+pub const ESCALATION_STEP: u32 = 40;
+
+impl VersusFormat {
+    /// The rain period in force at `ply` (0 = no rain this format).
+    pub fn rain_period_at(&self, ply: u32) -> u32 {
+        if self.rain_period == 0 {
+            return 0;
+        }
+        if !self.sudden_death || ply < self.max_plies {
+            return self.rain_period;
+        }
+        let halvings = (ply - self.max_plies) / ESCALATION_STEP + 1;
+        // Clamp the shift to 31 (a u32 shift of >=32 is UB/panic); any shift
+        // that large has already driven the period to its floor of 1 anyway.
+        (self.rain_period >> halvings.min(31)).max(1)
+    }
+
+    /// The absolute last ply this format can reach.
+    pub fn hard_cap(&self) -> u32 {
+        if self.sudden_death {
+            self.max_plies * 2
+        } else {
+            self.max_plies
+        }
+    }
+}
+
+/// How a versus game ended — recorded so consumers can stratify results that
+/// were decided in open play from results forced by the sudden-death clock.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, serde::Serialize)]
+pub enum EndReason {
+    /// A topout inside the normal ply window (open play decided it).
+    Topout,
+    /// A topout during sudden-death escalation (the clock forced a decision).
+    Escalation,
+    /// The hard cap was reached with both alive (a draw under sudden death;
+    /// the attack tiebreak decided it under the original format).
+    TrueCap,
 }
 
 /// [`play_versus`] under an explicit [`VersusFormat`] (rain, ply cap).
@@ -141,7 +197,7 @@ pub fn play_versus_format(
     seed: u64,
     format: VersusFormat,
 ) -> VersusOutcome {
-    let max_plies = format.max_plies;
+    let mut end_ply = format.hard_cap();
     // Level rises but never ends the game here (only top-out / the cap do).
     // The versus rules — cancellation, rising after clear-less locks, the
     // garbage cap, hole choice — are the ENGINE's (see tetr-core's garbage
@@ -155,10 +211,13 @@ pub fn play_versus_format(
     let (mut a_topped, mut b_topped) = (false, false);
     let mut plies = 0u32;
 
-    'match_loop: for ply in 0..max_plies {
+    'match_loop: for ply in 0..format.hard_cap() {
         // Environmental rain (see [`VersusFormat::rain_period`]): symmetric
-        // queued pressure, before either side moves this ply.
-        if format.rain_period > 0 && ply % format.rain_period == format.rain_period - 1 {
+        // queued pressure, before either side moves this ply. During sudden
+        // death the period shrinks (see [`VersusFormat::rain_period_at`]), so
+        // the pressure that forces a decision keeps rising.
+        let period = format.rain_period_at(ply);
+        if period > 0 && ply % period == period - 1 {
             a_engine.queue_garbage(1);
             b_engine.queue_garbage(1);
         }
@@ -180,6 +239,7 @@ pub fn play_versus_format(
                 }
                 if topped {
                     a_topped = true;
+                    end_ply = ply;
                     break 'match_loop;
                 }
             } else {
@@ -190,13 +250,33 @@ pub fn play_versus_format(
                 }
                 if topped {
                     b_topped = true;
+                    end_ply = ply;
                     break 'match_loop;
                 }
             }
         }
     }
 
-    let result = decide_versus(a_topped, b_topped, a_attack, b_attack);
+    // Decide + classify. With sudden death, outcomes come from death alone: a
+    // hard-cap survival is an honest draw, never an attack comparison.
+    let (result, end_reason) = if a_topped || b_topped {
+        let reason = if format.sudden_death && end_ply >= format.max_plies {
+            EndReason::Escalation
+        } else {
+            EndReason::Topout
+        };
+        (
+            decide_versus(a_topped, b_topped, a_attack, b_attack),
+            reason,
+        )
+    } else if format.sudden_death {
+        (VersusResult::Draw, EndReason::TrueCap)
+    } else {
+        (
+            decide_versus(false, false, a_attack, b_attack),
+            EndReason::TrueCap,
+        )
+    };
 
     VersusOutcome {
         seed,
@@ -206,6 +286,7 @@ pub fn play_versus_format(
         attack_b: b_attack,
         a_topped,
         b_topped,
+        end_reason,
     }
 }
 
@@ -241,6 +322,7 @@ pub fn evaluate_versus(
         VersusFormat {
             max_plies,
             rain_period: 0,
+            sudden_death: false,
         },
     )
 }
@@ -352,6 +434,7 @@ mod versus_rules_tests {
         let format = VersusFormat {
             max_plies: 40,
             rain_period: 4,
+            sudden_death: false,
         };
         let parallel = evaluate_versus_format(&make, &make, &seeds, format);
         let sequential: Vec<VersusOutcome> = seeds
@@ -383,6 +466,71 @@ mod versus_rules_tests {
             )
         };
         assert_eq!(run(), run());
+    }
+}
+
+#[cfg(test)]
+mod venue_tests {
+    use super::*;
+    use tetr_core::ai::{AiController, Handicap};
+
+    #[test]
+    fn escalation_schedule_halves_to_a_floor_of_one() {
+        let f = VersusFormat {
+            max_plies: 240,
+            rain_period: 8,
+            sudden_death: true,
+        };
+        assert_eq!(f.rain_period_at(0), 8);
+        assert_eq!(f.rain_period_at(239), 8);
+        assert_eq!(f.rain_period_at(240), 4); // first halving at the cap
+        assert_eq!(f.rain_period_at(280), 2);
+        assert_eq!(f.rain_period_at(320), 1);
+        assert_eq!(f.rain_period_at(360), 1); // floor
+        assert_eq!(f.hard_cap(), 480);
+        // Off-switches: no sudden death → flat; no rain → none anywhere.
+        let flat = VersusFormat {
+            sudden_death: false,
+            ..f
+        };
+        assert_eq!(flat.rain_period_at(400), 8);
+        assert_eq!(flat.hard_cap(), 240);
+        let dry = VersusFormat {
+            rain_period: 0,
+            ..f
+        };
+        assert_eq!(dry.rain_period_at(400), 0);
+    }
+
+    #[test]
+    fn sudden_death_decides_a_mirror_match_by_death_only() {
+        // The venue's whole point: a mirror match (which under the flat format
+        // starves win signals) must end in a genuine topout, with the reason
+        // stratified, and never via the attack tiebreak.
+        let make: &dyn Fn(u64) -> Box<dyn tetr_core::player::PlayerController> =
+            &|seed| Box::new(AiController::new(Handicap::perfect(), seed));
+        let format = VersusFormat {
+            max_plies: 60, // small cap: escalation engages quickly
+            rain_period: 8,
+            sudden_death: true,
+        };
+        for seed in [3u64, 17] {
+            let out = play_versus_format(make, make, seed, format);
+            match out.end_reason {
+                EndReason::Topout | EndReason::Escalation => {
+                    assert!(out.a_topped ^ out.b_topped, "exactly one death");
+                    assert_ne!(out.result, VersusResult::Draw);
+                }
+                EndReason::TrueCap => {
+                    // The honest escape hatch: only a draw is allowed here.
+                    assert_eq!(out.result, VersusResult::Draw);
+                    assert!(!out.a_topped && !out.b_topped);
+                }
+            }
+            // The loop runs at most hard_cap() plies, each advancing up to two
+            // seats — so the ply counter can never exceed twice the hard cap.
+            assert!(out.plies <= 2 * format.hard_cap());
+        }
     }
 }
 

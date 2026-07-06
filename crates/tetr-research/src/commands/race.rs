@@ -50,6 +50,7 @@ impl Default for Spec {
             format: VersusFormat {
                 max_plies: 240,
                 rain_period: 8,
+                sudden_death: false,
             },
         }
     }
