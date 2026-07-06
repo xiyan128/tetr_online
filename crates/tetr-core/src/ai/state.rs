@@ -255,9 +255,22 @@ impl SearchState {
     /// and commits each via this method to explore "what if the next piece is X".
     pub fn commit_with_next(&mut self, next: crate::engine::PieceType) -> LockOutcome {
         let outcome = self.lock_active();
-        self.bag.deal(next); // a speculative draw consumes the bag (queue spawns don't)
-        self.spawn(next);
+        self.deal_speculative(next);
         outcome
+    }
+
+    /// Deal `next` speculatively — consuming the bag (queue spawns don't) — and
+    /// spawn it: the shared post-lock tail of [`commit_with_next`] and
+    /// [`commit_placement_with_next`]. Exposed to the beam so its speculation can
+    /// commit a placement **once** and fan the ≤7 bag continuations from the
+    /// committed state without re-locking; a continuation differs only by this
+    /// deal + spawn ([`spawn`](Self::spawn) still re-checks block-out per piece).
+    ///
+    /// [`commit_with_next`]: Self::commit_with_next
+    /// [`commit_placement_with_next`]: Self::commit_placement_with_next
+    pub(crate) fn deal_speculative(&mut self, next: crate::engine::PieceType) {
+        self.bag.deal(next);
+        self.spawn(next);
     }
 
     /// Classify-then-lock `self.active` at its current pose and transition the B2B /
@@ -326,8 +339,7 @@ impl SearchState {
         next: crate::engine::PieceType,
     ) -> LockOutcome {
         let outcome = self.apply_placement(placement);
-        self.bag.deal(next); // a speculative draw consumes the bag (queue spawns don't)
-        self.spawn(next);
+        self.deal_speculative(next);
         outcome
     }
 
@@ -338,7 +350,7 @@ impl SearchState {
     /// lock `placement.piece`, then transition the Back-to-Back and combo chains. Does
     /// **not** deal the next active piece — the caller supplies it (from the queue, or
     /// speculatively).
-    fn apply_placement(&mut self, placement: &Placement) -> LockOutcome {
+    pub(crate) fn apply_placement(&mut self, placement: &Placement) -> LockOutcome {
         if placement.used_hold {
             let displaced = self.active.piece_type();
             if self.hold.is_none() {

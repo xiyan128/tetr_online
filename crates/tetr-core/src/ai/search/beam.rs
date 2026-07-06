@@ -40,7 +40,7 @@
 
 use rustc_hash::FxHashSet;
 
-use crate::ai::eval::{EvalContext, Evaluator, Reward, Value};
+use crate::ai::eval::{EvalContext, Evaluator, Leaf, Reward, Value};
 use crate::ai::movegen::Placement;
 use crate::ai::search::{
     Mind, PlacementPlan, RootKey, ThinkProgress, best_root_plan, commit_child, hold_placements,
@@ -78,13 +78,19 @@ struct BeamNode {
 /// One not-yet-scored child of the generation being expanded: the forked state, its
 /// lock results, and the node bookkeeping, in **one** struct — so the batch inputs
 /// and the post-score node build read the same element and can never fall out of
-/// lockstep (this replaced a pair of parallel "owners"/"meta" vectors).
+/// lockstep.
 struct PendingChild {
     state: SearchState,
     lock: LockOutcome,
     t_spin: Option<TSpinKind>,
     /// The chain context the child scores under (the PARENT's pre-placement state).
     ctx: EvalContext,
+    /// A score already computed and shared by the speculative dedup (one board-only
+    /// evaluation covers a placement's whole bag fan). `None` = evaluate this child
+    /// in [`score_pending_into`]'s batch — the single scoring funnel either way.
+    ///
+    /// [`score_pending_into`]: BeamPlanner::score_pending_into
+    score: Option<(Value, Reward)>,
     /// Which ply-1 root this descends from.
     root_index: usize,
     /// The parent's accumulated path reward; this move's reward folds in at scoring.
@@ -179,6 +185,18 @@ impl BeamPlanner {
         self
     }
 
+    /// The current run's per-root backed-up scores: each ply-1 placement paired
+    /// with the best leaf score its subtree has achieved so far (`i32::MIN` =
+    /// no scored descendant yet). Empty between decisions or on a topped-out
+    /// root. This is the search-improved read of the root decision — the
+    /// distribution an expert-iteration data pipeline derives its policy
+    /// targets from.
+    pub fn root_scores(&self) -> impl Iterator<Item = (&Placement, i32)> {
+        self.run
+            .iter()
+            .flat_map(|run| run.roots.iter().zip(run.root_best.iter().copied()))
+    }
+
     /// Seed a fresh run for `state`: form the ply-1 root children (depth 1), score
     /// them as one batch, and build the initial frontier. A topped-out state (no
     /// legal placement) seeds an *empty* run — the fingerprint still records it,
@@ -204,6 +222,7 @@ impl BeamPlanner {
                     lock,
                     t_spin,
                     ctx: root_ctx,
+                    score: None,
                     root_index: i,
                     parent_acc: Reward(0),
                     spec_weight: 1.0,
@@ -261,7 +280,7 @@ impl BeamPlanner {
             // terminal node contributes no children; its `root_best` was already
             // recorded when it entered the frontier, so the back-up keeps it.
             if speculate {
-                Self::expand_speculative(parent, &mut pending);
+                Self::expand_speculative(parent, &mut pending, eval);
             }
         } else {
             // Concrete: every placement of the parent's active piece. The trailing
@@ -279,6 +298,7 @@ impl BeamPlanner {
                     lock,
                     t_spin,
                     ctx: parent_ctx,
+                    score: None,
                     root_index: parent.root_index,
                     parent_acc: parent.acc_reward,
                     spec_weight: parent.spec_weight,
@@ -289,10 +309,12 @@ impl BeamPlanner {
         Self::score_pending_into(root_best, pending, eval, nodes, ranked);
     }
 
-    /// Score `pending` children with `evaluate_cols` (one call per child, BEAM.md
-    /// §7), append their nodes in canonical order, and append compact rank entries.
-    /// `root_best` may be the live run backup (seeding) or a generation-staged backup
-    /// (sliced expansion).
+    /// Score `pending` children — reusing any score the speculative dedup already
+    /// computed and evaluating the rest as one batch through
+    /// [`evaluate_leaves`](Evaluator::evaluate_leaves) (BEAM.md §7) — then append
+    /// their nodes in canonical order and compact rank entries. `root_best` may be
+    /// the live run backup (seeding) or a generation-staged backup (sliced
+    /// expansion).
     fn score_pending_into(
         root_best: &mut [i32],
         pending: Vec<PendingChild>,
@@ -304,19 +326,32 @@ impl BeamPlanner {
             return;
         }
 
-        // Score each child on the hot path directly. (No batch seam here on
-        // purpose: a batched value-net backend belongs AT the Evaluator trait,
-        // not in the search loop — docs/value-net-postmortem.md has the history.)
-        let scores: Vec<(Value, Reward)> = pending
+        // Evaluate the children the speculative dedup did not already score, as
+        // ONE batch through the trait's batch seam — a learned backend fuses the
+        // group into a single forward; the default loops `evaluate_cols`, which
+        // is exactly the old per-child hot path.
+        let unscored: Vec<Leaf<'_>> = pending
             .iter()
-            .map(|p| eval.evaluate_cols(&p.lock, p.state.board.view(), p.t_spin, p.ctx))
+            .filter(|p| p.score.is_none())
+            .map(|p| Leaf {
+                state: &p.state,
+                lock: &p.lock,
+                t_spin: p.t_spin,
+                ctx: p.ctx,
+            })
             .collect();
+        // `evaluate_leaves` returns an empty Vec on empty input, so the all-scored
+        // case yields an empty iterator that the loop below never advances.
+        let mut fresh = eval.evaluate_leaves(&unscored).into_iter();
 
         nodes.reserve(pending.len());
         ranked.reserve(pending.len());
-        for (p, (value, reward)) in pending.into_iter().zip(scores) {
-            // Death is absolute: override the batched eval (the truncated board
-            // it scored is a death remnant, not a position).
+        for p in pending.into_iter() {
+            let (value, reward) = p
+                .score
+                .unwrap_or_else(|| fresh.next().expect("one fresh score per unscored child"));
+            // Death is absolute: override the eval (the truncated board it
+            // scored is a death remnant, not a position).
             let (value, reward) = if p.state.dead {
                 (crate::ai::eval::Value(super::DEATH_SCORE), Reward(0))
             } else {
@@ -399,41 +434,80 @@ impl BeamPlanner {
         run.frontier = Self::ranked_frontier(nodes, ranked, beam_width, transpose);
     }
 
-    /// Speculative expansion of an empty-queue `parent` (BEAM.md §5): for each piece
-    /// still in the 7-bag remainder (in canonical [`PieceType::all`] order) and each
-    /// placement of the parent's active piece, lock the placement and spawn that
-    /// speculative piece as the next active. The child carries a reward weight scaled
-    /// by [`SPEC_DECAY`] so deeper speculative rewards count for less.
+    /// Speculative expansion of an empty-queue `parent` (BEAM.md §5): each placement
+    /// of the parent's active piece is committed **once** — the lock and its clears
+    /// are the same whatever the bag deals next — then fanned across the bag-legal
+    /// next pieces via the state's speculative deal, which is the only thing a
+    /// continuation changes (the spawn still re-checks block-out per piece). For a
+    /// [`board_only`](Evaluator::board_only) evaluator the committed board is also
+    /// *scored* once here, and the whole fan shares that score; a state-reading
+    /// evaluator leaves `score` empty and is batched per child downstream. The child
+    /// reward weight is scaled by [`SPEC_DECAY`] so deeper speculative rewards count
+    /// for less.
+    ///
+    /// The hold-aware transition is the same `used_hold` swap as the concrete path
+    /// (shared via `apply_placement`); an empty-queue node only offers `used_hold`
+    /// placements when hold is occupied (movegen's `hold.or(queue_front)`), so the
+    /// swap's empty-hold funding pop never fires here.
+    ///
+    /// Enumeration stays piece-major — all placements under one next piece, then
+    /// the next piece — so ranking order, and therefore every tie-break downstream,
+    /// is identical to fanning naively (pinned by
+    /// `speculative_share_matches_naive_fan`).
     ///
     /// No RNG, no expectimax average — every bag-legal piece is enumerated and
     /// beam-width truncation prunes the fan-out, keeping the planner deterministic.
-    fn expand_speculative(parent: &BeamNode, pending: &mut Vec<PendingChild>) {
+    fn expand_speculative(
+        parent: &BeamNode,
+        pending: &mut Vec<PendingChild>,
+        eval: &dyn Evaluator,
+    ) {
         let placements = hold_placements(&parent.state);
         let child_weight = parent.spec_weight * SPEC_DECAY;
         let parent_ctx = EvalContext {
             combo: parent.state.combo,
             b2b: parent.state.b2b,
         };
+
+        /// One placement, committed against the parent, before the bag fan.
+        struct Committed {
+            base: SearchState,
+            lock: LockOutcome,
+            t_spin: Option<TSpinKind>,
+            score: Option<(Value, Reward)>,
+        }
+        let committed: Vec<Committed> = placements
+            .iter()
+            .map(|placement| {
+                let mut base = parent.state.clone();
+                // Classify against the pre-lock board, like the concrete path.
+                let t_spin = crate::engine::classify_t_spin(&placement.piece, &base.board);
+                let lock = base.apply_placement(placement);
+                let score = eval
+                    .board_only()
+                    .then(|| eval.evaluate_cols(&lock, base.board.view(), t_spin, parent_ctx));
+                Committed {
+                    base,
+                    lock,
+                    t_spin,
+                    score,
+                }
+            })
+            .collect();
+
         for next_piece in PieceType::all() {
             if !parent.state.bag.contains(next_piece) {
                 continue;
             }
-            for placement in &placements {
-                let mut child = parent.state.clone();
-                // Classify against the pre-lock board, like the concrete path.
-                let t_spin = crate::engine::classify_t_spin(&placement.piece, &child.board);
-                // The hold-aware speculative transition: the same `used_hold` swap as
-                // the concrete path, but dealing `next_piece` (the visible queue is
-                // exhausted at a speculative node) as the new active rather than the
-                // queue front. An empty-queue node only offers `used_hold` placements
-                // when hold is occupied (movegen's `hold.or(queue_front)`), so the
-                // shared transition's empty-hold funding pop never fires here.
-                let lock = child.commit_placement_with_next(placement, next_piece);
+            for c in &committed {
+                let mut child = c.base.clone();
+                child.deal_speculative(next_piece);
                 pending.push(PendingChild {
                     state: child,
-                    lock,
-                    t_spin,
+                    lock: c.lock.clone(),
+                    t_spin: c.t_spin,
                     ctx: parent_ctx,
+                    score: c.score,
                     root_index: parent.root_index,
                     parent_acc: parent.acc_reward,
                     spec_weight: child_weight,
@@ -822,6 +896,103 @@ mod tests {
         let gp = drive(&mut bf, &state, &linear(), SearchBudget::single_ply()).unwrap();
         assert_eq!(bp.placement.origin(), gp.placement.origin());
         assert_eq!(bp.placement.rotation(), gp.placement.rotation());
+    }
+
+    /// Delegates to [`LinearEvaluator`] but reports a configurable `board_only`
+    /// and counts every `evaluate_cols` call. With `board_only: false` it forces
+    /// the naive per-child speculation fan — the oracle the dedup must match.
+    struct CountingEval {
+        inner: LinearEvaluator,
+        board_only: bool,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl CountingEval {
+        fn new(board_only: bool) -> Self {
+            Self {
+                inner: linear(),
+                board_only,
+                calls: std::sync::atomic::AtomicUsize::new(0),
+            }
+        }
+    }
+
+    impl Evaluator for CountingEval {
+        fn evaluate(
+            &self,
+            lock: &LockOutcome,
+            board: &Board,
+            t_spin: Option<TSpinKind>,
+            ctx: EvalContext,
+        ) -> (Value, Reward) {
+            self.inner.evaluate(lock, board, t_spin, ctx)
+        }
+
+        fn evaluate_cols(
+            &self,
+            lock: &LockOutcome,
+            board: crate::engine::ColumnView,
+            t_spin: Option<TSpinKind>,
+            ctx: EvalContext,
+        ) -> (Value, Reward) {
+            self.calls
+                .fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            self.inner.evaluate_cols(lock, board, t_spin, ctx)
+        }
+
+        fn board_only(&self) -> bool {
+            self.board_only
+        }
+    }
+
+    #[test]
+    fn speculative_share_matches_naive_fan() {
+        // The dedup shares one board-only evaluation across a placement's whole
+        // bag fan; refusing `board_only` forces the naive per-child fan through
+        // the same scoring funnel. Same decisions, same scores, same root
+        // back-ups — with strictly fewer evaluations — or the dedup is wrong.
+        let mut crafted_board = Board::new(6, 12);
+        crafted_board.set(0, 0, CellKind::Some(PieceType::O));
+        crafted_board.set(5, 0, CellKind::Some(PieceType::O));
+        let crafted = SearchState::for_test(
+            crafted_board,
+            movegen::spawn_piece(PieceType::T, 6, 12),
+            Some(PieceType::L),
+            std::iter::empty(),
+        );
+        // (state, depth): crafted speculates at ply 2; the engine snapshots carry
+        // a full visible queue, so a deep budget drives expansion past it.
+        let cases = [
+            (crafted, 3),
+            (engine_snapshot_state(7), 9),
+            (engine_snapshot_state(42), 9),
+        ];
+        for (state, depth) in cases {
+            let shared = CountingEval::new(true);
+            let naive = CountingEval::new(false);
+            let mut a = BeamPlanner::new(12);
+            let mut b = BeamPlanner::new(12);
+            let pa = drive(&mut a, &state, &shared, SearchBudget::beam(depth)).unwrap();
+            let pb = drive(&mut b, &state, &naive, SearchBudget::beam(depth)).unwrap();
+            assert_eq!(pa.placement.origin(), pb.placement.origin());
+            assert_eq!(pa.placement.rotation(), pb.placement.rotation());
+            assert_eq!(pa.placement.path, pb.placement.path);
+            assert_eq!(pa.score, pb.score);
+            let backups = |p: &BeamPlanner| {
+                p.root_scores()
+                    .map(|(r, s)| (r.origin(), r.rotation(), s))
+                    .collect::<Vec<_>>()
+            };
+            assert_eq!(backups(&a), backups(&b));
+            let (na, nb) = (
+                shared.calls.load(std::sync::atomic::Ordering::Relaxed),
+                naive.calls.load(std::sync::atomic::Ordering::Relaxed),
+            );
+            assert!(
+                na < nb,
+                "sharing must evaluate strictly less once speculation fires ({na} vs {nb})"
+            );
+        }
     }
 
     /// A `SearchState` from a fresh engine that has spawned its first piece (a real,

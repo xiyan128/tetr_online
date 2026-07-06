@@ -417,6 +417,13 @@ impl Evaluator for Cc2Evaluator {
     ) -> (Value, Reward) {
         self.score(board.columns(), lock, t_spin, ctx)
     }
+
+    /// Every input this evaluator reads comes from the locked board and the chain
+    /// context, so the beam may share one evaluation across a speculative
+    /// placement's bag continuations.
+    fn board_only(&self) -> bool {
+        true
+    }
 }
 
 /// Bit mask of all rows strictly below `height` (`(1<<height)-1`, guarded so a

@@ -203,10 +203,12 @@ pub(crate) fn score_placement(
 }
 
 /// Hold-aware enumeration of `state`'s active-piece placements in canonical movegen
-/// order — the single seam the greedy, beam, and best-first planners share. The
+/// order — the single seam the greedy, beam, best-first, and policy-argmax
+/// planners share (public: research minds enumerate through it too, so they
+/// can never disagree with the in-crate planners about what a move is). The
 /// movegen BFS re-derives reachable poses, so a hold swap only needs an on-board
 /// spawn, which the board's own `(width, height)` always provides.
-pub(crate) fn hold_placements(state: &SearchState) -> Vec<Placement> {
+pub fn hold_placements(state: &SearchState) -> Vec<Placement> {
     let (w, h) = (state.board.width(), state.board.height());
     generate_with_hold(
         &state.board,

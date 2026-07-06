@@ -97,6 +97,42 @@ pub struct EvalContext {
     pub b2b: bool,
 }
 
+/// One not-yet-scored search child, borrowed for batch evaluation: the full
+/// post-placement [`SearchState`] plus the transition facts the score depends on.
+///
+/// The board-only evaluators read `state.board` (via its column view); a learned
+/// evaluator may read the rest of the state (queue, hold, bag, incoming garbage)
+/// — which is exactly why the batch seam carries the state and not just the board.
+///
+/// [`SearchState`]: crate::ai::SearchState
+pub struct Leaf<'a> {
+    /// The child state *after* the placement (and its line clears).
+    pub state: &'a crate::ai::SearchState,
+    /// What the placement locked and cleared.
+    pub lock: &'a LockOutcome,
+    /// The placement's T-spin classification, if any.
+    pub t_spin: Option<TSpinKind>,
+    /// The chain context the child scores under (the parent's pre-placement state).
+    pub ctx: EvalContext,
+}
+
+/// The engine-truth attack a placement sends, as a [`Reward`] — the exact
+/// versus currency: line/spin base, Back-to-Back qualified under the
+/// pre-placement chain, combo table, perfect-clear bonus.
+///
+/// This is the reward half a *learned* evaluator composes with: its value head
+/// estimates the future, while the present move's payoff is stated by the
+/// engine, not estimated (`score = value(net) + attack_weight · this`).
+pub fn attack_reward(leaf: &Leaf<'_>) -> Reward {
+    let lines = leaf.lock.cleared_rows.len();
+    if lines == 0 {
+        return Reward(0);
+    }
+    let action = EngineScoreAction::from_lock_result(leaf.t_spin, lines);
+    let b2b = qualifies_for_back_to_back(leaf.t_spin, lines) && leaf.ctx.b2b;
+    Reward(attack_lines(action, b2b, leaf.ctx.combo, leaf.state.board.is_empty()) as i32)
+}
+
 /// Scores a board placement as a `(Value, Reward)` pair.
 ///
 /// Object-safe (`&dyn Evaluator`) and thread-safe so the planner can run a search
@@ -137,6 +173,27 @@ pub trait Evaluator: Send + Sync {
         ctx: EvalContext,
     ) -> (Value, Reward) {
         self.evaluate(lock, &board.to_board(), t_spin, ctx)
+    }
+
+    /// True iff this evaluator's score depends only on the locked board and chain
+    /// context — not on the queue, hold, bag, or incoming garbage. A board-only
+    /// evaluator lets the beam share **one** evaluation across a speculative
+    /// placement's ≤7 bag continuations, whose boards are identical (they differ
+    /// only in which piece spawns next). Opt-in: the `false` default always
+    /// evaluates per child, which is safe for any evaluator.
+    fn board_only(&self) -> bool {
+        false
+    }
+
+    /// Score a batch of children in one call — the seam a learned backend
+    /// overrides to run one fused forward per sibling group instead of a call
+    /// per leaf. The default loops [`evaluate_cols`](Self::evaluate_cols); an
+    /// override must be element-wise bit-identical to that default.
+    fn evaluate_leaves(&self, leaves: &[Leaf<'_>]) -> Vec<(Value, Reward)> {
+        leaves
+            .iter()
+            .map(|l| self.evaluate_cols(l.lock, l.state.board.view(), l.t_spin, l.ctx))
+            .collect()
     }
 }
 
@@ -205,6 +262,13 @@ impl Evaluator for LinearEvaluator {
         ctx: EvalContext,
     ) -> (Value, Reward) {
         self.score(board.columns(), lock, t_spin, ctx)
+    }
+
+    /// Every input this evaluator reads comes from the locked board and the chain
+    /// context, so the beam may share one evaluation across a speculative
+    /// placement's bag continuations.
+    fn board_only(&self) -> bool {
+        true
     }
 }
 

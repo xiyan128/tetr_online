@@ -52,7 +52,10 @@ pub enum EngineScoreAction {
 }
 
 impl EngineScoreAction {
-    pub(crate) fn from_lock_result(t_spin: Option<TSpinKind>, lines: usize) -> Self {
+    /// Classify a lock's clear result for scoring/attack. Public so evaluators
+    /// (and the learned-eval crate) can state the engine-truth attack of a
+    /// hypothetical placement.
+    pub fn from_lock_result(t_spin: Option<TSpinKind>, lines: usize) -> Self {
         if let Some(kind) = t_spin {
             return Self::TSpin { kind, lines };
         }
