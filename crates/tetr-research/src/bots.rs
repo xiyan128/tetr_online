@@ -231,7 +231,8 @@ impl BotSpec {
 
 /// The one place the full-strength convention lives: imperfection 0 and no
 /// reaction delay (suites measure pure policy quality), blocking venue.
-fn full_strength(
+/// Shared with [`crate::arm`], whose net arms follow the same convention.
+pub(crate) fn full_strength(
     planner: Box<dyn tetr_core::ai::Mind>,
     eval: Box<dyn Evaluator>,
     budget: SearchBudget,

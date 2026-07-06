@@ -67,6 +67,76 @@ enum Command {
         #[command(flatten)]
         rt: RuntimeArgs,
     },
+    /// CRN pair duel between two arms under the sudden-death venue.
+    /// `duel --a beam:M@w8d5 --b policy:M` is the G_pi probe; any
+    /// candidate-vs-incumbent race is the same command.
+    Duel {
+        /// Arm A (see src/arm.rs for the grammar).
+        #[arg(long)]
+        a: tetr_research::arm::Arm,
+        /// Arm B.
+        #[arg(long)]
+        b: tetr_research::arm::Arm,
+        /// CRN pairs to play (2 games each, arms swapped).
+        #[arg(long, default_value_t = 64)]
+        pairs: usize,
+        /// First seed of the region (the caller owns disjointness).
+        #[arg(long)]
+        seeds: u64,
+        #[command(flatten)]
+        venue: VenueArgs,
+        #[command(flatten)]
+        rt: RuntimeArgs,
+    },
+    /// Latched trinomial pair-GSPRT gate: arm A (candidate) vs arm B
+    /// (incumbent). The verdict latches at the first boundary crossing;
+    /// in-flight pairs are reported but never decide.
+    Gate {
+        #[arg(long)]
+        a: tetr_research::arm::Arm,
+        #[arg(long)]
+        b: tetr_research::arm::Arm,
+        /// Hard cap on pairs (hitting it = Inconclusive).
+        #[arg(long, default_value_t = 400)]
+        max_pairs: usize,
+        /// First seed of the region (the caller owns disjointness).
+        #[arg(long)]
+        seeds: u64,
+        /// H1 per-decisive-game win probability (H0 is 0.5).
+        #[arg(long, default_value_t = 0.55)]
+        p1: f64,
+        /// Pairs before any verdict is allowed.
+        #[arg(long, default_value_t = 32)]
+        min_pairs: u32,
+        #[command(flatten)]
+        venue: VenueArgs,
+        #[command(flatten)]
+        rt: RuntimeArgs,
+    },
+}
+
+/// Default wall-clock budget for an instrument run: 6 hours, a safety cap on a
+/// hung/slow arm — well beyond any healthy duel or gate.
+const DEFAULT_INSTRUMENT_BUDGET_SECS: u64 = 6 * 60 * 60;
+
+/// The sudden-death venue knobs (defaults = the calibrated venue).
+#[derive(Args, Debug)]
+struct VenueArgs {
+    /// Ply cap before sudden-death escalation begins.
+    #[arg(long, default_value_t = 240)]
+    max_plies: u32,
+    /// Rain period (garbage line to both seats every N plies).
+    #[arg(long, default_value_t = 8)]
+    rain: u32,
+}
+
+impl VenueArgs {
+    fn venue(&self) -> tetr_research::instruments::Venue {
+        tetr_research::instruments::Venue {
+            max_plies: self.max_plies,
+            rain_period: self.rain,
+        }
+    }
 }
 
 fn die(message: &str) -> ! {
@@ -156,8 +226,96 @@ fn execute(
     Ok(())
 }
 
+/// Shared instrument preamble: the dirty-tree refusal + a receipt dir; and
+/// the shared epilogue: ONE self-describing JSON line on stdout.
+fn run_instrument(
+    name: &str,
+    spec: serde_json::Value,
+    rt: &RuntimeArgs,
+    body: impl FnOnce() -> serde_json::Value,
+) -> std::io::Result<()> {
+    if !rt.allow_dirty && tetr_research::ledger::dirty() != Some(false) {
+        die(
+            "refusing to run: the working tree is dirty (or not a git checkout), so this \
+             run would not be re-runnable from (commit, args…).\n\
+             commit first, or pass --allow-dirty to record an exploratory run.",
+        );
+    }
+    let run_dir = RunDir::create(rt.runs_root.as_deref(), name, spec)?;
+    events::install(run_dir.dir())?;
+    let result = body();
+    let mut line = json!({ "run": run_dir.dir().display().to_string(), "eval": name });
+    if let (serde_json::Value::Object(line), serde_json::Value::Object(result)) =
+        (&mut line, result)
+    {
+        line.extend(result);
+    }
+    println!("{line}");
+    Ok(())
+}
+
 fn main() -> std::io::Result<()> {
     match Cli::parse().command {
         Command::Run { eval, bots, rt } => execute(&find_or_die(&eval), &bots, &rt),
+        Command::Duel {
+            a,
+            b,
+            pairs,
+            seeds,
+            venue,
+            rt,
+        } => {
+            let budget = std::time::Duration::from_secs(
+                rt.budget_secs.unwrap_or(DEFAULT_INSTRUMENT_BUDGET_SECS),
+            );
+            run_instrument(
+                "duel",
+                json!({
+                    "experiment": "duel",
+                    "spec": { "a": a.to_string(), "b": b.to_string(), "pairs": pairs,
+                              "seeds": seeds, "venue": venue.venue() },
+                    "runtime": { "budget_secs": budget.as_secs() },
+                }),
+                &rt,
+                || tetr_research::instruments::duel(&a, &b, venue.venue(), seeds, pairs, budget),
+            )
+        }
+        Command::Gate {
+            a,
+            b,
+            max_pairs,
+            seeds,
+            p1,
+            min_pairs,
+            venue,
+            rt,
+        } => {
+            let budget = std::time::Duration::from_secs(
+                rt.budget_secs.unwrap_or(DEFAULT_INSTRUMENT_BUDGET_SECS),
+            );
+            run_instrument(
+                "gate",
+                json!({
+                    "experiment": "gate",
+                    "spec": { "a": a.to_string(), "b": b.to_string(), "max_pairs": max_pairs,
+                              "seeds": seeds, "p1": p1, "min_pairs": min_pairs,
+                              "venue": venue.venue() },
+                    "runtime": { "budget_secs": budget.as_secs() },
+                }),
+                &rt,
+                || {
+                    tetr_research::instruments::gate(
+                        &a,
+                        &b,
+                        venue.venue(),
+                        seeds,
+                        max_pairs,
+                        p1,
+                        min_pairs,
+                        budget,
+                    )
+                },
+            )
+        }
     }
 }

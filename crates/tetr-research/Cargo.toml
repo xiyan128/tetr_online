@@ -12,6 +12,7 @@ publish = false
 
 [dependencies]
 tetr-core = { path = "../tetr-core" }
+tetr-nn = { path = "../tetr-nn" }
 # TBP client for the Cold Clear 2 baseline (native subprocess speaking JSON)
 # and the run-ledger manifests.
 serde = { version = "1", features = ["derive"] }
@@ -32,3 +33,8 @@ bench = false
 
 [lints]
 workspace = true
+
+[dev-dependencies]
+# Property tests for the arm grammar: fuzz the parser (never panics) and pin
+# the Display round-trip (a parsed arm's receipt identity re-parses).
+proptest = "1"

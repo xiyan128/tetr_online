@@ -63,12 +63,14 @@
 //! | [`events`] | the normalized game stream (`games.jsonl`, duckdb-ready) |
 //! | [`ledger`] | run receipts |
 
+pub mod arm;
 pub mod bots;
 pub mod cc2;
 pub mod commands;
 pub mod downstack;
 pub mod events;
 pub mod fixtures;
+pub mod instruments;
 pub mod ledger;
 pub mod marathon;
 pub mod pc;

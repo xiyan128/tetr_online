@@ -48,4 +48,17 @@ step "check (game, wasm32, webgl2 — the shipping target)"
 cargo check -p tetr_online --target wasm32-unknown-unknown \
     --no-default-features --features webgl2 --locked
 
+# The Python half (tetr-nn's model + exporter). Skipped if uv is absent so a
+# Rust-only checkout still gates; when present, the checks CI would run.
+if command -v uv >/dev/null 2>&1; then
+    step "python: ruff + pyright + pytest (uv)"
+    (cd python \
+        && uv run --frozen ruff check . \
+        && uv run --frozen ruff format --check . \
+        && uv run --frozen pyright \
+        && uv run --frozen pytest)
+else
+    step "python: SKIPPED (uv not found)"
+fi
+
 printf '\n\033[1;32mFULL GATE GREEN\033[0m (%ds) — matches .github/workflows/ci.yml\n' "$((SECONDS - t0))"
