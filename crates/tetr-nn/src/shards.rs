@@ -57,24 +57,25 @@ pub struct DecisionRecord {
     pub meta: DecisionMeta,
     /// Packed opponent plane (from the decision's [`Obs`]).
     pub opp_plane: [u8; PACKED_PLANE],
-    /// Per child: packed own plane, served features, backed-up root score.
-    pub children: Vec<([u8; PACKED_PLANE], [f32; FEATURE_LEN], i32)>,
+    /// Per child: packed own plane, served features, backed-up root score,
+    /// action slot ([`crate::obs::placement_slot`]).
+    pub children: Vec<([u8; PACKED_PLANE], [f32; FEATURE_LEN], i32, u8)>,
 }
 
 impl DecisionRecord {
     /// Build from served observations (one per child, sharing the decision's
     /// opponent plane) + the search's per-child scores.
-    pub fn from_served(meta: DecisionMeta, children: &[(&Obs, i32)]) -> Self {
+    pub fn from_served(meta: DecisionMeta, children: &[(&Obs, i32, u8)]) -> Self {
         let opp_plane = children
             .first()
-            .map(|(o, _)| pack_plane(&o.opp_board))
+            .map(|(o, _, _)| pack_plane(&o.opp_board))
             .unwrap_or([0; PACKED_PLANE]);
         Self {
             meta,
             opp_plane,
             children: children
                 .iter()
-                .map(|(o, score)| (pack_plane(&o.own_board), o.features, *score))
+                .map(|(o, score, slot)| (pack_plane(&o.own_board), o.features, *score, *slot))
                 .collect(),
         }
     }
@@ -160,6 +161,7 @@ impl ShardWriter {
         let mut child_own = Vec::with_capacity(c * PACKED_PLANE);
         let mut child_feats: Vec<f32> = Vec::with_capacity(c * FEATURE_LEN);
         let mut child_score: Vec<i32> = Vec::with_capacity(c);
+        let mut child_slot: Vec<u8> = Vec::with_capacity(c);
         child_offset.push(0);
         for r in &self.buf {
             let m = &r.meta;
@@ -174,10 +176,11 @@ impl ShardWriter {
                 m.plies_total as i32,
             ]);
             opp_plane.extend_from_slice(&r.opp_plane);
-            for (own, feats, score) in &r.children {
+            for (own, feats, score, slot) in &r.children {
                 child_own.extend_from_slice(own);
                 child_feats.extend_from_slice(feats);
                 child_score.push(*score);
+                child_slot.push(*slot);
             }
             child_offset.push(child_score.len() as i32);
         }
@@ -221,6 +224,7 @@ impl ShardWriter {
                 vec![c],
                 i32_bytes(&child_score),
             ),
+            ("child_slot", safetensors::Dtype::U8, vec![c], child_slot),
         ];
         let checksum = {
             let mut h = 0u64;
@@ -297,6 +301,7 @@ pub struct Shard {
     pub child_own: Vec<[u8; PACKED_PLANE]>,
     pub child_feats: Vec<[f32; FEATURE_LEN]>,
     pub child_scores: Vec<i32>,
+    pub child_slots: Vec<u8>,
 }
 
 impl Shard {
@@ -329,6 +334,7 @@ impl Shard {
             "child_own",
             "child_feats",
             "child_score",
+            "child_slot",
         ] {
             h ^= fnv1a(raw(name)?);
         }
@@ -380,6 +386,7 @@ impl Shard {
             child_own: planes(raw("child_own")?),
             child_feats,
             child_scores: i32s(raw("child_score")?),
+            child_slots: raw("child_slot")?.to_vec(),
         })
     }
 
@@ -428,7 +435,11 @@ mod tests {
         let children: Vec<(Obs, i32)> = (0..n_children)
             .map(|c| (obs_with(gid as usize + c, c as f32 + 0.5), c as i32 * 100))
             .collect();
-        let refs: Vec<(&Obs, i32)> = children.iter().map(|(o, s)| (o, *s)).collect();
+        let refs: Vec<(&Obs, i32, u8)> = children
+            .iter()
+            .enumerate()
+            .map(|(c, (o, s))| (o, *s, c as u8))
+            .collect();
         DecisionRecord::from_served(
             DecisionMeta {
                 game_id: gid,

@@ -152,9 +152,18 @@ pub struct BeamPlanner {
     /// recorded `new()` baselines stay byte-identical; TP variants are new
     /// registered names.
     transpose: bool,
+    /// Optional root pre-filter: given the decision state and its full legal
+    /// placement set, returns the subset this run may search (e.g. a learned
+    /// policy's top-m — the guided-beam vehicle). `None` = every root, byte-
+    /// identical to the recorded baselines. Must be deterministic per state
+    /// (re-rooting at the same state assumes the same roots).
+    root_filter: Option<RootFilter>,
     /// In-flight search, `None` between decisions. Reset on a new root state.
     run: Option<BeamRun>,
 }
+
+/// See [`BeamPlanner::with_root_filter`].
+pub type RootFilter = Box<dyn Fn(&SearchState, Vec<Placement>) -> Vec<Placement> + Send + Sync>;
 
 impl BeamPlanner {
     /// A beam planner of the given width, with bag speculation **on** (the default).
@@ -163,6 +172,7 @@ impl BeamPlanner {
             beam_width: beam_width.max(1),
             speculate: true,
             transpose: false,
+            root_filter: None,
             run: None,
         }
     }
@@ -185,6 +195,15 @@ impl BeamPlanner {
         self
     }
 
+    /// Restrict each run's roots through `filter` (the policy-guided beam: a
+    /// learned prior picks which ply-1 placements deserve search). A filter
+    /// that returns an empty set is ignored for that state (all roots search)
+    /// — restriction must never manufacture a resignation.
+    pub fn with_root_filter(mut self, filter: RootFilter) -> Self {
+        self.root_filter = Some(filter);
+        self
+    }
+
     /// The current run's per-root backed-up scores: each ply-1 placement paired
     /// with the best leaf score its subtree has achieved so far (`i32::MIN` =
     /// no scored descendant yet). Empty between decisions or on a topped-out
@@ -202,7 +221,16 @@ impl BeamPlanner {
     /// legal placement) seeds an *empty* run — the fingerprint still records it,
     /// so re-rooting at the same dead state stays a no-op.
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> BeamRun {
-        let roots = hold_placements(state);
+        let roots = {
+            let all = hold_placements(state);
+            match &self.root_filter {
+                Some(f) if !all.is_empty() => {
+                    let picked = f(state, all.clone());
+                    if picked.is_empty() { all } else { picked }
+                }
+                _ => all,
+            }
+        };
 
         // Fork + transition each root child in canonical order, through the shared
         // fork → classify pre-lock → commit helper. Root children score with the

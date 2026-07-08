@@ -34,6 +34,7 @@
 //! so a trainer reads *what was served* rather than re-deriving it.
 
 use tetr_core::ai::SearchState;
+use tetr_core::ai::movegen::Placement;
 use tetr_core::engine::PieceType;
 
 /// Board plane height (rows): the engine's full backing board for the default
@@ -49,6 +50,23 @@ pub const PACKED_PLANE: usize = BOARD_LEN / 8;
 
 /// Queue slots the encoder reads (the revealed Next preview the net sees).
 pub const QUEUE_SLOTS: usize = 5;
+
+/// The fixed action vocabulary for the action-indexed policy head:
+/// `hold(2) x rotation(4) x x-origin(+2 offset, 13)` = 104 slots. One forward
+/// of the PARENT ranks all its placements by slot — the eval-count lever that
+/// makes a guided search cheap (a per-child head costs one forward per child).
+/// Rare same-(rot,x) collisions (a tuck under an overhang vs resting on top)
+/// share a slot: both get the same prior; search disambiguates by value.
+pub const N_SLOTS: usize = 2 * 4 * 13;
+
+/// Map a placement to its action slot. Origins outside the expected x range
+/// clamp into it (defensive; movegen never produces them on a 10-wide board).
+pub fn placement_slot(p: &Placement) -> u8 {
+    let hold = p.used_hold as usize;
+    let rot = p.rotation() as usize;
+    let x = (p.origin().0 + 2).clamp(0, 12) as usize;
+    (hold * 4 * 13 + rot * 13 + x) as u8
+}
 
 // Feature segment offsets (the module table). One definition; the tests pin
 // contiguity.

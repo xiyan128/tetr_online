@@ -26,6 +26,7 @@ use std::str::FromStr;
 use std::sync::Arc;
 
 use tetr_core::ai::eval::{Cc2Weights, Evaluator, LinearEvaluator};
+use tetr_core::ai::movegen::Placement;
 use tetr_core::ai::search::{Mind, PlacementPlan, ThinkProgress, hold_placements};
 use tetr_core::ai::state::SearchState;
 use tetr_core::ai::{BeamPlanner, SearchBudget};
@@ -55,6 +56,15 @@ pub enum Arm {
     NetValue { dir: PathBuf },
     /// The net's policy head, argmax over the root's children. No search.
     NetPolicy { dir: PathBuf },
+    /// The policy-GUIDED beam (the deployed-vehicle seed): the net's policy
+    /// head picks the top-m roots, the beam searches only those with the net
+    /// as leaf evaluator. TP on (width buys distinct futures).
+    GuidedBeam {
+        dir: PathBuf,
+        m: usize,
+        width: usize,
+        depth: u8,
+    },
 }
 
 impl Arm {
@@ -80,6 +90,17 @@ impl Arm {
                 // session runner requires one).
                 Box::new(LinearEvaluator::default()),
                 SearchBudget::beam(1),
+                seed,
+            ),
+            Arm::GuidedBeam {
+                dir,
+                m,
+                width,
+                depth,
+            } => full_strength(
+                Box::new(BeamPlanner::transposing(*width).with_root_filter(policy_top_m(dir, *m))),
+                Box::new(NetEvaluator::load(dir).expect("arm model dir loads")),
+                SearchBudget::beam(*depth),
                 seed,
             ),
         }
@@ -121,6 +142,12 @@ impl fmt::Display for Arm {
             }
             Arm::NetValue { dir } => write!(f, "value:{}", dir.display()),
             Arm::NetPolicy { dir } => write!(f, "policy:{}", dir.display()),
+            Arm::GuidedBeam {
+                dir,
+                m,
+                width,
+                depth,
+            } => write!(f, "guided:{}@m{m}w{width}d{depth}", dir.display()),
         }
     }
 }
@@ -181,8 +208,26 @@ impl FromStr for Arm {
             }
             "value" => Ok(Arm::NetValue { dir: rest.into() }),
             "policy" => Ok(Arm::NetPolicy { dir: rest.into() }),
+            "guided" => {
+                let (target, cfg) = rest
+                    .rsplit_once('@')
+                    .ok_or_else(|| format!("arm {s:?}: expected guided:dir@m<M>w<W>d<D>"))?;
+                let cfg = cfg
+                    .strip_prefix('m')
+                    .ok_or_else(|| format!("arm {s:?}: expected m<M>w<W>d<D>"))?;
+                let (m_str, wd) = cfg
+                    .split_once('w')
+                    .ok_or_else(|| format!("arm {s:?}: expected m<M>w<W>d<D>"))?;
+                let (width, depth) = parse_wd(&format!("w{wd}"))?;
+                Ok(Arm::GuidedBeam {
+                    dir: target.into(),
+                    m: m_str.parse().map_err(|_| format!("bad m in {s:?}"))?,
+                    width,
+                    depth,
+                })
+            }
             other => Err(format!(
-                "arm {s:?}: unknown kind {other:?} (greedy | beam | tp | value | policy)"
+                "arm {s:?}: unknown kind {other:?} (greedy | beam | tp | value | policy | guided)"
             )),
         }
     }
@@ -220,6 +265,52 @@ impl PolicyMind {
             expanded: 0,
         }
     }
+}
+
+/// Build the policy-top-m [`RootFilter`]: one batched policy forward over the
+/// state's children, keep the m highest-logit LIVE placements (dead children
+/// never earn a beam root). Returns empty when every child is dead — the
+/// planner's defensive fallback then searches all roots (never a manufactured
+/// resignation). Deterministic per state; ties resolve to canonical movegen
+/// order (stable sort), matching every other planner's tie rule.
+pub fn policy_top_m(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
+    let net = Net::load(dir).expect("guided-beam model dir loads");
+    let mut scratch = Scratch::default();
+    let opp = OppCtx::default();
+    let opp_emb = net
+        .embed_boards(&[&opp.board], &mut scratch)
+        .pop()
+        .expect("one plane in, one embedding out");
+    let shared = std::sync::Mutex::new((net, scratch));
+    Box::new(move |state: &SearchState, placements: Vec<Placement>| {
+        let children: Vec<(Obs, bool)> = placements
+            .iter()
+            .map(|p| {
+                let mut child = state.clone();
+                child.commit_placement(p);
+                (encode(&child, &opp), child.dead)
+            })
+            .collect();
+        let items: Vec<_> = children
+            .iter()
+            .map(|(o, _)| (&o.own_board, &o.features))
+            .collect();
+        let mut guard = shared.lock().expect("filter net lock");
+        let (net, scratch) = &mut *guard;
+        let heads = net.forward(&items, &opp_emb, scratch);
+        let mut live: Vec<(usize, f32)> = heads
+            .iter()
+            .zip(&children)
+            .enumerate()
+            .filter(|(_, (_, (_, dead)))| !dead)
+            .map(|(i, (h, _))| (i, h.policy))
+            .collect();
+        // Stable by descending logit: ties keep canonical (movegen) order.
+        live.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut keep: Vec<usize> = live.into_iter().take(m).map(|(i, _)| i).collect();
+        keep.sort_unstable(); // restore canonical order among the kept
+        keep.into_iter().map(|i| placements[i].clone()).collect()
+    })
 }
 
 impl Mind for PolicyMind {

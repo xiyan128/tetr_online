@@ -9,6 +9,7 @@ Each shard is a safetensors file written by `tetr-nn::shards::ShardWriter`
   child_own    [c, 50] u8   packed own plane per child
   child_feats  [c, 85] f32  served feature vector per child
   child_score  [c]     i32  the beam's backed-up root score per child (the completed-Q source)
+  child_slot   [c]     u8   action slot (hold*52 + rot*13 + x+2; absent in pre-slot corpora)
 
 The decision's policy target is derived from `child_score` over its children;
 the value target is `z`.
@@ -36,6 +37,7 @@ class Shard:
     child_own: np.ndarray  # [c, 50] u8
     child_feats: np.ndarray  # [c, 85] f32
     child_score: np.ndarray  # [c] i32
+    child_slot: np.ndarray | None  # [c] u8, None on pre-slot corpora
 
     @property
     def n_decisions(self) -> int:
@@ -54,6 +56,7 @@ def read_shard(path: str) -> Shard:
         child_own=t["child_own"].reshape(-1, PACKED_PLANE),
         child_feats=t["child_feats"].reshape(-1, FEATURE_LEN),
         child_score=t["child_score"].reshape(-1),
+        child_slot=t["child_slot"].reshape(-1) if "child_slot" in t else None,
     )
 
 

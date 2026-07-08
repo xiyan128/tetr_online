@@ -122,7 +122,8 @@ fn play_decision(
     let children: Vec<_> = child_obs
         .iter()
         .zip(&scores)
-        .map(|(o, &s)| (o, s))
+        .zip(&placements)
+        .map(|((o, &s), p)| (o, s, tetr_nn::obs::placement_slot(p)))
         .collect();
     let record = DecisionRecord::from_served(
         DecisionMeta {
