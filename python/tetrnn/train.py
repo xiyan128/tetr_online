@@ -59,6 +59,7 @@ def run_batch(
     device: torch.device,
     metrics: bool,
     live_logits: bool = False,
+    boot_value: bool = False,
 ) -> tuple[torch.Tensor, dict]:
     """Forward one batch of decisions from one shard; return (loss, metrics)."""
     groups, rows, opp_rows, played_local, zc = [], [], [], [], []
@@ -113,6 +114,22 @@ def run_batch(
     wdl = heads[played_rows][:, :3]
     z_t = torch.as_tensor(np.asarray(zc), device=device)
     value_ce = torch.nn.functional.cross_entropy(wdl, z_t)
+
+    # Search-value bootstrap (round-3): the played child's stored root score is
+    # the GENERATOR search's d5 value estimate — a dense per-decision signal
+    # (z is one label per game). Regress the differentiable z_hat toward
+    # tanh(score / Z_SCALE); death-coded scores clamp to -1.
+    if boot_value:
+        Z_SCALE = 10_000.0
+        boots = []
+        for g, d in enumerate(dec_idx):
+            lo = int(shard.child_offset[d])
+            sc = float(shard.child_score[lo + int(shard.decision[d, 3])])
+            boots.append(-1.0 if sc < -1_000_000 else float(np.tanh(sc / Z_SCALE)))
+        p = torch.softmax(wdl, dim=1)
+        z_hat_pred = p[:, 0] - p[:, 2]
+        v_boot = torch.as_tensor(np.asarray(boots, dtype=np.float32), device=device)
+        value_ce = value_ce + ((z_hat_pred - v_boot) ** 2).mean()
 
     # Action head: CE(slot-scattered pi', log_softmax(slot logits(parent))).
     # Collided slots (rare same-(rot,x) placements) sum their target mass.
@@ -179,9 +196,14 @@ def main() -> None:
     epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     live = len(sys.argv) > 4 and sys.argv[4] == "live"
     init_dir = None
+    boot_value = False
     for a in sys.argv[4:]:
         if a.startswith("--init="):
             init_dir = a.split("=", 1)[1]
+        if a == "--boot-value":
+            boot_value = True
+    if boot_value:
+        print("value bootstrap: z_hat -> tanh(played root score / Z_SCALE) + z CE")
     if live:
         # ROUND-1 POSTMORTEM (2026-07-08): this mode is UNSOUND as implemented —
         # it re-mixes the stored (old) search Q with the TRAINEE's ever-changing
@@ -255,7 +277,14 @@ def main() -> None:
             targets = shard_targets(shard)
             for b in shard_batches(shard, rng):
                 loss, m = run_batch(
-                    model, shard, targets, b, device, metrics=False, live_logits=live
+                    model,
+                    shard,
+                    targets,
+                    b,
+                    device,
+                    metrics=False,
+                    live_logits=live,
+                    boot_value=boot_value,
                 )
                 opt.zero_grad()
                 loss.backward()
@@ -272,7 +301,14 @@ def main() -> None:
                 targets = shard_targets(shard)
                 for b in shard_batches(shard, None):
                     _, m = run_batch(
-                        model, shard, targets, b, device, metrics=True, live_logits=live
+                        model,
+                        shard,
+                        targets,
+                        b,
+                        device,
+                        metrics=True,
+                        live_logits=live,
+                        boot_value=boot_value,
                     )
                     for k, v in m.items():
                         ho.setdefault(k, []).append(v)
