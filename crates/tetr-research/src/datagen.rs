@@ -102,17 +102,21 @@ fn play_decision(
     meta: DecisionMeta,
     opp: &OppCtx,
 ) -> (Option<DecisionRecord>, u32, bool) {
-    let placements = hold_placements(state);
-    if placements.is_empty() {
+    if hold_placements(state).is_empty() {
         return (None, 0, true);
     }
     think_to_completion(beam, state, eval, SearchBudget::beam(depth));
 
-    // Per-root backed-up score, aligned to hold_placements order (root_scores
-    // yields roots in that order — same enumeration).
-    let mut scores = vec![i32::MIN; placements.len()];
-    for (i, (_p, s)) in beam.root_scores().enumerate() {
-        scores[i] = s;
+    // The decision's placements ARE the beam's roots — under a placement
+    // filter that is the filtered subset, in the beam's own order. Deriving
+    // them from `root_scores()` keeps placements and scores aligned BY
+    // CONSTRUCTION (round-1 postmortem: indexing the full `hold_placements`
+    // list with filtered-root scores mislabeled 36% of the corpus and
+    // misplayed every game — policy collapsed 0-64).
+    let (placements, scores): (Vec<_>, Vec<i32>) =
+        beam.root_scores().map(|(p, s)| (p.clone(), s)).unzip();
+    if placements.is_empty() {
+        return (None, 0, true);
     }
     let argmax = (0..scores.len()).max_by_key(|&i| scores[i]).unwrap_or(0);
 
@@ -329,6 +333,58 @@ mod tests {
             z_seen[0] && z_seen[2],
             "expected both win and loss z labels"
         );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Round-1 postmortem regression: with the guided filter active, the
+    /// record's children must be the beam's FILTERED roots (<= top_m), and the
+    /// game must play through — previously the full placement list was stored
+    /// with misaligned filtered scores (corrupt labels + misplayed games).
+    #[test]
+    fn filtered_datagen_stores_the_beams_roots() {
+        let dir = std::env::temp_dir().join(format!("tetr-datagen-filt-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let net_dir = std::path::Path::new(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/../tetr-nn/tests/fixtures/round0"
+        ));
+        let eval = tetr_nn::serve::NetEvaluator::load(net_dir).expect("fixture net");
+        let cfg = BeamConfig {
+            width: 6,
+            depth: 3,
+            transpose: true,
+            top_m: 6,
+        };
+        let venue = VersusFormat {
+            max_plies: 30,
+            rain_period: 4,
+            sudden_death: true,
+        };
+        let mut writer = ShardWriter::create(&dir, 8).expect("writer");
+        let out = datagen_game(&mut writer, &eval, cfg, Some(net_dir), &venue, 7, 7).unwrap();
+        writer.flush().unwrap();
+        assert!(out.plies_total > 0);
+        let mut checked = 0;
+        for p in std::fs::read_dir(&dir).unwrap() {
+            let p = p.unwrap().path();
+            if p.extension().and_then(|e| e.to_str()) != Some("safetensors") {
+                continue;
+            }
+            let shard = Shard::read(&p).unwrap();
+            for d in 0..shard.decisions.len() {
+                let n = shard.children_of(d).len();
+                assert!(n <= 6, "decision stored {n} children; filter is top-6");
+                let scores = &shard.child_scores[shard.children_of(d)];
+                let played = shard.decisions[d].played as usize;
+                assert_eq!(
+                    scores[played],
+                    *scores.iter().max().unwrap(),
+                    "played must be the argmax of the SERVED scores"
+                );
+                checked += 1;
+            }
+        }
+        assert!(checked > 0, "no decisions written");
         let _ = std::fs::remove_dir_all(&dir);
     }
 
