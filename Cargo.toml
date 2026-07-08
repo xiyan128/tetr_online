@@ -11,7 +11,7 @@ autobenches = false
 # Workspace root. The engine-agnostic core (engine + player + ai) lives in
 # `crates/tetr-core` (no Bevy); `crates/tetr-embed` adds the wasm embed component.
 [workspace]
-members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-nn", "crates/tetr-research"]
+members = ["crates/tetr-core", "crates/tetr-embed", "crates/tetr-nn", "crates/tetr-valuenet", "crates/tetr-research"]
 
 # One home for the shared package metadata; member crates inherit with
 # `version.workspace = true` etc.
@@ -48,6 +48,10 @@ workspace = true
 # pure Rust, no Bevy anywhere in its graph (the host adapts input itself via
 # `keyboard_input_from_keybinds`).
 tetr-core = { path = "crates/tetr-core" }
+# The deployed learned evaluator (single-board value net + CC2 reward). Loads
+# weights from disk at runtime, so it degrades to "bot omitted" where there is
+# no filesystem (wasm) or no model dir.
+tetr-valuenet = { path = "crates/tetr-valuenet" }
 bevy_asset_loader = "0.26.0"
 # Settings persistence (RON, via serde derives). `ron` is already in the graph
 # transitively through `bevy_asset`; both are size-cheap and let `GameSettings`

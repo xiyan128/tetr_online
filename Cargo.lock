@@ -5399,6 +5399,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "tetr-valuenet"
+version = "0.1.0"
+dependencies = [
+ "safetensors",
+ "serde_json",
+ "tetr-core",
+]
+
+[[package]]
 name = "tetr_online"
 version = "0.1.0"
 dependencies = [
@@ -5413,6 +5422,7 @@ dependencies = [
  "ron",
  "serde",
  "tetr-core",
+ "tetr-valuenet",
  "web-sys",
 ]
 

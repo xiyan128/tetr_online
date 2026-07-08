@@ -1,0 +1,17 @@
+[package]
+name = "tetr-valuenet"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "The game's deployed learned evaluator: a pure-Rust single-board value net (the wasm-ready ship kernel), scoring afterstates as a learned board Value + the CC2 per-move Reward. Separate from tetr-nn (the two-board research net) on purpose — different product, frozen to reproduce the shipped weights."
+
+[lints]
+workspace = true
+
+[dependencies]
+# The encoder reads SearchState; the net scores through tetr-core's Evaluator,
+# and reuses Cc2Evaluator for the per-move reward half.
+tetr-core = { path = "../tetr-core" }
+# Weights in (PyTorch-exported single-board value net).
+safetensors = "0.4"
+serde_json = "1"

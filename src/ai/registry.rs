@@ -333,6 +333,28 @@ impl Default for ModelRegistry {
             || tp_attack_model(16, 12),
         ));
 
+        // The deployed learned evaluator (tetr-valuenet): a single-board value
+        // net composed with the CC2 per-move reward. Weights are committed under
+        // models/conv_rb1 and added only if the dir loads — a stripped checkout,
+        // or the wasm target (no filesystem), simply omits the entry, exactly
+        // like any other optional model. `ValueNet` is cheap-ish to clone, so
+        // the factory forks a fresh `DeployNet` (its own scratch) per game.
+        if let Ok(value_net) = tetr_valuenet::ValueNet::load("models/conv_rb1") {
+            entries.push(ModelEntry::new(
+                "Learned NNUE",
+                "A learned board value net (16×32×32 conv, self-play \
+                 replay-buffer trained) composed with the CC2 attack reward — \
+                 the strongest stable learned evaluator. Pure-Rust, no GPU.",
+                move || {
+                    search_model(
+                        Box::new(BeamPlanner::new(BEAM_WIDTH)),
+                        Box::new(tetr_valuenet::DeployNet::new(value_net.clone())),
+                        SearchBudget::beam(BEAM_DEPTH),
+                    )
+                },
+            ));
+        }
+
         Self { entries }
     }
 }
