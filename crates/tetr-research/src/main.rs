@@ -113,6 +113,31 @@ enum Command {
         #[command(flatten)]
         rt: RuntimeArgs,
     },
+    /// Generate self-play decision shards (the datagen data plant). No `--net`
+    /// (CC2 eval) makes the round-0 BC corpus; a `--net <dir>` makes round-1+
+    /// self-play. Writes game-aligned shards to `--out`.
+    Datagen {
+        /// Net model dir for the leaf eval; omit for CC2 (round-0 BC corpus).
+        #[arg(long)]
+        net: Option<PathBuf>,
+        /// Beam width.
+        #[arg(long, default_value_t = 8)]
+        width: usize,
+        /// Beam depth.
+        #[arg(long, default_value_t = 5)]
+        depth: u8,
+        /// Number of games (seeds `base..base+games`).
+        #[arg(long, default_value_t = 100)]
+        games: u64,
+        /// First seed of the region (the caller owns disjointness).
+        #[arg(long)]
+        seeds: u64,
+        /// Output dir for shards.
+        #[arg(long)]
+        out: PathBuf,
+        #[command(flatten)]
+        venue: VenueArgs,
+    },
 }
 
 /// Default wall-clock budget for an instrument run: 6 hours, a safety cap on a
@@ -316,6 +341,70 @@ fn main() -> std::io::Result<()> {
                     )
                 },
             )
+        }
+        Command::Datagen {
+            net,
+            width,
+            depth,
+            games,
+            seeds,
+            out,
+            venue,
+        } => {
+            use tetr_research::datagen::{BeamConfig, datagen_game};
+            let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
+                Some(dir) => Box::new(
+                    tetr_nn::serve::NetEvaluator::load(dir)
+                        .unwrap_or_else(|e| die(&format!("net load {}: {e}", dir.display()))),
+                ),
+                None => Box::new(tetr_core::ai::Cc2Evaluator::new(
+                    tetr_core::ai::eval::Cc2Weights::attack_tuned(),
+                )),
+            };
+            let cfg = BeamConfig {
+                width,
+                depth,
+                transpose: true,
+            };
+            let venue_fmt = tetr_research::versus::VersusFormat {
+                max_plies: venue.max_plies,
+                rain_period: venue.rain,
+                sudden_death: true,
+            };
+            let mut writer = tetr_nn::shards::ShardWriter::create(&out, 1024)?;
+            let t0 = std::time::Instant::now();
+            let mut wld = [0u64; 3]; // A / B / draw
+            for i in 0..games {
+                let res = datagen_game(
+                    &mut writer,
+                    &*eval,
+                    cfg,
+                    &venue_fmt,
+                    seeds + i,
+                    (seeds + i) as u32,
+                )?;
+                let idx = match res.result {
+                    tetr_research::versus::VersusResult::AWins => 0,
+                    tetr_research::versus::VersusResult::BWins => 1,
+                    tetr_research::versus::VersusResult::Draw => 2,
+                };
+                wld[idx] += 1;
+            }
+            writer.flush()?;
+            let secs = t0.elapsed().as_secs_f64();
+            println!(
+                "{}",
+                json!({
+                    "experiment": "datagen",
+                    "eval": net.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "cc2".into()),
+                    "width": width, "depth": depth, "games": games, "seeds": seeds,
+                    "out": out.display().to_string(),
+                    "wall_secs": secs,
+                    "games_per_hr": games as f64 * 3600.0 / secs,
+                    "a_b_draw": wld,
+                })
+            );
+            Ok(())
         }
     }
 }

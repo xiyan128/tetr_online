@@ -1,0 +1,358 @@
+//! Self-play datagen driver (leapfrog map ticket T14).
+//!
+//! Plays mirror self-play under the sudden-death venue with a policy-guided beam,
+//! capturing every decision as a `DecisionRecord` (served children obs + the beam's
+//! per-root backed-up score = the completed-Q source) and writing game-aligned
+//! shards. The move actually applied is the beam's argmax (v0: no ε-sampling), so
+//! `played == argmax` and the capture is unambiguous — no offline reconstruction,
+//! no dependence on controller tie-break RNG.
+//!
+//! Same code, two uses: a **CC2** evaluator makes the round-0 BC corpus (CC2
+//! rollouts → shards); a **net** evaluator makes round-1+ self-play. The driver
+//! drives the `BeamPlanner` directly (to read `root_scores`) and applies the
+//! chosen placement via `placement_to_inputs` + a replay controller through the
+//! shared `versus_step_piece`, so the versus rules stay the engine's.
+
+use tetr_core::ai::eval::Evaluator;
+use tetr_core::ai::search::{hold_placements, think_to_completion};
+use tetr_core::ai::state::SearchState;
+use tetr_core::ai::{BeamPlanner, SearchBudget, placement_to_inputs};
+use tetr_core::engine::{Engine, EngineSnapshot, InputFrame};
+use tetr_core::player::PlayerController;
+use tetr_nn::obs::{OppCtx, encode};
+use tetr_nn::shards::{DecisionMeta, DecisionRecord, ShardWriter};
+
+use tetr_core::engine::EngineEvent;
+
+use crate::marathon::marathon_config;
+use crate::versus::{EndReason, VersusFormat, VersusResult, decide_versus, versus_step_piece};
+
+/// The engine's nominal idle timestep (mirrors the controller's `neutral()`).
+const NOMINAL_DT: f32 = 1.0 / 60.0;
+
+/// Step `engine` with idle frames (dt>0, so ARE/gravity advance) until a piece is
+/// active (spawn complete), returning its `SearchState`. `None` = the game topped
+/// out at spawn. A fresh engine has no active piece until stepped, and maneuver
+/// frames carry `dt==0`, so this is how a piece gets on the board before planning.
+fn advance_to_active(engine: &mut Engine) -> Option<SearchState> {
+    for _ in 0..600 {
+        if let Some(state) = SearchState::from_snapshot(&engine.snapshot()) {
+            return Some(state);
+        }
+        let idle = InputFrame {
+            dt_seconds: NOMINAL_DT,
+            ..InputFrame::default()
+        };
+        if engine
+            .step(idle)
+            .iter()
+            .any(|e| matches!(e, EngineEvent::GameOver { .. }))
+        {
+            return None;
+        }
+    }
+    None
+}
+
+/// Feeds a pre-computed input sequence one frame per poll; neutral once drained
+/// (the piece has already hard-dropped, so trailing polls are no-ops).
+struct ReplayController {
+    frames: std::vec::IntoIter<InputFrame>,
+}
+
+impl PlayerController for ReplayController {
+    fn poll(&mut self, _snapshot: &EngineSnapshot) -> InputFrame {
+        self.frames.next().unwrap_or_default()
+    }
+}
+
+/// Beam config for the datagen bot.
+#[derive(Clone, Copy)]
+pub struct BeamConfig {
+    pub width: usize,
+    pub depth: u8,
+    pub transpose: bool,
+}
+
+fn planner(cfg: BeamConfig) -> BeamPlanner {
+    if cfg.transpose {
+        BeamPlanner::transposing(cfg.width)
+    } else {
+        BeamPlanner::new(cfg.width)
+    }
+}
+
+/// One seat's decision: run the beam on `state`, capture the record (aligned to
+/// `hold_placements`), and apply the argmax placement to `engine` via a replay
+/// controller. Returns `(record, attack, topped)`; `record` is `None` only for a
+/// topped-out state (no legal placement).
+fn play_decision(
+    engine: &mut Engine,
+    beam: &mut BeamPlanner,
+    eval: &dyn Evaluator,
+    depth: u8,
+    state: &SearchState,
+    meta: DecisionMeta,
+    opp: &OppCtx,
+) -> (Option<DecisionRecord>, u32, bool) {
+    let placements = hold_placements(state);
+    if placements.is_empty() {
+        return (None, 0, true);
+    }
+    think_to_completion(beam, state, eval, SearchBudget::beam(depth));
+
+    // Per-root backed-up score, aligned to hold_placements order (root_scores
+    // yields roots in that order — same enumeration).
+    let mut scores = vec![i32::MIN; placements.len()];
+    for (i, (_p, s)) in beam.root_scores().enumerate() {
+        scores[i] = s;
+    }
+    let argmax = (0..scores.len()).max_by_key(|&i| scores[i]).unwrap_or(0);
+
+    // Served children: the resulting state after each placement, encoded as the
+    // net sees it (opponent-blind, matching the net arms).
+    let child_obs: Vec<_> = placements
+        .iter()
+        .map(|p| {
+            let mut child = state.clone();
+            child.commit_placement(p);
+            encode(&child, opp)
+        })
+        .collect();
+    let children: Vec<_> = child_obs
+        .iter()
+        .zip(&scores)
+        .map(|(o, &s)| (o, s))
+        .collect();
+    let record = DecisionRecord::from_served(
+        DecisionMeta {
+            played: argmax as u16,
+            argmax: argmax as u16,
+            ..meta
+        },
+        &children,
+    );
+
+    // Apply the argmax placement (== best plan) to the engine.
+    // Mirror the controller: render on the engine Board (BitBoard→array2d) from
+    // the search state's active pose — the pose the movegen path was recorded from.
+    let best = &placements[argmax];
+    let frames = placement_to_inputs(&state.board.to_array2d(), &state.active, best);
+    let mut replay = ReplayController {
+        frames: frames.into_iter(),
+    };
+    let (attack, topped) = versus_step_piece(engine, &mut replay);
+    (Some(record), attack, topped)
+}
+
+/// Play one mirror self-play game (both seats = the same beam config + eval),
+/// pushing every decision to `writer` and sealing the game with its outcome.
+/// Returns the outcome.
+pub fn datagen_game(
+    writer: &mut ShardWriter,
+    eval: &dyn Evaluator,
+    cfg: BeamConfig,
+    venue: &VersusFormat,
+    seed: u64,
+    game_id: u32,
+) -> std::io::Result<VersusOutcomeLite> {
+    let opp = OppCtx::default();
+    let mut engines = [
+        Engine::new(marathon_config(), seed),
+        Engine::new(marathon_config(), seed),
+    ];
+    let mut beams = [planner(cfg), planner(cfg)];
+    let mut attack = [0u32; 2];
+    let mut topped = [false; 2];
+    let mut ply_of = [0u16; 2];
+    let mut end_ply = venue.hard_cap();
+
+    'game: for ply in 0..venue.hard_cap() {
+        let period = venue.rain_period_at(ply);
+        if period > 0 && ply % period == period - 1 {
+            engines[0].queue_garbage(1);
+            engines[1].queue_garbage(1);
+        }
+        let order = if ply % 2 == 0 { [0usize, 1] } else { [1, 0] };
+        for &who in &order {
+            let Some(state) = advance_to_active(&mut engines[who]) else {
+                topped[who] = true;
+                end_ply = ply;
+                break 'game;
+            };
+            let meta = DecisionMeta {
+                game_id,
+                seat: who as u8,
+                ply: ply_of[who],
+                ..Default::default()
+            };
+            ply_of[who] += 1;
+            // Split borrows: eval is shared &dyn, engines/beams indexed distinctly.
+            let (engine_who, beam_who) = (&mut engines[who], &mut beams[who]);
+            let (record, atk, topout) =
+                play_decision(engine_who, beam_who, eval, cfg.depth, &state, meta, &opp);
+            if let Some(r) = record {
+                writer.push(r);
+            }
+            if atk > 0 {
+                engines[who ^ 1].queue_garbage(atk);
+                attack[who] += atk;
+            }
+            if topout {
+                topped[who] = true;
+                end_ply = ply;
+                break 'game;
+            }
+        }
+    }
+
+    let result = decide_versus(topped[0], topped[1], attack[0], attack[1]);
+    let end_reason = if topped[0] || topped[1] {
+        if venue.sudden_death && end_ply >= venue.max_plies {
+            EndReason::Escalation
+        } else {
+            EndReason::Topout
+        }
+    } else {
+        EndReason::TrueCap
+    };
+    let plies_total = ply_of[0] + ply_of[1];
+    let z_for_seat = |seat: u8| -> i8 {
+        match (seat, result) {
+            (0, VersusResult::AWins) | (1, VersusResult::BWins) => 1,
+            (0, VersusResult::BWins) | (1, VersusResult::AWins) => -1,
+            _ => 0,
+        }
+    };
+    writer.finish_game(z_for_seat, end_reason as u8, plies_total)?;
+
+    Ok(VersusOutcomeLite {
+        result,
+        end_reason,
+        plies_total,
+        attack,
+    })
+}
+
+/// The datagen game's outcome (the shard already has the per-decision z).
+#[derive(Debug, Clone, Copy)]
+pub struct VersusOutcomeLite {
+    pub result: VersusResult,
+    pub end_reason: EndReason,
+    pub plies_total: u16,
+    pub attack: [u32; 2],
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use tetr_core::ai::Cc2Evaluator;
+    use tetr_core::ai::eval::Cc2Weights;
+    use tetr_nn::shards::Shard;
+
+    /// End-to-end: a few CC2-beam mirror games write shards; read them back and
+    /// verify the pipeline (round-trip, per-decision children align, z ∈ {−1,0,1}).
+    /// Run: cargo test --release -p tetr-research --test-threads=1 datagen_writes_shards -- --nocapture
+    #[test]
+    fn datagen_writes_shards() {
+        let dir = std::env::temp_dir().join(format!("tetr-datagen-test-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let eval = Cc2Evaluator::new(Cc2Weights::attack_tuned());
+        let cfg = BeamConfig {
+            width: 6,
+            depth: 4,
+            transpose: true,
+        };
+        // Pressured venue so games end fast.
+        let venue = VersusFormat {
+            max_plies: 60,
+            rain_period: 4,
+            sudden_death: true,
+        };
+
+        let mut total_games = 0;
+        let mut total_decisions = 0;
+        {
+            let mut writer = ShardWriter::create(&dir, 64).expect("writer");
+            for seed in 1..=4u64 {
+                let out = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32)
+                    .expect("game writes");
+                total_games += 1;
+                assert!(out.plies_total > 0, "game {seed} made no moves");
+            }
+            writer.flush().expect("final flush");
+        }
+
+        // Read back every shard and validate structure.
+        let mut z_seen = [false; 3]; // -1, 0, +1
+        for shard_path in std::fs::read_dir(&dir).unwrap().filter_map(|e| {
+            let p = e.ok()?.path();
+            (p.extension()?.to_str()? == "safetensors").then_some(p)
+        }) {
+            let shard = Shard::read(&shard_path).expect("shard loads + checksum ok");
+            for (d_idx, meta) in shard.decisions.iter().enumerate() {
+                total_decisions += 1;
+                let n_children = shard.children_of(d_idx).len();
+                assert!(n_children > 0, "decision has no children");
+                assert!((meta.played as usize) < n_children, "played in range");
+                assert!((meta.argmax as usize) < n_children, "argmax in range");
+                assert!((-1..=1).contains(&meta.z), "z ∈ [-1,1]");
+                z_seen[(meta.z + 1) as usize] = true;
+            }
+        }
+        eprintln!(
+            "\ndatagen: {total_games} games, {total_decisions} decisions; z_seen(-1,0,+1)={z_seen:?}"
+        );
+        assert!(total_decisions > 0, "no decisions written");
+        // A decisive mirror set should show wins and losses (not all draws).
+        assert!(
+            z_seen[0] && z_seen[2],
+            "expected both win and loss z labels"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// Driver throughput at a realistic config (CC2, w8d5, full venue) — the
+    /// "measure the real bottleneck" step for T13. Reports games/hr so the driver
+    /// overhead can be compared to the raw duel rate.
+    /// Run: cargo test --release -p tetr-research datagen_throughput -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn datagen_throughput() {
+        use std::time::Instant;
+        let dir = std::env::temp_dir().join(format!("tetr-datagen-tput-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        let eval = Cc2Evaluator::new(Cc2Weights::attack_tuned());
+        let cfg = BeamConfig {
+            width: 8,
+            depth: 5,
+            transpose: true,
+        };
+        let venue = VersusFormat {
+            max_plies: 240,
+            rain_period: 8,
+            sudden_death: true,
+        };
+        let mut writer = ShardWriter::create(&dir, 1024).expect("writer");
+        let n = 8u64;
+        let t0 = Instant::now();
+        for seed in 1..=n {
+            let _ = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32).unwrap();
+        }
+        writer.flush().unwrap();
+        let secs = t0.elapsed().as_secs_f64();
+        let mut decisions = 0usize;
+        for p in std::fs::read_dir(&dir).unwrap() {
+            let p = p.unwrap().path();
+            if p.extension().and_then(|e| e.to_str()) == Some("safetensors") {
+                decisions += Shard::read(&p).unwrap().decisions.len();
+            }
+        }
+        eprintln!(
+            "\ndatagen CC2 w8d5 (single-thread): {n} games in {secs:.1}s = {:.0} games/hr, {decisions} decisions ({:.0} dec/s)",
+            n as f64 * 3600.0 / secs,
+            decisions as f64 / secs,
+        );
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+}
