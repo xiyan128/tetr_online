@@ -178,6 +178,10 @@ def main() -> None:
     corpus_dir, out_dir = sys.argv[1], Path(sys.argv[2])
     epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     live = len(sys.argv) > 4 and sys.argv[4] == "live"
+    init_dir = None
+    for a in sys.argv[4:]:
+        if a.startswith("--init="):
+            init_dir = a.split("=", 1)[1]
     if live:
         # ROUND-1 POSTMORTEM (2026-07-08): this mode is UNSOUND as implemented —
         # it re-mixes the stored (old) search Q with the TRAINEE's ever-changing
@@ -201,11 +205,42 @@ def main() -> None:
     import os
     device = torch.device(os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu"))
     model = TetrNet().to(device)
+    if init_dir:
+        # Fine-tune: load an exported checkpoint (round-2+ continues the SAME
+        # net rather than re-learning from scratch on the replay mix).
+        from safetensors.torch import load_file as load_st
+
+        sd = load_st(str(Path(init_dir) / "net_v2.safetensors"))
+        renamed = {}
+        conv_i = 0
+        for k, v in sd.items():
+            if k.startswith("conv"):
+                # conv1.weight -> convs.0.weight, conv2 -> convs.2, conv3 -> convs.4
+                n = int(k[4]) - 1
+                renamed[f"convs.{2 * n}.{k.split('.', 1)[1]}"] = v
+                conv_i += 1
+            else:
+                renamed[k] = v
+        missing, unexpected = model.load_state_dict(renamed, strict=False)
+        missing = [m for m in missing if not m.startswith("feat_")]
+        assert not unexpected, f"unexpected keys: {unexpected}"
+        assert not missing, f"missing keys: {missing}"
+        print(f"initialized from {init_dir}")
     t0 = time.time()
-    mean, std = whitening_stats(train_paths)
-    model.feat_mean.copy_(torch.as_tensor(mean))
-    model.feat_std.copy_(torch.as_tensor(std))
-    print(f"whitening from train children [{time.time()-t0:.0f}s]")
+    if init_dir:
+        # Fine-tune keeps the CHECKPOINT's whitening (recomputing from the new
+        # mix would shift the input distribution under the loaded weights).
+        import json
+
+        cfg = json.loads((Path(init_dir) / "config.json").read_text())
+        model.feat_mean.copy_(torch.as_tensor(cfg["feature_mean"], dtype=torch.float32))
+        model.feat_std.copy_(torch.as_tensor(cfg["feature_std"], dtype=torch.float32))
+        print("whitening from checkpoint config")
+    else:
+        mean, std = whitening_stats(train_paths)
+        model.feat_mean.copy_(torch.as_tensor(mean))
+        model.feat_std.copy_(torch.as_tensor(std))
+        print(f"whitening from train children [{time.time()-t0:.0f}s]")
 
     opt = torch.optim.AdamW(model.parameters(), lr=LR)
     rng = np.random.default_rng(SEED)
