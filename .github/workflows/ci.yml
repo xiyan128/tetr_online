@@ -26,6 +26,10 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        # Model weights (*.safetensors) live in Git LFS; fetch them so the
+        # tetr-nn / tetr-valuenet golden tests read real weights, not pointers.
+        with:
+          lfs: true
 
       # Reads rust-toolchain.toml for the channel + targets, and caches builds.
       - name: Install Rust (pinned toolchain)
