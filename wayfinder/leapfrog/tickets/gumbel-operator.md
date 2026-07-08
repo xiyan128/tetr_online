@@ -2,7 +2,7 @@
 id: T12
 title: Build the minimal Gumbel expectimax search vehicle (probe-grade)
 labels: [wayfinder:prototype]
-status: open
+status: closed
 assignee:
 blocked-by: []
 ---
@@ -51,3 +51,13 @@ The `guided:` arm remains valuable as a **strength-per-width** instrument (does 
 ## Strength receipt (2026-07-08): the m12 restriction costs NOTHING at matched width
 
 `guided:round0@m12w8d5` vs `beam:round0@w8d5` (same net leaf, seeds 850M, 6 CRN pairs): **6-6-0 dead even** (end reasons 7 topout / 5 escalation). The policy top-12 contains everything the full ~68-root beam needed — Gate-0a's coverage finding confirmed at system level, with the search in the loop. The guided vehicle loses no strength; the action-indexed head will make the SAME restriction ~fan-factor cheaper. Mechanism validated; the remaining vehicle work is the 104-slot head.
+
+## Resolution — the guided vehicle is BUILT, FAST, and STRENGTH-NEUTRAL (T12 v1 complete)
+
+Final receipts (2026-07-08, round0_v3 = the slot-head net @ epoch 1):
+
+- **Throughput:** guided net datagen (`--net v3 --topm 12`, w8d5) = **1,370 games/hr single-thread** — ~14× the full net beam (<100/hr) and ~7× the ≥200/hr campaign floor, WITHOUT the ANE port. The action-indexed head is the eval-count lever, exactly as the measurement predicted: one parent forward ranks all ~68 placements; only the top-12 are ever committed+evaluated, at every node.
+- **Strength:** `guided:v3@m12w8d5` vs `beam:v3@w8d5` = **8-8-0 dead even** (16 games, seeds 910M) — matching the per-child variant's 6-6. The restriction is free at matched width; the prior concentrates everything the full fan carried.
+- Slot head learns cleanly (holdout sCE 21.8 → 4.24 in 2 epochs) alongside unchanged policy/value trajectories.
+
+**Status:** the deployed-vehicle seed exists (`guided:` arm), the R4 fix is in motion (the vehicle consumes the policy prior), and round-1 self-play datagen is running on it. Deferred to post-round-1: Sequential-Halving sims, survival-CVaR chance backup (still SPEC_DECAY in v1 — an allowed-during-training crutch that must be gone by the showdown per the purity contract), the ANE per-eval fix (multiplicative, T13).
