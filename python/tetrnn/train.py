@@ -61,6 +61,7 @@ def run_batch(
     live_logits: bool = False,
     boot_value: bool = False,
     ssl: bool = False,
+    policy_heads: bool = True,
 ) -> tuple[torch.Tensor, dict]:
     """Forward one batch of decisions from one shard; return (loss, metrics)."""
     groups, rows, opp_rows, played_local, zc = [], [], [], [], []
@@ -175,7 +176,10 @@ def run_batch(
             z_hat = (p[:, 0] - p[:, 2]).detach().cpu().numpy()
             m["z_hat_std"] = float(np.std(z_hat))
 
-    return policy_ce + value_ce + slot_ce + ssl_bce, m
+    total = value_ce + ssl_bce
+    if policy_heads:
+        total = total + policy_ce + slot_ce
+    return total, m
 
 
 def shard_targets(shard: Shard) -> list[np.ndarray]:
@@ -211,6 +215,9 @@ def main() -> None:
         if a == "--boot-value":
             boot_value = True
     ssl = "--ssl" in sys.argv[4:]
+    a3 = "--a3" in sys.argv[4:]
+    if a3:
+        print("A3 per-source heads: r1 shards train all heads; r0 shards train VALUE(+ssl) only")
     if ssl:
         print("SSL aux: trunk reconstructs the own plane (BCE, all child rows)")
     if boot_value:
@@ -288,6 +295,7 @@ def main() -> None:
         for sp in shard_order:
             shard = read_shard(str(sp))
             targets = shard_targets(shard)
+            ph = not (a3 and "shard-r0" in str(sp))
             for b in shard_batches(shard, rng):
                 loss, m = run_batch(
                     model,
@@ -299,6 +307,7 @@ def main() -> None:
                     live_logits=live,
                     boot_value=boot_value,
                     ssl=ssl,
+                    policy_heads=ph,
                 )
                 opt.zero_grad()
                 loss.backward()
