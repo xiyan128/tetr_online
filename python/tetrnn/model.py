@@ -64,6 +64,10 @@ class TetrNet(nn.Module):
         # Forwarded on the PARENT state; per-child heads cost one forward per
         # child, which is exactly what a search filter must avoid.
         self.slot_head = nn.Linear(TRUNK, N_SLOTS)
+        # SSL board-reconstruction aux (TRAINING-ONLY, never exported): forces
+        # the trunk to retain per-state board detail — the value head's
+        # effective-N densifier (states, not games).
+        self.ssl_head = nn.Linear(TRUNK, BOARD_H * BOARD_W)
         # Feature whitening, applied in the forward and exported to config.json
         # so `net.rs` whitens identically. Trained stats overwrite these.
         self.register_buffer("feat_mean", torch.zeros(FEATURE_LEN))
@@ -91,6 +95,14 @@ class TetrNet(nn.Module):
         """The deployed forward, matching `net.rs`: wdl+policy raw, aux tanh'd."""
         raw = self.head2(self.trunk(own, opp, feats))
         return torch.cat([raw[:, :4], torch.tanh(raw[:, 4:5])], dim=1)
+
+    def serve_and_ssl(self, own: Plane, opp: Plane, feats: Feats):
+        """One trunk pass -> (deployed heads, ssl reconstruction logits).
+        Trainer-only (the SSL head is not part of the export contract)."""
+        tr = self.trunk(own, opp, feats)
+        raw = self.head2(tr)
+        heads = torch.cat([raw[:, :4], torch.tanh(raw[:, 4:5])], dim=1)
+        return heads, self.ssl_head(tr)
 
     @jaxtyped(typechecker=beartype)
     def serve_slots(self, own: Plane, opp: Plane, feats: Feats) -> SlotLogits:

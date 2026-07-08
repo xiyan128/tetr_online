@@ -60,6 +60,7 @@ def run_batch(
     metrics: bool,
     live_logits: bool = False,
     boot_value: bool = False,
+    ssl: bool = False,
 ) -> tuple[torch.Tensor, dict]:
     """Forward one batch of decisions from one shard; return (loss, metrics)."""
     groups, rows, opp_rows, played_local, zc = [], [], [], [], []
@@ -77,7 +78,13 @@ def run_batch(
     own = torch.as_tensor(unpack_plane(shard.child_own[rows]), device=device).unsqueeze(1)
     opp = torch.as_tensor(unpack_plane(shard.opp_plane[opp_rows]), device=device).unsqueeze(1)
     feats = torch.as_tensor(shard.child_feats[rows], device=device)
-    heads = model.serve(own, opp, feats)
+    ssl_bce = torch.zeros((), device=device)
+    if ssl:
+        heads, ssl_logits = model.serve_and_ssl(own, opp, feats)
+        target_bits = own.squeeze(1).flatten(1)
+        ssl_bce = torch.nn.functional.binary_cross_entropy_with_logits(ssl_logits, target_bits)
+    else:
+        heads = model.serve(own, opp, feats)
 
     # Policy: grouped log-softmax over each decision's children.
     logit = heads[:, 3]
@@ -152,6 +159,7 @@ def run_batch(
         "policy_ce": float(policy_ce.detach()),
         "value_ce": float(value_ce.detach()),
         "slot_ce": float(slot_ce.detach()),
+        "ssl_bce": float(ssl_bce.detach()),
     }
     if metrics:
         # top-1 agreement with the search argmax; z_hat spread (start-gate).
@@ -167,7 +175,7 @@ def run_batch(
             z_hat = (p[:, 0] - p[:, 2]).detach().cpu().numpy()
             m["z_hat_std"] = float(np.std(z_hat))
 
-    return policy_ce + value_ce + slot_ce, m
+    return policy_ce + value_ce + slot_ce + ssl_bce, m
 
 
 def shard_targets(shard: Shard) -> list[np.ndarray]:
@@ -202,6 +210,9 @@ def main() -> None:
             init_dir = a.split("=", 1)[1]
         if a == "--boot-value":
             boot_value = True
+    ssl = "--ssl" in sys.argv[4:]
+    if ssl:
+        print("SSL aux: trunk reconstructs the own plane (BCE, all child rows)")
     if boot_value:
         print("value bootstrap: z_hat -> tanh(played root score / Z_SCALE) + z CE")
     if live:
@@ -244,7 +255,9 @@ def main() -> None:
             else:
                 renamed[k] = v
         missing, unexpected = model.load_state_dict(renamed, strict=False)
-        missing = [m for m in missing if not m.startswith("feat_")]
+        missing = [
+            m for m in missing if not (m.startswith("feat_") or m.startswith("ssl_head"))
+        ]
         assert not unexpected, f"unexpected keys: {unexpected}"
         assert not missing, f"missing keys: {missing}"
         print(f"initialized from {init_dir}")
@@ -285,6 +298,7 @@ def main() -> None:
                     metrics=False,
                     live_logits=live,
                     boot_value=boot_value,
+                    ssl=ssl,
                 )
                 opt.zero_grad()
                 loss.backward()
@@ -309,6 +323,7 @@ def main() -> None:
                         metrics=True,
                         live_logits=live,
                         boot_value=boot_value,
+                        ssl=ssl,
                     )
                     for k, v in m.items():
                         ho.setdefault(k, []).append(v)
