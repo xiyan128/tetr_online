@@ -44,3 +44,11 @@ Run A (same mix, STATIC targets) ALSO collapsed 0-64 → live-logit mode was NOT
 **Record corrections:** (1) the "live-logit unsound" theory is UNTESTED (stays quarantined pending a clean A/B on uncorrupted data — the frozen-generator-logit form is still the right design either way); (2) the z_std collapse read is also confounded by the corrupt data — the VALUE-COLLAPSE stop may not fire on a clean round-1; re-measure. (3) the ~5σ seat skew may have been the misplay artifact — the parity fix stays (harmless) but the skew needs a clean re-read.
 
 **Round-1 RERUN (clean): fresh corpus seeds 2010000 (workers 6) → static-target retrain → gate.**
+
+## Round-1 CLEAN verdict: H0Accepted — a real negative result
+
+Clean rerun (fixed driver, fair seat split, healthy training, z_std 0.151 ≥ gate): promotion gate **H0Accepted at 36 pairs (llr −2.95; v3 swept 16 pairs to 2)**; policy-vs-policy 5-59. **The loop as configured does not compound.** The corrupted-run artifacts are all explained (skew gone, value gate passes), so this verdict stands.
+
+**Structural diagnosis (from all receipts):** the venue is strength-mismatched for self-play. Rain-8 was calibrated on CC2-strength bots (~292 decisions/game mirror); v3-guided mirror games last ~72 — the venue is effectively ~4× harsher relative to the agent, so self-play data concentrates on early-game quick-death states with compressed skill expression (echoes the graveyard's escalation-attenuation and mirror-decisiveness facts). Secondary suspects: subset-group policy targets lose full-set contrast; from-scratch-on-mix discards the r0 optimum.
+
+**Round-2 (ONE change, pre-registered): fine-tune from the round0_v3 checkpoint** (`--init`) instead of from-scratch — the standard AZ loop form and the direct counter to "from-scratch-on-mix < from-scratch-on-r0". Preflight: 1 epoch + a cheap policy duel before the full round. Queued for round-3+ if round-2 fails: (a) venue curriculum for datagen (weaker rain, matched to agent strength; evaluation venue stays frozen), (b) full-set contrast negatives, (c) A3 per-source loss weighting, (d) champion-pinned pool.
