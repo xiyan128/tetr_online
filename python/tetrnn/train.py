@@ -179,7 +179,13 @@ def main() -> None:
     epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
     live = len(sys.argv) > 4 and sys.argv[4] == "live"
     if live:
-        print("live-logit targets (round-1 reanalyze form)")
+        # ROUND-1 POSTMORTEM (2026-07-08): this mode is UNSOUND as implemented —
+        # it re-mixes the stored (old) search Q with the TRAINEE's ever-changing
+        # logits each batch, a self-amplifying runaway (policy collapsed 0-64 vs
+        # its round-0 parent; gate H0Accepted llr -2.97). The sound reanalyze
+        # form needs the GENERATOR net's frozen logits (store child_gen_logit in
+        # shards at datagen time). Kept only as evidence; do not use for rounds.
+        print("WARNING: live-logit mode is UNSOUND (round-1 postmortem) — training anyway for A/B use only")
 
     paths = shard_paths(corpus_dir)
     assert paths, f"no shards in {corpus_dir}"
