@@ -58,6 +58,7 @@ def run_batch(
     dec_idx: np.ndarray,
     device: torch.device,
     metrics: bool,
+    live_logits: bool = False,
 ) -> tuple[torch.Tensor, dict]:
     """Forward one batch of decisions from one shard; return (loss, metrics)."""
     groups, rows, opp_rows, played_local, zc = [], [], [], [], []
@@ -85,8 +86,25 @@ def run_batch(
     ex = torch.exp(logit - gmax[groups_t])
     gsum = torch.zeros(n_groups, device=device).scatter_add_(0, groups_t, ex)
     logp = logit - gmax[groups_t] - torch.log(gsum[groups_t])
+    if live_logits:
+        # Round-1 reanalyze form: pi' = softmax(CURRENT logits + c*qnorm),
+        # logits detached (the target must not chase its own gradient).
+        lg_np = logit.detach().cpu().numpy()
+        live_targets: list[np.ndarray] = []
+        pos = 0
+        for d in dec_idx:
+            n_ch = int(shard.child_offset[d + 1]) - int(shard.child_offset[d])
+            sc = shard.child_score[shard.children_of(int(d))]
+            live_targets.append(
+                completed_q_target(sc, logits=lg_np[pos : pos + n_ch])
+            )
+            pos += n_ch
+        batch_targets = {int(d): t for d, t in zip(dec_idx, live_targets)}
+    else:
+        batch_targets = {int(d): targets[d] for d in dec_idx}
     pi = torch.as_tensor(
-        np.concatenate([targets[d] for d in dec_idx]).astype(np.float32), device=device
+        np.concatenate([batch_targets[int(d)] for d in dec_idx]).astype(np.float32),
+        device=device,
     )
     policy_ce = -(pi * logp).sum() / n_groups
 
@@ -106,9 +124,10 @@ def run_batch(
         slot_logits = model.serve_slots(p_own, p_opp, p_feats)
         slot_target = np.zeros((n_groups, N_SLOTS), dtype=np.float32)
         for g, d in enumerate(dec_idx):
+            t = batch_targets[int(d)]
             lo = int(shard.child_offset[d])
-            slots = shard.child_slot[lo : lo + len(targets[d])]
-            np.add.at(slot_target[g], slots, targets[d].astype(np.float32))
+            slots = shard.child_slot[lo : lo + len(t)]
+            np.add.at(slot_target[g], slots, t.astype(np.float32))
         st = torch.as_tensor(slot_target, device=device)
         slot_ce = -(st * torch.log_softmax(slot_logits, dim=1)).sum(dim=1).mean()
 
@@ -158,6 +177,9 @@ def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
 def main() -> None:
     corpus_dir, out_dir = sys.argv[1], Path(sys.argv[2])
     epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
+    live = len(sys.argv) > 4 and sys.argv[4] == "live"
+    if live:
+        print("live-logit targets (round-1 reanalyze form)")
 
     paths = shard_paths(corpus_dir)
     assert paths, f"no shards in {corpus_dir}"
@@ -191,7 +213,9 @@ def main() -> None:
             shard = read_shard(str(sp))
             targets = shard_targets(shard)
             for b in shard_batches(shard, rng):
-                loss, m = run_batch(model, shard, targets, b, device, metrics=False)
+                loss, m = run_batch(
+                    model, shard, targets, b, device, metrics=False, live_logits=live
+                )
                 opt.zero_grad()
                 loss.backward()
                 opt.step()
@@ -206,7 +230,9 @@ def main() -> None:
                 shard = read_shard(sp)
                 targets = shard_targets(shard)
                 for b in shard_batches(shard, None):
-                    _, m = run_batch(model, shard, targets, b, device, metrics=True)
+                    _, m = run_batch(
+                        model, shard, targets, b, device, metrics=True, live_logits=live
+                    )
                     for k, v in m.items():
                         ho.setdefault(k, []).append(v)
         hom = {k: float(np.mean(v)) for k, v in ho.items()}
