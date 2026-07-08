@@ -68,3 +68,9 @@ Value-isolation duels (`value:` arm, d1 argmax — the clean value-head read, 64
 - Round-3 policy also dipped (30-34 vs round-2's 40-24) — shared-trunk gradients from the bad value target.
 
 **The compounding scoreboard after three rounds:** policy fine-tuning extracts real signal (40-24); the value head is the bottleneck and NO variant has improved it (round-0-pure v3 value is best-in-class); vehicle gates split (search washes out small deltas). **Round-4 (ONE change vs round-2): the SSL board-reconstruction aux head** — the design freeze's prescribed value-signal densifier, scale-free by construction (reconstructs the own plane; no score units anywhere). Also queued: `eval_scale` metadata in shards (fixes the bootstrap soundly); larger self-play volume (5-10k games now cheap).
+
+## Round-5 verdict: per-SHARD A3 masking = catastrophic interference (0-64 both heads)
+
+Long runs of policy-free gradients (r0 shards, 64% of data) let the shared trunk drift from the policy heads (train sCE exploded to 53; top1 0.098). The inherited A3 mixed per-ROW within 50/50 batches — per-shard sequential masking is not the same thing. The sound form needs cross-shard batch interleaving in the streaming trainer (queued, fresh build).
+
+**Round ladder so far (all single-variable, all receipted):** (1) from-scratch/mix: policy 5-59. (2) fine-tune: policy 40-24 ✓, value 12-52 ✗, gate H0-split. (3) +boot-value: value 2-62 (C6 scale trap). (4) **+SSL: policy 34-30 ✓, value 23-41 (best fine-tuned value) — gate pending.** (5) +A3-by-shard: 0-64 (interference). Running round-4's gate now.
