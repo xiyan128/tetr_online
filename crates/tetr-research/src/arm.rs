@@ -313,6 +313,56 @@ pub fn policy_top_m(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
     })
 }
 
+/// Build the SLOT-ranker [`RootFilter`]: ONE forward of the parent state
+/// ranks every placement via the action-indexed head (obs::placement_slot) —
+/// ~one eval per NODE instead of one per child, the guided vehicle's
+/// throughput lever. Live-ness is not known without committing, so dead
+/// placements are not excluded here; the beam's own scoring handles them.
+pub fn slot_top_m(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
+    let net = Net::load(dir).expect("guided-beam model dir loads");
+    assert!(
+        net.has_slot_head(),
+        "model has no slot head; retrain/export with slots"
+    );
+    let mut scratch = Scratch::default();
+    let opp = OppCtx::default();
+    let opp_emb = net
+        .embed_boards(&[&opp.board], &mut scratch)
+        .pop()
+        .expect("one plane in, one embedding out");
+    let shared = std::sync::Mutex::new((net, scratch));
+    Box::new(move |state: &SearchState, placements: Vec<Placement>| {
+        let obs = encode(state, &opp);
+        let mut guard = shared.lock().expect("filter net lock");
+        let (net, scratch) = &mut *guard;
+        let slots = net
+            .forward_slots(&[(&obs.own_board, &obs.features)], &opp_emb, scratch)
+            .pop()
+            .expect("one state in, one slot row out");
+        let mut ranked: Vec<(usize, f32)> = placements
+            .iter()
+            .enumerate()
+            .map(|(i, p)| (i, slots[tetr_nn::obs::placement_slot(p) as usize]))
+            .collect();
+        ranked.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
+        let mut keep: Vec<usize> = ranked.into_iter().take(m).map(|(i, _)| i).collect();
+        keep.sort_unstable();
+        keep.into_iter().map(|i| placements[i].clone()).collect()
+    })
+}
+
+/// The best available guided-beam ranker for a model dir: the cheap slot
+/// ranker when the export carries the action head, else the per-child policy
+/// ranker (correct but ~one forward per child — root-restriction only in
+/// effect, since interior nodes pay the same forward the eval would).
+pub fn guided_filter(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
+    if Net::load(dir).map(|n| n.has_slot_head()).unwrap_or(false) {
+        slot_top_m(dir, m)
+    } else {
+        policy_top_m(dir, m)
+    }
+}
+
 impl Mind for PolicyMind {
     fn reroot(&mut self, state: &SearchState, _eval: &dyn Evaluator, _max_depth: u8) {
         let placements = hold_placements(state);

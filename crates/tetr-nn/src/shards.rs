@@ -57,6 +57,10 @@ pub struct DecisionRecord {
     pub meta: DecisionMeta,
     /// Packed opponent plane (from the decision's [`Obs`]).
     pub opp_plane: [u8; PACKED_PLANE],
+    /// The PARENT state's own plane + features (what an action-indexed policy
+    /// head forwards — one parent forward ranks all placements by slot).
+    pub parent_own: [u8; PACKED_PLANE],
+    pub parent_feats: [f32; FEATURE_LEN],
     /// Per child: packed own plane, served features, backed-up root score,
     /// action slot ([`crate::obs::placement_slot`]).
     pub children: Vec<([u8; PACKED_PLANE], [f32; FEATURE_LEN], i32, u8)>,
@@ -65,7 +69,7 @@ pub struct DecisionRecord {
 impl DecisionRecord {
     /// Build from served observations (one per child, sharing the decision's
     /// opponent plane) + the search's per-child scores.
-    pub fn from_served(meta: DecisionMeta, children: &[(&Obs, i32, u8)]) -> Self {
+    pub fn from_served(meta: DecisionMeta, parent: &Obs, children: &[(&Obs, i32, u8)]) -> Self {
         let opp_plane = children
             .first()
             .map(|(o, _, _)| pack_plane(&o.opp_board))
@@ -73,6 +77,8 @@ impl DecisionRecord {
         Self {
             meta,
             opp_plane,
+            parent_own: pack_plane(&parent.own_board),
+            parent_feats: parent.features,
             children: children
                 .iter()
                 .map(|(o, score, slot)| (pack_plane(&o.own_board), o.features, *score, *slot))
@@ -157,6 +163,8 @@ impl ShardWriter {
 
         let mut decision = Vec::with_capacity(d * 8);
         let mut opp_plane = Vec::with_capacity(d * PACKED_PLANE);
+        let mut parent_own = Vec::with_capacity(d * PACKED_PLANE);
+        let mut parent_feats: Vec<f32> = Vec::with_capacity(d * FEATURE_LEN);
         let mut child_offset: Vec<i32> = Vec::with_capacity(d + 1);
         let mut child_own = Vec::with_capacity(c * PACKED_PLANE);
         let mut child_feats: Vec<f32> = Vec::with_capacity(c * FEATURE_LEN);
@@ -176,6 +184,8 @@ impl ShardWriter {
                 m.plies_total as i32,
             ]);
             opp_plane.extend_from_slice(&r.opp_plane);
+            parent_own.extend_from_slice(&r.parent_own);
+            parent_feats.extend_from_slice(&r.parent_feats);
             for (own, feats, score, slot) in &r.children {
                 child_own.extend_from_slice(own);
                 child_feats.extend_from_slice(feats);
@@ -199,6 +209,18 @@ impl ShardWriter {
                 safetensors::Dtype::U8,
                 vec![d, PACKED_PLANE],
                 opp_plane,
+            ),
+            (
+                "parent_own",
+                safetensors::Dtype::U8,
+                vec![d, PACKED_PLANE],
+                parent_own,
+            ),
+            (
+                "parent_feats",
+                safetensors::Dtype::F32,
+                vec![d, FEATURE_LEN],
+                f32_bytes(&parent_feats),
             ),
             (
                 "child_offset",
@@ -297,6 +319,8 @@ pub fn shard_paths(dir: impl AsRef<Path>) -> io::Result<Vec<PathBuf>> {
 pub struct Shard {
     pub decisions: Vec<DecisionMeta>,
     pub opp_planes: Vec<[u8; PACKED_PLANE]>,
+    pub parent_own: Vec<[u8; PACKED_PLANE]>,
+    pub parent_feats: Vec<[f32; FEATURE_LEN]>,
     child_offset: Vec<i32>,
     pub child_own: Vec<[u8; PACKED_PLANE]>,
     pub child_feats: Vec<[f32; FEATURE_LEN]>,
@@ -330,6 +354,8 @@ impl Shard {
         for name in [
             "decision",
             "opp_plane",
+            "parent_own",
+            "parent_feats",
             "child_offset",
             "child_own",
             "child_feats",
@@ -379,9 +405,22 @@ impl Shard {
                 f
             })
             .collect();
+        let feats_rows = |b: &[u8]| -> Vec<[f32; FEATURE_LEN]> {
+            b.chunks_exact(4 * FEATURE_LEN)
+                .map(|row| {
+                    let mut f = [0.0f32; FEATURE_LEN];
+                    for (i, c) in row.chunks_exact(4).enumerate() {
+                        f[i] = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    }
+                    f
+                })
+                .collect()
+        };
         Ok(Self {
             decisions,
             opp_planes: planes(raw("opp_plane")?),
+            parent_own: planes(raw("parent_own")?),
+            parent_feats: feats_rows(raw("parent_feats")?),
             child_offset: i32s(raw("child_offset")?),
             child_own: planes(raw("child_own")?),
             child_feats,
@@ -440,6 +479,7 @@ mod tests {
             .enumerate()
             .map(|(c, (o, s))| (o, *s, c as u8))
             .collect();
+        let parent = obs_with(gid as usize + 991, 7.25);
         DecisionRecord::from_served(
             DecisionMeta {
                 game_id: gid,
@@ -449,6 +489,7 @@ mod tests {
                 argmax: (n_children - 1) as u16,
                 ..Default::default()
             },
+            &parent,
             &refs,
         )
     }

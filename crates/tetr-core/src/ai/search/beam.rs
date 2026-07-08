@@ -152,12 +152,14 @@ pub struct BeamPlanner {
     /// recorded `new()` baselines stay byte-identical; TP variants are new
     /// registered names.
     transpose: bool,
-    /// Optional root pre-filter: given the decision state and its full legal
-    /// placement set, returns the subset this run may search (e.g. a learned
-    /// policy's top-m — the guided-beam vehicle). `None` = every root, byte-
-    /// identical to the recorded baselines. Must be deterministic per state
-    /// (re-rooting at the same state assumes the same roots).
-    root_filter: Option<RootFilter>,
+    /// Optional placement pre-filter applied at EVERY expansion (the root seed
+    /// and each interior/speculative node): given the node's state and its full
+    /// legal placement set, returns the subset this search may commit+evaluate
+    /// (e.g. a learned policy's top-m — the guided-beam vehicle; a cheap
+    /// action-indexed ranker makes this one forward per NODE). `None` = every
+    /// placement, byte-identical to the recorded baselines. Must be
+    /// deterministic per state (re-rooting assumes the same roots).
+    placement_filter: Option<RootFilter>,
     /// In-flight search, `None` between decisions. Reset on a new root state.
     run: Option<BeamRun>,
 }
@@ -172,7 +174,7 @@ impl BeamPlanner {
             beam_width: beam_width.max(1),
             speculate: true,
             transpose: false,
-            root_filter: None,
+            placement_filter: None,
             run: None,
         }
     }
@@ -200,8 +202,22 @@ impl BeamPlanner {
     /// that returns an empty set is ignored for that state (all roots search)
     /// — restriction must never manufacture a resignation.
     pub fn with_root_filter(mut self, filter: RootFilter) -> Self {
-        self.root_filter = Some(filter);
+        self.placement_filter = Some(filter);
         self
+    }
+
+    /// Apply the placement filter (if any) to a node's legal placements.
+    /// An empty filter result is ignored — restriction must never manufacture
+    /// a resignation or silently terminate a live branch.
+    fn filtered_placements(filter: Option<&RootFilter>, state: &SearchState) -> Vec<Placement> {
+        let all = hold_placements(state);
+        match filter {
+            Some(f) if !all.is_empty() => {
+                let picked = f(state, all.clone());
+                if picked.is_empty() { all } else { picked }
+            }
+            _ => all,
+        }
     }
 
     /// The current run's per-root backed-up scores: each ply-1 placement paired
@@ -221,16 +237,7 @@ impl BeamPlanner {
     /// legal placement) seeds an *empty* run — the fingerprint still records it,
     /// so re-rooting at the same dead state stays a no-op.
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> BeamRun {
-        let roots = {
-            let all = hold_placements(state);
-            match &self.root_filter {
-                Some(f) if !all.is_empty() => {
-                    let picked = f(state, all.clone());
-                    if picked.is_empty() { all } else { picked }
-                }
-                _ => all,
-            }
-        };
+        let roots = Self::filtered_placements(self.placement_filter.as_ref(), state);
 
         // Fork + transition each root child in canonical order, through the shared
         // fork → classify pre-lock → commit helper. Root children score with the
@@ -288,6 +295,7 @@ impl BeamPlanner {
     /// Expand one parent frontier node into staged, already-scored next-generation
     /// nodes. The caller owns the node meter; this function only performs the work.
     fn expand_parent(
+        filter: Option<&RootFilter>,
         parent: &BeamNode,
         root_best: &mut [i32],
         nodes: &mut Vec<Option<BeamNode>>,
@@ -308,7 +316,7 @@ impl BeamPlanner {
             // terminal node contributes no children; its `root_best` was already
             // recorded when it entered the frontier, so the back-up keeps it.
             if speculate {
-                Self::expand_speculative(parent, &mut pending, eval);
+                Self::expand_speculative(filter, parent, &mut pending, eval);
             }
         } else {
             // Concrete: every placement of the parent's active piece. The trailing
@@ -319,7 +327,7 @@ impl BeamPlanner {
                 combo: parent.state.combo,
                 b2b: parent.state.b2b,
             };
-            for placement in hold_placements(&parent.state) {
+            for placement in Self::filtered_placements(filter, &parent.state) {
                 let (child, lock, t_spin) = commit_child(&parent.state, &placement);
                 pending.push(PendingChild {
                     state: child,
@@ -486,11 +494,12 @@ impl BeamPlanner {
     /// No RNG, no expectimax average — every bag-legal piece is enumerated and
     /// beam-width truncation prunes the fan-out, keeping the planner deterministic.
     fn expand_speculative(
+        filter: Option<&RootFilter>,
         parent: &BeamNode,
         pending: &mut Vec<PendingChild>,
         eval: &dyn Evaluator,
     ) {
-        let placements = hold_placements(&parent.state);
+        let placements = Self::filtered_placements(filter, &parent.state);
         let child_weight = parent.spec_weight * SPEC_DECAY;
         let parent_ctx = EvalContext {
             combo: parent.state.combo,
@@ -596,6 +605,7 @@ impl Mind for BeamPlanner {
             while spent < quantum && generation.next_parent < generation.parents.len() {
                 let parent = &generation.parents[generation.next_parent];
                 Self::expand_parent(
+                    self.placement_filter.as_ref(),
                     parent,
                     &mut generation.root_best,
                     &mut generation.nodes,

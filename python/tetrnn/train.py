@@ -28,7 +28,7 @@ import numpy as np
 import torch
 
 from .export import export
-from .model import TetrNet
+from .model import N_SLOTS, TetrNet
 from .shards import Shard, read_shard, shard_paths, unpack_plane
 from .targets import completed_q_target, n_eff
 
@@ -96,7 +96,27 @@ def run_batch(
     z_t = torch.as_tensor(np.asarray(zc), device=device)
     value_ce = torch.nn.functional.cross_entropy(wdl, z_t)
 
-    m = {"policy_ce": float(policy_ce.detach()), "value_ce": float(value_ce.detach())}
+    # Action head: CE(slot-scattered pi', log_softmax(slot logits(parent))).
+    # Collided slots (rare same-(rot,x) placements) sum their target mass.
+    slot_ce = torch.zeros((), device=device)
+    if shard.parent_own is not None and shard.child_slot is not None:
+        p_own = torch.as_tensor(unpack_plane(shard.parent_own[dec_idx]), device=device).unsqueeze(1)
+        p_opp = torch.as_tensor(unpack_plane(shard.opp_plane[dec_idx]), device=device).unsqueeze(1)
+        p_feats = torch.as_tensor(shard.parent_feats[dec_idx], device=device)
+        slot_logits = model.serve_slots(p_own, p_opp, p_feats)
+        slot_target = np.zeros((n_groups, N_SLOTS), dtype=np.float32)
+        for g, d in enumerate(dec_idx):
+            lo = int(shard.child_offset[d])
+            slots = shard.child_slot[lo : lo + len(targets[d])]
+            np.add.at(slot_target[g], slots, targets[d].astype(np.float32))
+        st = torch.as_tensor(slot_target, device=device)
+        slot_ce = -(st * torch.log_softmax(slot_logits, dim=1)).sum(dim=1).mean()
+
+    m = {
+        "policy_ce": float(policy_ce.detach()),
+        "value_ce": float(value_ce.detach()),
+        "slot_ce": float(slot_ce.detach()),
+    }
     if metrics:
         # top-1 agreement with the search argmax; z_hat spread (start-gate).
         with torch.no_grad():
@@ -111,7 +131,7 @@ def run_batch(
             z_hat = (p[:, 0] - p[:, 2]).detach().cpu().numpy()
             m["z_hat_std"] = float(np.std(z_hat))
 
-    return policy_ce + value_ce, m
+    return policy_ce + value_ce + slot_ce, m
 
 
 def shard_targets(shard: Shard) -> list[np.ndarray]:
@@ -191,8 +211,9 @@ def main() -> None:
                         ho.setdefault(k, []).append(v)
         hom = {k: float(np.mean(v)) for k, v in ho.items()}
         print(
-            f"epoch {epoch}: train pCE={trm['policy_ce']:.3f} vCE={trm['value_ce']:.3f} | "
-            f"holdout pCE={hom['policy_ce']:.3f} vCE={hom['value_ce']:.3f} "
+            f"epoch {epoch}: train pCE={trm['policy_ce']:.3f} vCE={trm['value_ce']:.3f} "
+            f"sCE={trm.get('slot_ce', 0.0):.3f} | holdout pCE={hom['policy_ce']:.3f} "
+            f"vCE={hom['value_ce']:.3f} sCE={hom.get('slot_ce', 0.0):.3f} "
             f"top1={hom['top1']:.3f} z_std={hom['z_hat_std']:.3f} [{time.time()-te:.0f}s]",
             flush=True,
         )

@@ -26,12 +26,16 @@ from torch import Tensor, nn
 BOARD_H, BOARD_W = 40, 10
 FEATURE_LEN = 85
 BOARD_EMB, FEAT_EMB, TRUNK, N_OUT = 128, 64, 128, 5
+# The action vocabulary (mirrors tetr-nn obs::N_SLOTS): hold x rotation x
+# x-origin. One PARENT forward ranks every placement by slot.
+N_SLOTS = 2 * 4 * 13
 
 # Shape aliases — read as documentation, enforced at runtime.
 Plane = Float[Tensor, "batch 1 40 10"]
 Feats = Float[Tensor, "batch 85"]
 Embedding = Float[Tensor, "batch 128"]
 Heads = Float[Tensor, "batch 5"]
+SlotLogits = Float[Tensor, "batch 104"]
 
 
 class TetrNet(nn.Module):
@@ -56,6 +60,10 @@ class TetrNet(nn.Module):
         self.feat_fc = nn.Linear(FEATURE_LEN, FEAT_EMB)
         self.head1 = nn.Linear(2 * BOARD_EMB + FEAT_EMB, TRUNK)
         self.head2 = nn.Linear(TRUNK, N_OUT)
+        # The action-indexed policy head: TRUNK -> one logit per action slot.
+        # Forwarded on the PARENT state; per-child heads cost one forward per
+        # child, which is exactly what a search filter must avoid.
+        self.slot_head = nn.Linear(TRUNK, N_SLOTS)
         # Feature whitening, applied in the forward and exported to config.json
         # so `net.rs` whitens identically. Trained stats overwrite these.
         self.register_buffer("feat_mean", torch.zeros(FEATURE_LEN))
@@ -67,14 +75,25 @@ class TetrNet(nn.Module):
         return torch.relu(self.board_fc(self.convs(plane).flatten(1)))
 
     @jaxtyped(typechecker=beartype)
-    def serve(self, own: Plane, opp: Plane, feats: Feats) -> Heads:
-        """The deployed forward, matching `net.rs`: wdl+policy raw, aux tanh'd."""
+    def trunk(self, own: Plane, opp: Plane, feats: Feats) -> Embedding:
+        """The shared trunk activation (own tower | opp tower | whitened feats
+        -> head1). Both `serve` and `serve_slots` read this."""
         own_emb = self.embed(own)
         opp_emb = self.embed(opp)
         # Floor the std so a zero-variance (constant) feature can't divide to
         # inf/NaN. net.rs floors identically (MIN_STD), so parity holds.
         f = (feats - self.feat_mean) / self.feat_std.clamp_min(1e-6)
         feat_emb = torch.relu(self.feat_fc(f))
-        trunk = torch.relu(self.head1(torch.cat([own_emb, opp_emb, feat_emb], dim=1)))
-        raw = self.head2(trunk)
+        return torch.relu(self.head1(torch.cat([own_emb, opp_emb, feat_emb], dim=1)))
+
+    @jaxtyped(typechecker=beartype)
+    def serve(self, own: Plane, opp: Plane, feats: Feats) -> Heads:
+        """The deployed forward, matching `net.rs`: wdl+policy raw, aux tanh'd."""
+        raw = self.head2(self.trunk(own, opp, feats))
         return torch.cat([raw[:, :4], torch.tanh(raw[:, 4:5])], dim=1)
+
+    @jaxtyped(typechecker=beartype)
+    def serve_slots(self, own: Plane, opp: Plane, feats: Feats) -> SlotLogits:
+        """The action head on the PARENT observation: one forward, a logit per
+        action slot (rot x column x hold). Raw logits."""
+        return self.slot_head(self.trunk(own, opp, feats))

@@ -30,7 +30,7 @@ def export(model: TetrNet, out: Path, *, attack_w: float = 125.0) -> None:
             conv_i += 1
             tensors[f"conv{conv_i}.weight"] = value.contiguous()
             tensors[f"conv{conv_i}.bias"] = sd[key[: -len("weight")] + "bias"].contiguous()
-    for name in ("board_fc", "feat_fc", "head1", "head2"):
+    for name in ("board_fc", "feat_fc", "head1", "head2", "slot_head"):
         tensors[f"{name}.weight"] = sd[f"{name}.weight"].contiguous()
         tensors[f"{name}.bias"] = sd[f"{name}.bias"].contiguous()
     save_file(tensors, str(out / "net_v2.safetensors"))
@@ -40,7 +40,7 @@ def export(model: TetrNet, out: Path, *, attack_w: float = 125.0) -> None:
         "arch": {"conv_channels": list(model.conv_channels), "siamese": True},
         "feature_mean": model.feat_mean.tolist(),
         "feature_std": model.feat_std.tolist(),
-        "heads": {"wdl": [0, 1, 2], "policy": 3, "aux": 4},
+        "heads": {"wdl": [0, 1, 2], "policy": 3, "aux": 4, "slots": 104},
         "contract": {"z_scale": Z_SCALE, "attack_w": attack_w},
     }
     (out / "config.json").write_text(json.dumps(config, indent=1))

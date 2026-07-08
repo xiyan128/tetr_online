@@ -25,7 +25,7 @@
 
 use std::path::Path;
 
-use crate::obs::{BOARD_LEN, BOARD_W, FEATURE_LEN, Obs};
+use crate::obs::{BOARD_LEN, BOARD_W, FEATURE_LEN, N_SLOTS, Obs};
 
 /// Spatial size of a plane (`40 × 10`), the per-position row count of the
 /// conv GEMMs.
@@ -139,6 +139,9 @@ pub struct Net {
     feat_fc: Dense,
     head1: Dense,
     head2: Dense,
+    /// The action-indexed policy head (one logit per [`N_SLOTS`] action slot,
+    /// forwarded on the PARENT observation). Absent on pre-slot exports.
+    slot_head: Option<Dense>,
     feat_mean: Vec<f32>,
     feat_std: Vec<f32>,
     /// The model's frozen leaf contract from `config.json`.
@@ -215,11 +218,17 @@ impl Net {
         }
         let last_c = *channels.last().expect("checked non-empty");
 
+        let slot_head = if st.tensor("slot_head.weight").is_ok() {
+            Some(dense("slot_head", TRUNK, N_SLOTS)?)
+        } else {
+            None
+        };
         Ok(Self {
             board_fc: dense("board_fc", last_c * HW, BOARD_EMB)?,
             feat_fc: dense("feat_fc", FEATURE_LEN, FEAT_EMB)?,
             head1: dense("head1", 2 * BOARD_EMB + FEAT_EMB, TRUNK)?,
             head2: dense("head2", TRUNK, N_OUT)?,
+            slot_head,
             convs,
             feat_mean: stats("feature_mean")?,
             feat_std: stats("feature_std")?,
@@ -302,9 +311,78 @@ impl Net {
         opp: &BoardEmb,
         s: &mut Scratch,
     ) -> Vec<Heads> {
-        let n = items.len();
+        let n = self.trunk_batch(items, opp, s);
         if n == 0 {
             return Vec::new();
+        }
+        dense_batch(
+            &s.trunk,
+            n,
+            TRUNK,
+            &self.head2.w,
+            &self.head2.bias,
+            N_OUT,
+            false,
+            &mut s.out,
+        );
+
+        (0..n)
+            .map(|b| {
+                let o = &s.out[b * N_OUT..(b + 1) * N_OUT];
+                Heads {
+                    wdl: [o[0], o[1], o[2]],
+                    policy: o[3],
+                    aux: o[4].tanh(),
+                }
+            })
+            .collect()
+    }
+
+    /// The action head on PARENT observations: one forward per state, a raw
+    /// logit per action slot. Panics if the model was exported without the
+    /// slot head (pre-slot models cannot drive a guided search).
+    pub fn forward_slots(
+        &self,
+        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
+        opp: &BoardEmb,
+        s: &mut Scratch,
+    ) -> Vec<[f32; N_SLOTS]> {
+        let head = self
+            .slot_head
+            .as_ref()
+            .expect("model has no slot head (pre-slot export)");
+        let n = self.trunk_batch(items, opp, s);
+        if n == 0 {
+            return Vec::new();
+        }
+        dense_batch(
+            &s.trunk, n, TRUNK, &head.w, &head.bias, N_SLOTS, false, &mut s.out,
+        );
+        (0..n)
+            .map(|b| {
+                let mut row = [0.0f32; N_SLOTS];
+                row.copy_from_slice(&s.out[b * N_SLOTS..(b + 1) * N_SLOTS]);
+                row
+            })
+            .collect()
+    }
+
+    /// Whether this export carries the action head.
+    pub fn has_slot_head(&self) -> bool {
+        self.slot_head.is_some()
+    }
+
+    /// Shared trunk: own tower | opp (broadcast) | whitened feats -> head1,
+    /// leaving activations in `s.trunk`. Returns the batch size.
+    fn trunk_batch(
+        &self,
+        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
+        opp: &BoardEmb,
+        s: &mut Scratch,
+    ) -> usize {
+        let n = items.len();
+        if n == 0 {
+            return 0;
         }
         let planes: Vec<&[f32; BOARD_LEN]> = items.iter().map(|(p, _)| *p).collect();
         let own = self.embed_boards(&planes, s);
@@ -353,27 +431,7 @@ impl Net {
             true,
             &mut s.trunk,
         );
-        dense_batch(
-            &s.trunk,
-            n,
-            TRUNK,
-            &self.head2.w,
-            &self.head2.bias,
-            N_OUT,
-            false,
-            &mut s.out,
-        );
-
-        (0..n)
-            .map(|b| {
-                let o = &s.out[b * N_OUT..(b + 1) * N_OUT];
-                Heads {
-                    wdl: [o[0], o[1], o[2]],
-                    policy: o[3],
-                    aux: o[4].tanh(),
-                }
-            })
-            .collect()
+        n
     }
 
     /// Convenience full forward of one observation (embeds the opp plane too).

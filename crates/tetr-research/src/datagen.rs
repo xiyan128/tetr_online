@@ -125,12 +125,14 @@ fn play_decision(
         .zip(&placements)
         .map(|((o, &s), p)| (o, s, tetr_nn::obs::placement_slot(p)))
         .collect();
+    let parent = encode(state, opp);
     let record = DecisionRecord::from_served(
         DecisionMeta {
             played: argmax as u16,
             argmax: argmax as u16,
             ..meta
         },
+        &parent,
         &children,
     );
 

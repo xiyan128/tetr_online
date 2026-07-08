@@ -5,6 +5,8 @@ Each shard is a safetensors file written by `tetr-nn::shards::ShardWriter`
 
   decision     [d, 8]  i32  game_id, seat, ply, played, argmax, z, end_reason, plies_total
   opp_plane    [d, 50] u8   packed 40x10 opponent plane (bit i = cell i)
+  parent_own   [d, 50] u8   packed parent own plane (the action head's input)
+  parent_feats [d, 85] f32  parent feature vector
   child_offset [d+1]   i32  child_own[child_offset[k]:child_offset[k+1]] are decision k's children
   child_own    [c, 50] u8   packed own plane per child
   child_feats  [c, 85] f32  served feature vector per child
@@ -33,6 +35,8 @@ BOARD_H, BOARD_W = 40, 10
 class Shard:
     decision: np.ndarray  # [d, 8] i32
     opp_plane: np.ndarray  # [d, 50] u8
+    parent_own: np.ndarray | None  # [d, 50] u8 (None on pre-parent corpora)
+    parent_feats: np.ndarray | None  # [d, 85] f32
     child_offset: np.ndarray  # [d+1] i32
     child_own: np.ndarray  # [c, 50] u8
     child_feats: np.ndarray  # [c, 85] f32
@@ -52,6 +56,8 @@ def read_shard(path: str) -> Shard:
     return Shard(
         decision=t["decision"].reshape(-1, 8),
         opp_plane=t["opp_plane"].reshape(-1, PACKED_PLANE),
+        parent_own=t["parent_own"].reshape(-1, PACKED_PLANE) if "parent_own" in t else None,
+        parent_feats=t["parent_feats"].reshape(-1, FEATURE_LEN) if "parent_feats" in t else None,
         child_offset=t["child_offset"].reshape(-1),
         child_own=t["child_own"].reshape(-1, PACKED_PLANE),
         child_feats=t["child_feats"].reshape(-1, FEATURE_LEN),
