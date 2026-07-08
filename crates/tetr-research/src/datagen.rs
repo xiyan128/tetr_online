@@ -184,7 +184,15 @@ pub fn datagen_game(
             engines[0].queue_garbage(1);
             engines[1].queue_garbage(1);
         }
-        let order = if ply % 2 == 0 { [0usize, 1] } else { [1, 0] };
+        // Alternate first mover per ply AND stagger which seat opens the game
+        // by game parity: with one game per seed (no arm-swapped CRN pair like
+        // the duel instrument), a fixed ply-0 opener left a measured ~5σ
+        // seat-A win skew over 1900 short mirror games — pure z-label noise.
+        let order = if (ply + game_id) % 2 == 0 {
+            [0usize, 1]
+        } else {
+            [1, 0]
+        };
         for &who in &order {
             let Some(state) = advance_to_active(&mut engines[who]) else {
                 topped[who] = true;
