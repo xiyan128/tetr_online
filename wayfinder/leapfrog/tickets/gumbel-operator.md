@@ -36,3 +36,18 @@ Investigating the build surfaced that **the panel conflated two separable things
 **Revised plan:** v0 "operator" = the **existing beam restricted to the net's top-m policy roots** (correct, reuses tested code) + a **Python completed-Q → π' transform** over stored root scores. The from-scratch Gumbel-SH MCTS + CVaR chance nodes is a **deferred throughput/quality refinement**, not a pre-freeze blocker. Gate-0b's premise (does search beat the policy) is measured by `duel beam:<M>@w.. vs policy:<M>` **today** (see T07) — no new operator required for the first read.
 
 This ticket is therefore **downgraded**: it is no longer a design-freeze blocker as a from-scratch MCTS. It re-scopes to "the completed-Q target path" and folds the SH-MCTS into post-freeze throughput work. T07 (Gate-0b) unblocks immediately (uses the beam).
+
+## Measurement finding (2026-07-08): the action-indexed policy head is load-bearing for throughput
+
+Built the root-filter seam (`BeamPlanner::with_root_filter`, byte-neutral default — 280 core tests green) + the `guided:<dir>@m<M>w<W>d<D>` arm (policy top-m roots, TP beam, net leaf). Measured: guided m12w8d5 mirror ≈ **30 games/hr** (trainer-contended) — NO throughput win over the plain net beam. Two structural reasons the panel and I both missed:
+
+1. **Root-filtering cannot cheapen a beam**: interior generations still fan every child (~68/node), and width-truncation already bounds interior work regardless of root count. Root restriction only trims generation-1 evals (~56 of ~2,200/move).
+2. **A per-child policy head can never cheapen search**: P and V share one forward, so *ranking* a child costs exactly what *evaluating* it costs. Filtering-by-policy saves nothing when the policy requires a per-child forward.
+
+**Consequence (shapes T12 v1 + round-1):** the design freeze's "~34-way policy head" is not a nicety — it is THE eval-count lever. An **action-indexed head** (fixed slots: rotation × column × hold ≈ 80) lets ONE forward of the *parent* rank all its placements, so only the top-m ever get committed+evaluated → evals/move drops by the fan factor (~68× per node at full fan). This is what makes both the deployed vehicle's ~100 ms budget and self-play datagen cost feasible, independent of (and multiplicative with) the T13 per-eval fix.
+
+The `guided:` arm remains valuable as a **strength-per-width** instrument (does the prior's top-m lose anything at matched width? — the Gate-0a question at system level; duel running). The action-head is the next net change: keep the per-child value path, add the 80-slot policy head trained from the same shards (children map to slots via their Placement (rot, col, hold)) — needs the Placement recorded per child in shards (currently NOT stored — shard schema addition required: a `child_slot` u8 tensor).
+
+## Strength receipt (2026-07-08): the m12 restriction costs NOTHING at matched width
+
+`guided:round0@m12w8d5` vs `beam:round0@w8d5` (same net leaf, seeds 850M, 6 CRN pairs): **6-6-0 dead even** (end reasons 7 topout / 5 escalation). The policy top-12 contains everything the full ~68-root beam needed — Gate-0a's coverage finding confirmed at system level, with the search in the loop. The guided vehicle loses no strength; the action-indexed head will make the SAME restriction ~fan-factor cheaper. Mechanism validated; the remaining vehicle work is the 104-slot head.

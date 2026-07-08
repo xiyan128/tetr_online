@@ -2,7 +2,7 @@
 id: T15
 title: Completed-Q target transform + round-0 two-headed net training
 labels: [wayfinder:prototype]
-status: open
+status: closed
 assignee:
 blocked-by: []
 ---
@@ -24,3 +24,30 @@ The actual "dodge fact (d)" fix (Python, `python/tetrnn`): transform stored per-
 **Full round-0 training RUNNING** (2000-game corpus, 3 epochs, per-epoch exports). Trap re-learned: `| tail` swallows live stdout (the memory's pipe-swallow warning) — progress watched via the per-epoch export mtime instead. Evaluation battery pre-staged (`scratchpad/round0_battery.sh`): policy-vs-policy vs the prior round0 fixture, beam-vs-beam @w8d5, and fresh-seed G_π, seed regions 810M/820M/830M.
 
 **The decisive read pending:** holdout pCE/top-1 trajectory + strength vs the prior BC net = the entropy-injection (R1) check for completed-Q targets at BC scale. The full R1 answer (does the loop COMPOUND) is round-1.
+
+## Round-0 training complete (2026-07-08)
+
+Full corpus (482 shards / 2000 games / ~585k decisions), 3 epochs, MPS: holdout pCE **2.117 → 2.086 → 2.071** (monotone, train/holdout track — no overfit, no entropy blow-up), top-1 vs search argmax ~0.35 (not comparable to the fixture's 0.639 — this net trains toward the SOFT completed-Q π', N_eff≈5.4, by design), **z_std 0.172 ≥ the 0.15 value gate** (marginal — epoch 1 dipped to 0.141 then recovered; watch: played-child-only WDL training may be value-starved vs the prior 50/50 replay). Targets in band (N_eff 5.42). Exported per epoch; final at `scratchpad/round0_v2`.
+
+Strength battery (policy-vs-policy vs the prior fixture; beam-vs-beam @w8d5; fresh-seed G_π) = the decisive entropy-injection read — running.
+
+## Pre-registered battery interpretation (written BEFORE results)
+
+1. **BC-vs-BC (policy:round0_v2 vs policy:fixture, 32 pairs):** the fixture is the prior campaign's BC (same 2000-game corpus scale, argmax-ish targets + τ machinery). Win/even = completed-Q targets at least match the old pipeline at BC (entropy-injection refuted at BC scale). Clear loss = the soft-target risk is real → try sharper c or per-source weighting before round 1.
+2. **Beam-vs-beam @w8d5:** the leaf+prior combination test. Even is acceptable (the fixture's value head had more training machinery); win = strict improvement.
+3. **G_π (beam vs own policy):** healthy ≥ 0.55; this authorizes round-1 expert iteration on this net.
+4. **Watch-items:** TrueCap draws (historically never observed) = passivity regression from soft targets/played-child-only value → round-1 must add value bootstrapping or attack-awareness via z; z_std 0.172 is marginal vs the fixture's 0.458.
+
+## Resolution — ALL THREE BATTERY READS GREEN; round-1 authorized
+
+Battery ran 2026-07-08 (pre-registered interpretation above; seed regions 810M/820M/830M, receipts in runs/):
+
+1. **BC-vs-BC:** `policy:round0_v2` **35-29** over the prior campaign's round0 fixture (64 games, all topout-decisive — the TrueCap-passivity worry did NOT materialize). The completed-Q pipeline ≥ the old τ-machinery pipeline at BC scale. **Entropy-injection refuted at BC scale.**
+2. **Beam-vs-beam @w8d5:** **11-5 (0.69)** — the new net is a strictly better leaf+prior.
+3. **G_π (fresh seeds):** **16-0** — search massively improves on the new policy; expert-iteration fuel confirmed for THIS net.
+
+**Verdict: T15's question (do completed-Q targets improve the net or inject entropy?) is answered — they improve it, at BC scale, over the prior pipeline.** The full compounding question (round-1: does training on SELF-generated completed-Q targets keep improving?) transfers to the round-1 ticket/driver.
+
+**Round-1 trainer note (pre-staged):** round-1 targets must include the CURRENT net's logits (π' = softmax(logit + c·qnorm) — the reanalyze form). `targets.py` already takes `logits=`; the trainer computes child policy logits in-batch (`heads[:,3]`) — wire those in for round-1 (per-batch live targets instead of precomputed). Also: ε-sampling for datagen diversity still deferred (seed diversity carried round-0).
+
+Remaining in-flight (T12 v1, not T15): round0_v3 retrain with the 104-slot action head on the regenerated parent+slot corpus → guided-vehicle throughput + strength measurements.

@@ -35,11 +35,12 @@ A bot whose deployed decision-making is **entirely learned** — learned policy 
 **The design is FROZEN (2026-07-08) — the strike is in EXECUTION, ordered infra-first per the ratified rigor/velocity steer.** The planning fog has graduated into the execution DAG below; what remains as fog is downstream of round 1.
 
 Execution frontier (charted tickets):
-- **Velocity infra FIRST** (ratified): [T13 forward throughput fix](tickets/fix-forward-verify-ane.md) (im2col is memory-bandwidth-bound — confirmed; fix = ANE fusion for datagen + BNNS/ANE for deployed) and [T17 port spec-dedup](tickets/port-spec-dedup.md) (beam-bookkeeping velocity, 1.32× bit-identical). Both touch core code — do fresh with full attention.
-- **Data plant:** [T14 self-play datagen driver](tickets/datagen-driver.md) (writes shards + root scores; correctness-first, throughput via T13) + [T09 datagen architecture](tickets/datagen-architecture.md) (Mac-small/cloud-scalable seam).
-- **Training:** [T15 completed-Q transform + round-0 two-headed net](tickets/completedq-training.md) (the decisive round-1 test: do completed-Q targets improve the net or inject entropy?).
+- **Velocity infra FIRST** (ratified): [T13 forward throughput fix](tickets/fix-forward-verify-ane.md) (im2col is memory-bandwidth-bound — confirmed; fix = ANE fusion for datagen + BNNS/ANE for deployed) and ~~T17 spec-dedup~~ (**verified already on master**, PR1 d151054 — closed no-op).
+- **Data plant: T14 DONE** ([driver + CLI](tickets/datagen-driver.md), 5,392 games/hr CC2 single-thread; full 2000-game round-0 corpus generated). [T09 datagen architecture](tickets/datagen-architecture.md) (cloud scale-out seam) still open.
+- **Training: T15 RESOLVED — all three battery reads GREEN, round-1 authorized.** The completed-Q round-0 net **beats the prior campaign's round0 fixture 35-29 (BC-vs-BC) and 11-5 (beam-vs-beam @w8d5), with G_π = 16-0 on fresh seeds** — entropy-injection refuted at BC scale; the new pipeline strictly improves on the old one. Guided m12 restriction = **6-6 dead even** vs the full beam (costs nothing). Details + round-1 trainer notes on [the T15 ticket](tickets/completedq-training.md).
+- **Vehicle (T12): guided beam BUILT** (`BeamPlanner::with_root_filter` + `guided:<dir>@mMwWdD` arm, committed) — and its measurement produced the key finding: **the ACTION-INDEXED policy head is the real eval-count lever** (root-filtering can't cheapen a beam — interior fan unchanged; a per-child policy head costs one forward per child, exactly what it should save). One forward of the PARENT must rank all placements: `obs::placement_slot` (104 slots) now recorded per child in shards; the 104-way head is the next net change, multiplicative with T13. Detail on [the T12 ticket](tickets/gumbel-operator.md).
 - **Loop:** [T16 round driver](tickets/round-driver.md) (one resumable command/round; balanced-rigor amendment log).
-- **R4 fix** — retire value-only `compose()` for the net bot (lands with T14/the deployed vehicle).
+- **R4 fix** — retire value-only `compose()` for the net bot (the `guided:` arm is the vehicle seed; completes with the action head).
 
 Still fog (downstream of round 1):
 - **Net scale ladder / obs v3** — tower size, do venue clocks stay in obs (they bind the net to the venue). After round 1 shows the loop compounds.
