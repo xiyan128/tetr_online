@@ -1,0 +1,53 @@
+---
+title: Leapfrog strike — SOTA bot from a fully learned system
+labels: [wayfinder:map]
+created: 2026-07-07
+---
+
+## Destination
+
+A bot whose deployed decision-making is **entirely learned** — learned policy + learned value driving a *generic* search, zero hand-tuned eval terms or search heuristics — that **beats the champion `probe-tp128d9`** head-to-head in versus (pre-registered pair-GSPRT at champion-comparable per-move wall-clock) **and matches-or-beats it on the single-player battery**. The system runs small experiments on the Mac and scales to cloud (provider-agnostic) without redesign. CC2 is permitted only as round-0 warm start and as opponent/yardstick.
+
+## Notes
+
+- **Domain**: tetr_online (Rust, Bevy game + `tetr-core` engine + `tetr-research` platform). Diffbase = **master** (v2 foundation landed at 575be51: `tetr-nn` two-board P+V net, sudden-death venue, Arm grammar, `duel`/`gate` latched pair-GSPRT, `evaluate_leaves` batch seam). The `../tetr_online-rl` worktree (branch `rl/strike`) is **reference only**; its round 1 aborted at 206/2000 games with no verdict. Graveyard evidence: `docs/` labnotes + postmortems, `autoresearch/rl-strike-260702/` ledgers in the rl worktree.
+- **Champion**: `tp:cc2@w128d9`, ~100 ms/move, 0.8225 APP held-out, moat = brute width-as-survival-hedge + bag speculation; leaf-eval edges compress to EVEN at its config.
+- **Execution override**: research decisions here require running measurements — Task tickets that run experiments or build instruments are in-map when they unblock a decision. Full campaign rounds (train→gate→promote→repeat) start *after* the design freeze and get charted as tickets then.
+- **Standing preferences**: one change per experiment, no pseudo-reward hacks (memory: research-principles-generality); experiments via the tetr-research platform + ledger receipts, never bespoke binaries; bound every long job (TIME_BUDGET_SECS); `scripts/gate` before any push; campaign work in a separate git worktree off master; treat prior notes as evidence, not gospel.
+- **Method**: grill via AskUserQuestion; use ultracode workflows for surveys and design panels; pre-registration weight is itself a decision (see the rigor/velocity ticket).
+
+## Decisions so far
+
+- [Name the destination](tickets/destination.md) — SOTA bar = dethrone probe-tp128d9 (versus SPRT win + solo match-or-beat, practical budget); purity = fully learned deployed bot, CC2 only as round-0 warm start + yardstick; compute = Mac-small / cloud-scalable, provider-agnostic; deployment = native research bot, shipping later.
+- [Algorithm-family survey](tickets/algorithm-survey.md) — recommend **Gumbel Expectimax-AlphaZero on the true model** (policy-guided Gumbel-top-m + Sequential Halving with completed-Q targets — *not* PUCT/visit-counts, which dodges the near-deterministic-backup collapse; exact enumerated chance nodes with a **survival-CVaR backup** replacing SPEC_DECAY; terminal-WDL value; factored two-board value). Native Rust on the SearchState/Mind seam, ANE eval. Win is **honestly unproven** at matched wall-clock → gated behind **Gate-0** (zero-training falsification). Surfaced the **R4 structural fix** (deployed net bot must consume the policy prior; retire value-only `compose()`). Full memo + kill criteria in the [T02 memo](assets/T02-algorithm-family-memo.md).
+- [Throughput budget model](tickets/throughput-budget.md) — measured on master (corrected memory 2×): the tetr-nn forward is **glue-bound at ~6.9k evals/s** (memory said 20.5k), ~99% im2col/transpose, batch-invariant; the prior starvation multiplier is `evals/move × s/eval` for a net search (champion 278 games/hr with cheap eval; `beam:round0@w8d5` <100/hr). **Floor: ≥200 games/hr for a strong-ish agent before any campaign.** Gumbel-n64 is marginal on the current forward, comfortable (~300–600/hr) once it's fixed → fixing the forward is a **prerequisite**. Numbers in [T03 measurements](assets/T03-throughput-measurements.md).
+- [Gate-0a — survival-recall](tickets/gate0a-survival-recall.md) — **built + ran** (harness `crates/tetr-research/src/gate0a.rs`). The cheap zero-training falsification **did NOT kill the thesis**. Measurement corrected the panel's metric: binary d9-survival is trivial (72/72 states: every non-instakill placement survives the horizon — survivors are abundant, not a sparse hedge). On the redefined **agreement@k** (net top-k ∩ champion-beam top-k-by-score), even the *weak* round0 prior hits **0.657 @ k=6 vs 0.209 random = 3.1× lift** — the champion's preferred near-death moves already sit in the weak net's top-6. Green-light (not verdict): the barrier relocates from root-survival coverage to value-discrimination-among-survivors = **Gate-0b**. Detail in [T11 findings](assets/T11-gate0a-findings.md).
+- [Gate-0b — search-gain premise](tickets/search-gain-verification.md) — **CONFIRMED on clean seeds.** `beam:round0@w8d5 vs policy:round0` = **31-1-0 / 32 games (~0.97)** on a fresh seed region → deep search crushes the raw policy, re-confirming (exceeding) the prior campaign's *contaminated* G_π=0.900 and retiring that doubt. **Both preconditions of the thesis are now green** (search-gain + Gate-0a coverage). Not yet settled: whether completed-Q *target training* compounds (campaign round-1, post-freeze) and deployment-parity at matched wall-clock (needs the forward fix). Also: T12 rescoped — the beam is the sound v0 operator, no from-scratch MCTS needed pre-freeze.
+- [Purity contract](tickets/purity-contract.md) — classified every fixed component (environment truth / budget knobs / training machinery = ALLOWED; CC2 eval, SPEC_DECAY, Z_SCALE/W/λ composition = FORBIDDEN in the deployed bot; terminal-WDL value eliminates composition by design). One flagged judgment call (hand-chosen search budget = allowed knob, user may veto). [Contract](assets/T01-purity-contract.md).
+- [Design freeze (PROPOSED)](tickets/design-freeze.md) — the whole route synthesized into a ratifiable design ([doc](assets/T08-design-freeze-PROPOSED.md)): policy-guided completed-Q search on the true model, terminal-WDL value, survival-CVaR chance backup, factored two-board value, R4 fix, champion-pinned self-play, forward-fix-then-campaign throughput plan, proposed gate battery + lighter rigor contract. **Four genuine user decisions flagged** (purity budget-knob veto; gate hardware/ANE fairness; rigor/velocity trade; gate sensitivity). On ratification, the strike moves from planning to campaign execution.
+- **RATIFIED 2026-07-08** (all four delegated; explicit steer: balanced rigor, **infra-first** — invest in research velocity before grinding rounds). See the §RATIFIED block in the [design doc](assets/T08-design-freeze-PROPOSED.md). Gate battery (T04) + rigor contract (T06) folded in and closed.
+- [Self-play datagen driver](tickets/datagen-driver.md) — **BUILT + VERIFIED + CLI** (`crates/tetr-research/src/datagen.rs`; `tetr-research datagen --games N --seeds BASE --out DIR [--net dir]`). Drives the beam directly (captures `root_scores` = the completed-Q source), applies moves via `placement_to_inputs` replay, writes game-aligned shards with z backfill. **5,392 games/hr single-thread (CC2 w8d5)** — driver overhead negligible; net datagen bottlenecked purely by the forward (T13), as predicted. Full 2000-game round-0 corpus generated (482 shards, 13 GB, 1002-998 balanced).
+- [Port spec-dedup](tickets/port-spec-dedup.md) — **verified no-op**: the v2 landing's PR1 (d151054) already re-derived it on master (`expand_speculative` commits once per placement, fans the bag with cheap clones). Five minutes of verification saved a core-code port.
+- **T15 in flight**: Python side built + verified — shard reader (Rust→Python seam proven on 710k children), **completed-Q target transform** (7 self-checks: scale-free, non-degenerate at near-deterministic argmax, dead-masking; **C_SCALE=12 calibrated once** to the pre-registered N_eff band [2.5,6], softest-in-band per the A5 discipline), streaming trainer (game-level split by shard alignment, grouped-softmax policy CE + played-child WDL CE, whitening from train stats, per-epoch export). Dev round-trip CLOSED: Rust datagen → Python train → Rust `policy:` arm plays. Full round-0 training running (3 epochs, ~5h).
+
+## Not yet specified
+
+**The design is FROZEN (2026-07-08) — the strike is in EXECUTION, ordered infra-first per the ratified rigor/velocity steer.** The planning fog has graduated into the execution DAG below; what remains as fog is downstream of round 1.
+
+Execution frontier (charted tickets):
+- **Velocity infra FIRST** (ratified): [T13 forward throughput fix](tickets/fix-forward-verify-ane.md) (im2col is memory-bandwidth-bound — confirmed; fix = ANE fusion for datagen + BNNS/ANE for deployed) and [T17 port spec-dedup](tickets/port-spec-dedup.md) (beam-bookkeeping velocity, 1.32× bit-identical). Both touch core code — do fresh with full attention.
+- **Data plant:** [T14 self-play datagen driver](tickets/datagen-driver.md) (writes shards + root scores; correctness-first, throughput via T13) + [T09 datagen architecture](tickets/datagen-architecture.md) (Mac-small/cloud-scalable seam).
+- **Training:** [T15 completed-Q transform + round-0 two-headed net](tickets/completedq-training.md) (the decisive round-1 test: do completed-Q targets improve the net or inject entropy?).
+- **Loop:** [T16 round driver](tickets/round-driver.md) (one resumable command/round; balanced-rigor amendment log).
+- **R4 fix** — retire value-only `compose()` for the net bot (lands with T14/the deployed vehicle).
+
+Still fog (downstream of round 1):
+- **Net scale ladder / obs v3** — tower size, do venue clocks stay in obs (they bind the net to the venue). After round 1 shows the loop compounds.
+- **[Single-player from the same system](tickets/single-player-story.md)** (T10) — multi-task vs finetune; after the versus loop works.
+- **Rounds 1..N and the final showdown** — the SPRT vs the champion at matched ~100 ms; end-game distillation if matched wall-clock favors less-search-bigger-net. Charted round by round as the loop compounds.
+
+## Out of scope
+
+- **Shipping the bot in-game** (wasm/browser distillation, real-time budgets) — destination grilling ruled it a follow-up effort.
+- **Beating external CC2-at-full-strength as a bar** — CC2 remains an opponent/yardstick only; the bar is the in-repo champion.
+- **Game/UI features and TETR.IO fidelity** — dropped in the 2026-06 SOTA-plan decision; unchanged here.
