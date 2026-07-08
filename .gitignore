@@ -21,3 +21,7 @@ python/.venv/
 __pycache__/
 .pytest_cache/
 .ruff_cache/
+
+# Machine-local RL-campaign model outputs (17GB of trained nets); the deployed
+# weights live in models/ and Git LFS. Never commit this scratch dir.
+/valuenet/
