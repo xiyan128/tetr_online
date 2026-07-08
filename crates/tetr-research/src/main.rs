@@ -126,6 +126,10 @@ enum Command {
         /// Beam depth.
         #[arg(long, default_value_t = 5)]
         depth: u8,
+        /// Guided vehicle: net policy top-m placements per node (0 = off;
+        /// needs --net).
+        #[arg(long, default_value_t = 0)]
+        topm: usize,
         /// Number of games (seeds `base..base+games`).
         #[arg(long, default_value_t = 100)]
         games: u64,
@@ -346,6 +350,7 @@ fn main() -> std::io::Result<()> {
             net,
             width,
             depth,
+            topm,
             games,
             seeds,
             out,
@@ -365,6 +370,7 @@ fn main() -> std::io::Result<()> {
                 width,
                 depth,
                 transpose: true,
+                top_m: topm,
             };
             let venue_fmt = tetr_research::versus::VersusFormat {
                 max_plies: venue.max_plies,
@@ -379,6 +385,7 @@ fn main() -> std::io::Result<()> {
                     &mut writer,
                     &*eval,
                     cfg,
+                    net.as_deref(),
                     &venue_fmt,
                     seeds + i,
                     (seeds + i) as u32,
@@ -397,7 +404,7 @@ fn main() -> std::io::Result<()> {
                 json!({
                     "experiment": "datagen",
                     "eval": net.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "cc2".into()),
-                    "width": width, "depth": depth, "games": games, "seeds": seeds,
+                    "width": width, "depth": depth, "topm": topm, "games": games, "seeds": seeds,
                     "out": out.display().to_string(),
                     "wall_secs": secs,
                     "games_per_hr": games as f64 * 3600.0 / secs,

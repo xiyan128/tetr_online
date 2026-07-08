@@ -72,13 +72,20 @@ pub struct BeamConfig {
     pub width: usize,
     pub depth: u8,
     pub transpose: bool,
+    /// Guided-vehicle restriction: net policy top-m placements per node
+    /// (0 = unrestricted). Requires a net dir (the filter's ranker).
+    pub top_m: usize,
 }
 
-fn planner(cfg: BeamConfig) -> BeamPlanner {
-    if cfg.transpose {
+fn planner(cfg: BeamConfig, net_dir: Option<&std::path::Path>) -> BeamPlanner {
+    let base = if cfg.transpose {
         BeamPlanner::transposing(cfg.width)
     } else {
         BeamPlanner::new(cfg.width)
+    };
+    match (cfg.top_m, net_dir) {
+        (m, Some(dir)) if m > 0 => base.with_root_filter(crate::arm::guided_filter(dir, m)),
+        _ => base,
     }
 }
 
@@ -155,6 +162,7 @@ pub fn datagen_game(
     writer: &mut ShardWriter,
     eval: &dyn Evaluator,
     cfg: BeamConfig,
+    net_dir: Option<&std::path::Path>,
     venue: &VersusFormat,
     seed: u64,
     game_id: u32,
@@ -164,7 +172,7 @@ pub fn datagen_game(
         Engine::new(marathon_config(), seed),
         Engine::new(marathon_config(), seed),
     ];
-    let mut beams = [planner(cfg), planner(cfg)];
+    let mut beams = [planner(cfg, net_dir), planner(cfg, net_dir)];
     let mut attack = [0u32; 2];
     let mut topped = [false; 2];
     let mut ply_of = [0u16; 2];
@@ -265,6 +273,7 @@ mod tests {
             width: 6,
             depth: 4,
             transpose: true,
+            top_m: 0,
         };
         // Pressured venue so games end fast.
         let venue = VersusFormat {
@@ -278,7 +287,7 @@ mod tests {
         {
             let mut writer = ShardWriter::create(&dir, 64).expect("writer");
             for seed in 1..=4u64 {
-                let out = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32)
+                let out = datagen_game(&mut writer, &eval, cfg, None, &venue, seed, seed as u32)
                     .expect("game writes");
                 total_games += 1;
                 assert!(out.plies_total > 0, "game {seed} made no moves");
@@ -330,6 +339,7 @@ mod tests {
             width: 8,
             depth: 5,
             transpose: true,
+            top_m: 0,
         };
         let venue = VersusFormat {
             max_plies: 240,
@@ -340,7 +350,7 @@ mod tests {
         let n = 8u64;
         let t0 = Instant::now();
         for seed in 1..=n {
-            let _ = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32).unwrap();
+            let _ = datagen_game(&mut writer, &eval, cfg, None, &venue, seed, seed as u32).unwrap();
         }
         writer.flush().unwrap();
         let secs = t0.elapsed().as_secs_f64();
