@@ -130,6 +130,10 @@ enum Command {
         /// needs --net).
         #[arg(long, default_value_t = 0)]
         topm: usize,
+        /// Parallel workers (games partitioned round-robin; each worker owns
+        /// out/wN/ so shard numbering never collides).
+        #[arg(long, default_value_t = 1)]
+        workers: usize,
         /// Number of games (seeds `base..base+games`).
         #[arg(long, default_value_t = 100)]
         games: u64,
@@ -355,6 +359,7 @@ fn main() -> std::io::Result<()> {
             seeds,
             out,
             venue,
+            workers,
         } => {
             use tetr_research::datagen::{BeamConfig, datagen_game};
             let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
@@ -377,27 +382,66 @@ fn main() -> std::io::Result<()> {
                 rain_period: venue.rain,
                 sudden_death: true,
             };
-            let mut writer = tetr_nn::shards::ShardWriter::create(&out, 1024)?;
             let t0 = std::time::Instant::now();
-            let mut wld = [0u64; 3]; // A / B / draw
-            for i in 0..games {
-                let res = datagen_game(
-                    &mut writer,
-                    &*eval,
-                    cfg,
-                    net.as_deref(),
-                    &venue_fmt,
-                    seeds + i,
-                    (seeds + i) as u32,
-                )?;
-                let idx = match res.result {
-                    tetr_research::versus::VersusResult::AWins => 0,
-                    tetr_research::versus::VersusResult::BWins => 1,
-                    tetr_research::versus::VersusResult::Draw => 2,
-                };
-                wld[idx] += 1;
-            }
-            writer.flush()?;
+            let n_workers = workers.max(1);
+            drop(eval); // each worker owns its eval; the probe load above validated the dir
+            let wld_total = std::sync::Mutex::new([0u64; 3]);
+            std::thread::scope(|scope| -> std::io::Result<()> {
+                let mut handles = Vec::new();
+                for w in 0..n_workers {
+                    let out_w = if n_workers == 1 {
+                        out.clone()
+                    } else {
+                        out.join(format!("w{w}"))
+                    };
+                    let net_ref = &net;
+                    let venue_ref = &venue_fmt;
+                    let wld_ref = &wld_total;
+                    handles.push(scope.spawn(move || -> std::io::Result<()> {
+                        let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match net_ref {
+                            Some(dir) => Box::new(
+                                tetr_nn::serve::NetEvaluator::load(dir)
+                                    .map_err(|e| std::io::Error::other(e.to_string()))?,
+                            ),
+                            None => Box::new(tetr_core::ai::Cc2Evaluator::new(
+                                tetr_core::ai::eval::Cc2Weights::attack_tuned(),
+                            )),
+                        };
+                        let mut writer = tetr_nn::shards::ShardWriter::create(&out_w, 1024)?;
+                        let mut wld = [0u64; 3];
+                        let mut i = w as u64;
+                        while i < games {
+                            let res = datagen_game(
+                                &mut writer,
+                                &*eval,
+                                cfg,
+                                net_ref.as_deref(),
+                                venue_ref,
+                                seeds + i,
+                                (seeds + i) as u32,
+                            )?;
+                            let idx = match res.result {
+                                tetr_research::versus::VersusResult::AWins => 0,
+                                tetr_research::versus::VersusResult::BWins => 1,
+                                tetr_research::versus::VersusResult::Draw => 2,
+                            };
+                            wld[idx] += 1;
+                            i += n_workers as u64;
+                        }
+                        writer.flush()?;
+                        let mut total = wld_ref.lock().expect("wld lock");
+                        for k in 0..3 {
+                            total[k] += wld[k];
+                        }
+                        Ok(())
+                    }));
+                }
+                for h in handles {
+                    h.join().expect("datagen worker panicked")?;
+                }
+                Ok(())
+            })?;
+            let wld = *wld_total.lock().expect("wld lock");
             let secs = t0.elapsed().as_secs_f64();
             println!(
                 "{}",
