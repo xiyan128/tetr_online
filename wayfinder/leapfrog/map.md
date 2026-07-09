@@ -69,3 +69,10 @@ Still fog (downstream of round 1):
 - **Solo baseline (T10):** the versus vehicle = **0.0 APP, 16/16 topouts** (champion local ref 0.787) — versus→solo transfer is zero; a real second axis with a `solo` instrument now in the CLI.
 - **T13 groundwork:** ONNX export (leaf + slot graphs); parity median fp16-scale, tail ~1e-1 unresolved.
 - **Method receipts:** the round driver's ledger (`rounds.jsonl`), anchor-gated promotion, pool diversity — each amendment logged before the round that uses it.
+
+## Campaign log — 2026-07-09 (the instrument forensic)
+
+- **ALL r6-r10 verdicts VOID — the hidden vehicle chooser.** `guided_filter` silently dispatched on `has_slot_head()`: once v3's export carried a slot head, datagen AND every anchor/gate quietly swapped from the per-child ranker to the slot ranker under the same arm string. The slot head (sCE ~4.0, two epochs) collapses play — v3 slot-guided anchors **0-16 in 7-second suicide games** on the seeds where per-child v3 reads strong. The "glass cannon lineage" and "LR too hot" narratives were artifacts of measuring (and training on) the wrong vehicle. Full forensic + evidence chain on [the round-driver ticket](tickets/round-driver.md).
+- **Retractions:** the 24-8 teacher read and the 12-4 slot-beats-full-beam read were a stale binary (still per-child). The **21-11 per-child milestone stands** (pre-chooser, sha-verified weights). The slot vehicle's 1,370 games/hr datagen figure was real but measured on degenerate (short) games — per-child datagen cost being re-measured now.
+- **Fix (commit 0cebd90):** rankers are explicit in the arm grammar — `guided:` = per-child (validated), `sguided:` = slot (experimental until the slot head trains stronger). No hidden dispatch on model contents may ever select a vehicle. A-r8's anchor-veto machinery is what caught this; it stays.
+- **Round-11 = the true first consistent round:** per-child vehicle end-to-end, diversified pool, anchor veto, pre-registered LR (the 1e-4 hypothesis was never cleanly tested).
