@@ -29,7 +29,7 @@ import torch
 
 from .export import export
 from .model import N_SLOTS, TetrNet
-from .shards import Shard, read_shard, shard_paths, unpack_plane
+from .shards import FEATURE_LEN, Shard, read_shard, shard_paths, unpack_plane
 from .targets import completed_q_target, n_eff
 
 BATCH_DECISIONS = 64
@@ -144,7 +144,11 @@ def run_batch(
     # Action head: CE(slot-scattered pi', log_softmax(slot logits(parent))).
     # Collided slots (rare same-(rot,x) placements) sum their target mass.
     slot_ce = torch.zeros((), device=device)
-    if shard.parent_own is not None and shard.child_slot is not None:
+    if (
+        shard.parent_own is not None
+        and shard.parent_feats is not None
+        and shard.child_slot is not None
+    ):
         p_own = torch.as_tensor(unpack_plane(shard.parent_own[dec_idx]), device=device).unsqueeze(1)
         p_opp = torch.as_tensor(unpack_plane(shard.opp_plane[dec_idx]), device=device).unsqueeze(1)
         p_feats = torch.as_tensor(shard.parent_feats[dec_idx], device=device)
@@ -207,7 +211,9 @@ def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
     ever divides zero for it. (The same landmine waits on the constant-zero
     opp/venue dims if set_opponent is wired — recompute whitening whenever the
     obs distribution grows a new live dim.)"""
-    n, s, s2 = 0, 0.0, 0.0
+    n = 0
+    s = np.zeros(FEATURE_LEN, dtype=np.float64)
+    s2 = np.zeros(FEATURE_LEN, dtype=np.float64)
     for p in paths:
         sh = read_shard(p)
         for f in (sh.child_feats, sh.parent_feats):
