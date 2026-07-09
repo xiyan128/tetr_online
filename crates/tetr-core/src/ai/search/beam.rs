@@ -428,7 +428,30 @@ impl BeamPlanner {
     ) -> Vec<BeamNode> {
         // Rank by score descending, ties by canonical index ascending — the exact
         // order the old stable descending node-sort produced (header pin 1).
-        ranked.sort_unstable_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
+        // PARTIAL selection (Stage-0 deferred lever #3): only the consumed
+        // prefix is ever sorted. Without transposition exactly `beam_width`
+        // entries are read; TP dedup can read further, so the sorted prefix
+        // grows geometrically on demand. The walk visits entries in the exact
+        // full-sort order, so the resulting frontier is IDENTICAL.
+        fn cmp(a: &(i32, u32), b: &(i32, u32)) -> std::cmp::Ordering {
+            b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1))
+        }
+        fn ensure_sorted(ranked: &mut [(i32, u32)], sorted_upto: &mut usize, want: usize) {
+            let want = want.min(ranked.len());
+            if want <= *sorted_upto {
+                return;
+            }
+            let tail = &mut ranked[*sorted_upto..];
+            let k = want - *sorted_upto;
+            if k < tail.len() {
+                tail.select_nth_unstable_by(k - 1, cmp);
+            }
+            tail[..k].sort_unstable_by(cmp);
+            *sorted_upto = want;
+        }
+        let n = ranked.len();
+        let mut sorted_upto = 0usize;
+        ensure_sorted(&mut ranked, &mut sorted_upto, beam_width);
 
         // Gather the top `beam_width` survivors in rank order, collapsing
         // transpositions as we go — first-seen wins, i.e. the highest-scoring
@@ -438,7 +461,14 @@ impl BeamPlanner {
         // moves out of `nodes` exactly once.
         let mut frontier: Vec<BeamNode> = Vec::with_capacity(beam_width.min(nodes.len()));
         let mut seen = transpose.then(FxHashSet::default);
-        for &(_, i) in &ranked {
+        let mut pos = 0usize;
+        while pos < n {
+            if pos == sorted_upto {
+                let want = (sorted_upto * 2).max(beam_width);
+                ensure_sorted(&mut ranked, &mut sorted_upto, want);
+            }
+            let (_, i) = ranked[pos];
+            pos += 1;
             let i = i as usize;
             if let Some(seen) = seen.as_mut() {
                 let node = nodes[i].as_ref().expect("ranking indexes every node once");
