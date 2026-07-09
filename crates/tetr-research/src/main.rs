@@ -411,7 +411,7 @@ fn main() -> std::io::Result<()> {
             workers,
             opp_cc2,
         } => {
-            use tetr_research::datagen::{BeamConfig, datagen_game};
+            use tetr_research::datagen::BeamConfig;
             let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
                 Some(dir) => Box::new(
                     tetr_nn::serve::NetEvaluator::load(dir)

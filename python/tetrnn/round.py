@@ -94,23 +94,29 @@ def main() -> None:
     lineage = args.lineage or args.incumbent
     row: dict = {"round": n, "incumbent": args.incumbent, "lineage": lineage, "games": args.games}
 
-    # 1. datagen (grounded two-arm, consistent vehicle).
-    if not (corpus / "w0").exists():
-        text = sh(
-            [
-                str(BIN), "datagen",
-                "--net", lineage,
-                "--topm", str(args.topm),
-                "--width", width, "--depth", depth,
-                "--games", str(args.games),
-                "--seeds", str(datagen_seeds),
-                "--workers", str(args.workers),
-                "--opp-cc2",
-                "--out", str(corpus),
-            ],
-            rdir / "datagen.log",
-        )
-        row["datagen"] = last_json(text)
+    # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
+    # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
+    if not (corpus / "cc2").exists():
+        half = args.games // 2
+        for tag, extra, base in [
+            ("cc2", ["--opp-cc2"], datagen_seeds),
+            ("mirror", [], datagen_seeds + half),
+        ]:
+            text = sh(
+                [
+                    str(BIN), "datagen",
+                    "--net", lineage,
+                    "--topm", str(args.topm),
+                    "--width", width, "--depth", depth,
+                    "--games", str(half),
+                    "--seeds", str(base),
+                    "--workers", str(args.workers),
+                    *extra,
+                    "--out", str(corpus / tag),
+                ],
+                rdir / f"datagen_{tag}.log",
+            )
+            row[f"datagen_{tag}"] = last_json(text)
     else:
         print(f"datagen: {corpus} exists — skipping")
 
@@ -118,8 +124,9 @@ def main() -> None:
     if not mix.exists():
         mix.mkdir()
         k = 0
-        for f in sorted(corpus.glob("w*/shard-*.safetensors")):
-            (mix / f"shard-r{n}{f.parent.name}-{f.name.removeprefix('shard-')}").symlink_to(f)
+        for f in sorted(corpus.glob("*/w*/shard-*.safetensors")):
+            tag = f.parent.parent.name
+            (mix / f"shard-r{n}{tag}{f.parent.name}-{f.name.removeprefix('shard-')}").symlink_to(f)
         for i, f in enumerate(sorted(Path(args.base_corpus).glob("**/shard-*.safetensors"))):
             if i % 4 == 0:
                 (mix / f"shard-base-{f.name.removeprefix('shard-')}").symlink_to(f)
@@ -146,6 +153,10 @@ def main() -> None:
     for tag, a, b, seeds in [
         ("policy_duel", f"policy:{net}", f"policy:{args.incumbent}", duel_seeds),
         ("value_duel", f"value:{net}", f"value:{args.incumbent}", duel_seeds + 100_000),
+        # A-r8: the FIXED-ANCHOR duel — self-play lineages can evolve
+        # parent-exploiting degenerates (r7: beat v3 at the gate, lost 0-32 to
+        # CC2). Promotion requires no-regression vs the fixed external anchor.
+        ("anchor_duel", cand_guided, "beam:cc2@w8d5", duel_seeds + 200_000),
     ]:
         text = sh(
             [str(BIN), "duel", "--a", a, "--b", b, "--pairs", "24",
@@ -163,7 +174,15 @@ def main() -> None:
     )
     row["gate"] = duel_line(text)
     row["gate_json"] = last_json(text)
-    row["verdict"] = row["gate_json"].get("verdict")
+    gate_verdict = row["gate_json"].get("verdict")
+    # A-r8 promotion rule: gate PASS vs the incumbent AND >=12/32 wins vs the
+    # CC2 anchor (a coarse no-regression floor; v3 scores ~24/32).
+    anchor_wins = int(row["anchor_duel"].split("|")[1].strip().split()[1].split("-")[0])
+    row["anchor_wins_of_48"] = anchor_wins
+    if gate_verdict == "H1Accepted" and anchor_wins < 18:
+        row["verdict"] = f"H1_VOIDED_BY_ANCHOR({anchor_wins}/48)"
+    else:
+        row["verdict"] = gate_verdict
     row["wall_secs"] = round(time.time() - t0, 1)
 
     # 6. ledger.

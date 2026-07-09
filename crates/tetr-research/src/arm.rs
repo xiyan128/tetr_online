@@ -447,6 +447,18 @@ mod tests {
             "policy:models/round0".parse::<Arm>(),
             Ok(Arm::NetPolicy { .. })
         ));
+        match "guided:models/round0@m12w8d5".parse::<Arm>() {
+            Ok(Arm::GuidedBeam { dir, m, width, depth }) => {
+                assert_eq!(
+                    (dir.to_str().unwrap(), m, width, depth),
+                    ("models/round0", 12, 8, 5)
+                );
+            }
+            other => panic!("{other:?}"),
+        }
+        // Display round-trips (the receipt identity).
+        let arm: Arm = "guided:models/round0@m12w8d5".parse().unwrap();
+        assert_eq!(arm.to_string(), "guided:models/round0@m12w8d5");
     }
 
     #[test]

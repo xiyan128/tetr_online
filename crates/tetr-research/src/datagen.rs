@@ -108,10 +108,10 @@ fn play_decision(
     if std::env::var("TETR_DATAGEN_TRACE").is_ok() {
         let mut miny = [99i32; 10];
         let arr = state.board.to_array2d();
-        for x in 0..10 {
+        for (x, slot) in miny.iter_mut().enumerate() {
             for y in 0..arr.height() {
                 if arr.get_cell_kind(x as isize, y as isize).is_some() {
-                    miny[x] = y as i32;
+                    *slot = y as i32;
                     break;
                 }
             }
@@ -270,7 +270,7 @@ pub fn datagen_game_vs(
         // by game parity: with one game per seed (no arm-swapped CRN pair like
         // the duel instrument), a fixed ply-0 opener left a measured ~5σ
         // seat-A win skew over 1900 short mirror games — pure z-label noise.
-        let order = if (ply + game_id) % 2 == 0 {
+        let order = if (ply + game_id).is_multiple_of(2) {
             [0usize, 1]
         } else {
             [1, 0]
