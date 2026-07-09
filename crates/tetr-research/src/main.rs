@@ -134,6 +134,11 @@ enum Command {
         /// out/wN/ so shard numbering never collides).
         #[arg(long, default_value_t = 1)]
         workers: usize,
+        /// Two-arm mode: the opponent seat plays a plain CC2 TP-beam at the
+        /// same width/depth (grounded-opponent games; net seat alternates by
+        /// game parity). Requires --net.
+        #[arg(long)]
+        opp_cc2: bool,
         /// Number of games (seeds `base..base+games`).
         #[arg(long, default_value_t = 100)]
         games: u64,
@@ -360,6 +365,7 @@ fn main() -> std::io::Result<()> {
             out,
             venue,
             workers,
+            opp_cc2,
         } => {
             use tetr_research::datagen::{BeamConfig, datagen_game};
             let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
@@ -407,15 +413,19 @@ fn main() -> std::io::Result<()> {
                                 tetr_core::ai::eval::Cc2Weights::attack_tuned(),
                             )),
                         };
+                        let cc2 = tetr_core::ai::Cc2Evaluator::new(
+                            tetr_core::ai::eval::Cc2Weights::attack_tuned(),
+                        );
                         let mut writer = tetr_nn::shards::ShardWriter::create(&out_w, 1024)?;
                         let mut wld = [0u64; 3];
                         let mut i = w as u64;
                         while i < games {
-                            let res = datagen_game(
+                            let res = tetr_research::datagen::datagen_game_vs(
                                 &mut writer,
-                                &*eval,
+                                [&*eval, &cc2],
                                 cfg,
                                 net_ref.as_deref(),
+                                opp_cc2,
                                 venue_ref,
                                 seeds + i,
                                 (seeds + i) as u32,

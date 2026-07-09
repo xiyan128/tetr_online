@@ -171,12 +171,61 @@ pub fn datagen_game(
     seed: u64,
     game_id: u32,
 ) -> std::io::Result<VersusOutcomeLite> {
+    datagen_game_vs(
+        writer,
+        [eval, eval],
+        cfg,
+        net_dir,
+        false,
+        venue,
+        seed,
+        game_id,
+    )
+}
+
+/// Two-arm variant: when `opp_cc2` is set, one seat plays a plain TP beam with
+/// `evals[1]` (a CC2 evaluator) at the same width/depth — grounded-opponent
+/// games (long, competitive, value-rich) vs the degenerate short mirrors.
+/// Which seat gets the net alternates by game parity so the data covers both.
+/// BOTH seats' decisions are recorded (the CC2 seat's rows are r0-grade
+/// grounded data; policy qnorm is per-decision scale-free so mixed score
+/// units are safe for the current recipe — only the quarantined boot-value
+/// would care).
+pub fn datagen_game_vs(
+    writer: &mut ShardWriter,
+    evals: [&dyn Evaluator; 2],
+    cfg: BeamConfig,
+    net_dir: Option<&std::path::Path>,
+    opp_cc2: bool,
+    venue: &VersusFormat,
+    seed: u64,
+    game_id: u32,
+) -> std::io::Result<VersusOutcomeLite> {
     let opp = OppCtx::default();
     let mut engines = [
         Engine::new(marathon_config(), seed),
         Engine::new(marathon_config(), seed),
     ];
-    let mut beams = [planner(cfg, net_dir), planner(cfg, net_dir)];
+    // Seat of the net arm alternates by game parity in two-arm mode.
+    let net_seat: usize = if opp_cc2 { (game_id % 2) as usize } else { 0 };
+    let seat_eval = |who: usize| -> &dyn Evaluator {
+        if !opp_cc2 || who == net_seat {
+            evals[0]
+        } else {
+            evals[1]
+        }
+    };
+    let mut beams = if opp_cc2 {
+        let net_beam = planner(cfg, net_dir);
+        let cc2_beam = BeamPlanner::transposing(cfg.width);
+        if net_seat == 0 {
+            [net_beam, cc2_beam]
+        } else {
+            [cc2_beam, net_beam]
+        }
+    } else {
+        [planner(cfg, net_dir), planner(cfg, net_dir)]
+    };
     let mut attack = [0u32; 2];
     let mut topped = [false; 2];
     let mut ply_of = [0u16; 2];
@@ -212,8 +261,15 @@ pub fn datagen_game(
             ply_of[who] += 1;
             // Split borrows: eval is shared &dyn, engines/beams indexed distinctly.
             let (engine_who, beam_who) = (&mut engines[who], &mut beams[who]);
-            let (record, atk, topout) =
-                play_decision(engine_who, beam_who, eval, cfg.depth, &state, meta, &opp);
+            let (record, atk, topout) = play_decision(
+                engine_who,
+                beam_who,
+                seat_eval(who),
+                cfg.depth,
+                &state,
+                meta,
+                &opp,
+            );
             if let Some(r) = record {
                 writer.push(r);
             }
