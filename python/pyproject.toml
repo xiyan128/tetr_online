@@ -12,7 +12,14 @@ dependencies = [
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.6", "pyright>=1.1.380", "pytest>=8"]
+dev = [
+    "ruff>=0.6",
+    "pyright>=1.1.380",
+    "pytest>=8",
+    "onnxscript>=0.7.1",
+    "onnx>=1.22.0",
+    "onnxruntime>=1.27.0",
+]
 
 [tool.ruff]
 line-length = 100
