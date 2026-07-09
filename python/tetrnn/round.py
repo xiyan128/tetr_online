@@ -171,23 +171,23 @@ def main() -> None:
         row[tag] = duel_line(text)
         print(f"{tag}: {row[tag]}")
 
-    # 5. promotion gate (the verdict).
-    text = sh(
-        [str(BIN), "gate", "--a", cand_guided, "--b", inc_guided,
-         "--seeds", str(gate_seeds), "--max-pairs", "120", "--allow-dirty"],
-        rdir / "gate.log",
-    )
-    row["gate"] = duel_line(text)
-    row["gate_json"] = last_json(text)
-    gate_verdict = row["gate_json"].get("verdict")
-    # A-r8 promotion rule: gate PASS vs the incumbent AND >=12/32 wins vs the
-    # CC2 anchor (a coarse no-regression floor; v3 scores ~24/32).
+    # 5. promotion gate (the verdict) — SHORT-CIRCUITED when the anchor
+    # already failed (A-r8 veto): rounds 6-9 each burned 5-35 gate-minutes on
+    # candidates the 25-second anchor duel had already killed.
     anchor_wins = int(row["anchor_duel"].split("|")[1].strip().split()[1].split("-")[0])
     row["anchor_wins_of_48"] = anchor_wins
-    if gate_verdict == "H1Accepted" and anchor_wins < 18:
-        row["verdict"] = f"H1_VOIDED_BY_ANCHOR({anchor_wins}/48)"
+    if anchor_wins < 18:
+        row["gate"] = "skipped (anchor veto)"
+        row["verdict"] = f"ANCHOR_FAIL({anchor_wins}/48)"
     else:
-        row["verdict"] = gate_verdict
+        text = sh(
+            [str(BIN), "gate", "--a", cand_guided, "--b", inc_guided,
+             "--seeds", str(gate_seeds), "--max-pairs", "120", "--allow-dirty"],
+            rdir / "gate.log",
+        )
+        row["gate"] = duel_line(text)
+        row["gate_json"] = last_json(text)
+        row["verdict"] = row["gate_json"].get("verdict")
     row["wall_secs"] = round(time.time() - t0, 1)
 
     # 6. ledger.
