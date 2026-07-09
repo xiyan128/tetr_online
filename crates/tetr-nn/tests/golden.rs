@@ -54,6 +54,28 @@ fn check_fixture(dir: &str) {
                 "{dir} case {i} out[{j}]: rust {g} vs pytorch {e}"
             );
         }
+
+        // Slot-head parity, when the fixture carries it. Coverage gap history:
+        // forward_slots shipped WITHOUT a golden (2026-07-09) while the slot
+        // vehicle collapsed in play — this is the check that would have
+        // localized (or exonerated) a Rust-side slot defect immediately.
+        if !case["slots"].is_null() {
+            let expected_slots = arr("slots");
+            let opp_emb = net
+                .embed_boards(&[&obs.opp_board], &mut s)
+                .pop()
+                .expect("one embedding");
+            let slots = net
+                .forward_slots(&[(&obs.own_board, &obs.features)], &opp_emb, &mut s)
+                .pop()
+                .expect("one slot row");
+            for (j, (g, e)) in slots.iter().zip(&expected_slots).enumerate() {
+                assert!(
+                    (g - e).abs() < 1e-3,
+                    "{dir} case {i} slots[{j}]: rust {g} vs pytorch {e}"
+                );
+            }
+        }
     }
 }
 
@@ -150,4 +172,15 @@ fn batched_forward_matches_one_by_one() {
             );
         }
     }
+}
+
+
+/// Ad-hoc parity probe: point TETR_GOLDEN_DIR at any model dir carrying a
+/// golden_v2.json (e.g. a trained net + REAL-observation goldens dumped by
+/// tetrnn.goldens) and run with --ignored.
+#[test]
+#[ignore]
+fn env_dir_fixture() {
+    let dir = std::env::var("TETR_GOLDEN_DIR").expect("set TETR_GOLDEN_DIR");
+    check_fixture(&dir);
 }
