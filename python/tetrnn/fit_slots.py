@@ -97,7 +97,7 @@ def main() -> None:
             opt.zero_grad()
             loss.backward()
             opt.step()
-            tot += float(loss) * len(idx)
+            tot += float(loss.detach()) * len(idx)
         if epoch % 10 == 9 or epoch == 0:
             with torch.no_grad():
                 ho_logits = head(ho_emb)
