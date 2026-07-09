@@ -307,7 +307,7 @@ def main() -> None:
         mean, std = whitening_stats(train_paths)
         model.feat_mean.copy_(torch.as_tensor(mean))
         model.feat_std.copy_(torch.as_tensor(std))
-        print(f"whitening from train children [{time.time()-t0:.0f}s]")
+        print(f"whitening from train children+parents [{time.time()-t0:.0f}s]")
 
     print(f"lr={lr}")
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
