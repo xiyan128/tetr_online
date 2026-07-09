@@ -85,28 +85,25 @@ def main() -> None:
         )
         print(f"exported {out}")
 
-    # Parity check vs the torch forward (random-ish inputs).
+    # Parity vs the torch forward on REALISTIC inputs: random values in
+    # training-constant features (std floored at 1e-6) standardize to ~1e6 and
+    # blow activations to ~1e5, where fp32 reorder noise looks like a large
+    # ABSOLUTE delta (the resolved "tail"). Clamp standardized inputs into the
+    # realistic range by drawing feats near the training mean.
     rng = np.random.default_rng(0)
     own = torch.as_tensor(rng.integers(0, 2, (5, 1, 40, 10)).astype(np.float32))
     opp = torch.as_tensor(rng.integers(0, 2, (5, 1, 40, 10)).astype(np.float32))
-    feats = torch.as_tensor(rng.random((5, 85)).astype(np.float32) * 3)
+    z = torch.as_tensor(rng.normal(0, 1, (5, 85)).astype(np.float32)).clamp(-3, 3)
+    feats = model.feat_mean + z * model.feat_std  # in-distribution by construction
     want = model.serve(own, opp, feats).detach().numpy()
     try:
         import onnxruntime as ort  # optional; parity check only if available
 
         sess = ort.InferenceSession(str(dir / "net_leaf.onnx"))
         got = sess.run(None, {"own": own.numpy(), "opp": opp.numpy(), "feats": feats.numpy()})[0]
-        d = np.abs(got - want)
-        print(
-            f"onnxruntime parity: median|Δ|={np.median(d):.1e} "
-            f"p99|Δ|={np.percentile(d, 99):.1e} max|Δ|={d.max():.1e}"
-        )
-        # Median deltas are fp16-scale (k/4096 steps — the exporter's graph
-        # optimization), fine for the ANE path (fp16 hardware, Elo-gated). The
-        # tail can spike ~1e-1 on some inputs (a boundary unit flipping) —
-        # UNRESOLVED; investigate before trusting the graph for gating races.
-        if d.max() > 5e-3:
-            print(f"WARNING: parity tail {d.max():.2e} > 5e-3 — see T13 notes")
+        rel = np.abs(got - want) / np.maximum(np.abs(want), 1.0)
+        print(f"onnxruntime parity (relative): median={np.median(rel):.1e} max={rel.max():.1e}")
+        assert rel.max() < 1e-4, f"relative parity {rel.max():.2e}" 
     except ImportError:
         print("onnxruntime not installed — parity check skipped (graphs still exported)")
 
