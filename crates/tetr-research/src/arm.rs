@@ -56,10 +56,19 @@ pub enum Arm {
     NetValue { dir: PathBuf },
     /// The net's policy head, argmax over the root's children. No search.
     NetPolicy { dir: PathBuf },
-    /// The policy-GUIDED beam (the deployed-vehicle seed): the net's policy
-    /// head picks the top-m roots, the beam searches only those with the net
-    /// as leaf evaluator. TP on (width buys distinct futures).
+    /// The policy-GUIDED beam (the deployed-vehicle seed): the net's PER-CHILD
+    /// policy head picks the top-m placements at every node; net leaf eval;
+    /// TP on (width buys distinct futures).
     GuidedBeam {
+        dir: PathBuf,
+        m: usize,
+        width: usize,
+        depth: u8,
+    },
+    /// The SLOT-ranked guided beam: one parent forward ranks placements via
+    /// the action-indexed head. Cheap (~fan-factor fewer forwards) but only as
+    /// good as the slot head — experimental until it trains stronger.
+    SlotGuidedBeam {
         dir: PathBuf,
         m: usize,
         width: usize,
@@ -99,7 +108,18 @@ impl Arm {
                 depth,
             } => full_strength(
                 Box::new(BeamPlanner::transposing(*width).with_root_filter(guided_filter(dir, *m))),
-                Box::new(NetEvaluator::load(dir).expect("arm model dir loads")),
+                net_leaf_eval(dir),
+                SearchBudget::beam(*depth),
+                seed,
+            ),
+            Arm::SlotGuidedBeam {
+                dir,
+                m,
+                width,
+                depth,
+            } => full_strength(
+                Box::new(BeamPlanner::transposing(*width).with_root_filter(slot_top_m(dir, *m))),
+                net_leaf_eval(dir),
                 SearchBudget::beam(*depth),
                 seed,
             ),
@@ -148,6 +168,12 @@ impl fmt::Display for Arm {
                 width,
                 depth,
             } => write!(f, "guided:{}@m{m}w{width}d{depth}", dir.display()),
+            Arm::SlotGuidedBeam {
+                dir,
+                m,
+                width,
+                depth,
+            } => write!(f, "sguided:{}@m{m}w{width}d{depth}", dir.display()),
         }
     }
 }
@@ -208,10 +234,10 @@ impl FromStr for Arm {
             }
             "value" => Ok(Arm::NetValue { dir: rest.into() }),
             "policy" => Ok(Arm::NetPolicy { dir: rest.into() }),
-            "guided" => {
+            "guided" | "sguided" => {
                 let (target, cfg) = rest
                     .rsplit_once('@')
-                    .ok_or_else(|| format!("arm {s:?}: expected guided:dir@m<M>w<W>d<D>"))?;
+                    .ok_or_else(|| format!("arm {s:?}: expected {kind}:dir@m<M>w<W>d<D>"))?;
                 let cfg = cfg
                     .strip_prefix('m')
                     .ok_or_else(|| format!("arm {s:?}: expected m<M>w<W>d<D>"))?;
@@ -219,11 +245,22 @@ impl FromStr for Arm {
                     .split_once('w')
                     .ok_or_else(|| format!("arm {s:?}: expected m<M>w<W>d<D>"))?;
                 let (width, depth) = parse_wd(&format!("w{wd}"))?;
-                Ok(Arm::GuidedBeam {
-                    dir: target.into(),
-                    m: m_str.parse().map_err(|_| format!("bad m in {s:?}"))?,
-                    width,
-                    depth,
+                let m = m_str.parse().map_err(|_| format!("bad m in {s:?}"))?;
+                let dir: PathBuf = target.into();
+                Ok(if kind == "guided" {
+                    Arm::GuidedBeam {
+                        dir,
+                        m,
+                        width,
+                        depth,
+                    }
+                } else {
+                    Arm::SlotGuidedBeam {
+                        dir,
+                        m,
+                        width,
+                        depth,
+                    }
                 })
             }
             other => Err(format!(
@@ -366,16 +403,15 @@ pub fn slot_top_m(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
     })
 }
 
-/// The best available guided-beam ranker for a model dir: the cheap slot
-/// ranker when the export carries the action head, else the per-child policy
-/// ranker (correct but ~one forward per child — root-restriction only in
-/// effect, since interior nodes pay the same forward the eval would).
+/// The guided-beam ranker. HISTORY: this was a hidden has_slot_head() chooser,
+/// which silently swapped the vehicle under every measurement when slot-headed
+/// exports appeared — and the slot ranker (v3's slot head plateaued at sCE
+/// ~4.0) turns out to COLLAPSE play vs CC2 (v3 slot-guided anchors 0-16 vs
+/// 21-11 per-child-guided). The ranker is now EXPLICIT in the arm grammar:
+/// `guided:` = per-child (the validated vehicle), `sguided:` = slot (cheap,
+/// experimental until the slot head trains stronger).
 pub fn guided_filter(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
-    if Net::load(dir).map(|n| n.has_slot_head()).unwrap_or(false) {
-        slot_top_m(dir, m)
-    } else {
-        policy_top_m(dir, m)
-    }
+    policy_top_m(dir, m)
 }
 
 impl Mind for PolicyMind {

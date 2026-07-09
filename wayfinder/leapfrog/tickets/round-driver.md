@@ -129,3 +129,18 @@ The r7-lineage candidate again "beat" v3 at the SPRT gate (llr +2.96, 103 pairs)
 ## Round-9: H1_VOIDED_BY_ANCHOR(0/48) — the v3-restart degenerates in ONE round → the LR is the suspect
 
 Fresh lineage from v3, diversified pool, one epoch of fine-tune at LR 1e-3: policy 14-34, value 9-39, **anchor 0/48**, and STILL "beats" v3 at the gate (llr +2.98) — the fourth consecutive incumbent-beating/anchor-failing candidate. Per the decision rule, the training step itself is now implicated: **LR 1e-3 on a 1-epoch fine-tune rewrites the policy wholesale toward the exploitable patterns of the very opponent whose games are in the corpus** (the mix's grounded half contains the incumbent's own play — beating the incumbent while failing the anchor is opponent-overfitting, not strength). **A-r10: `--lr` flag added; round-10 running at 1e-4** (the small-delta regime). If 1e-4 holds the anchor but gains nothing, the schedule between (LR × epochs × data share) becomes a measured sweep.
+
+## ⚠️ INSTRUMENT FORENSIC (2026-07-09): the r6-r10 verdicts were VEHICLE artifacts — the hidden ranker chooser
+
+Round-10 (LR 1e-4) anchored 0/48 — implausible for a near-clone of v3 — so the anchor instrument itself went under the microscope. Findings, in evidence order:
+
+1. **The control regressed**: `guided:round0_v3@m12w8d5` vs `beam:cc2@w8d5` on seeds 992000000 read **24-8 at ~19:40 Jul 8** and **0-16 (7-second games) tonight** — same weights (safetensors/config sha-verified untouched since the 09:01 export), same seeds, same CLI string.
+2. **Bisect exonerated the beam levers**: a worktree at dcb36f3 (pre-levers #1/#3) also reads 0-16.
+3. **Root cause: `guided_filter` was a hidden `has_slot_head()` chooser** (eb39302, ~19:33 Jul 8). The moment v3's export carried a slot head, every rebuilt binary silently swapped the vehicle from the per-child policy ranker to the slot ranker — under the SAME arm string. The 24-8/12-4 "slot vehicle" reads at ~19:40 almost certainly ran a STALE binary (still per-child): the arm fix was committed without a rebuild of the duel binary.
+4. **The slot ranker collapses play**: v3 slot-guided anchors **0-16 with instant-suicide games** (control B, explicit `sguided:`). The slot head (sCE plateaued ~4.0 after 2 epochs) is far too weak to filter every node.
+5. **Datagen was equally contaminated** (`datagen.rs` uses `guided_filter`): rounds 6-10 generated training data with the suicide vehicle AND measured anchors with it.
+
+**Consequences:**
+- **ALL r6-r10 verdicts are VOID** — not because the gates lied about net-vs-net, but because the vehicle underneath datagen + anchor was the degenerate slot ranker. The "glass cannon lineage" (A-r8) and "LR 1e-3 too hot" (A-r10) narratives are UNPROVEN — they explained artifacts of the wrong vehicle. The A-r8 anchor-veto mechanism itself remains sound and stays.
+- **Fix (landed)**: the ranker is now EXPLICIT in the arm grammar — `guided:` = per-child (validated), `sguided:` = slot (experimental until the slot head trains stronger). `guided_filter` no longer chooses. No hidden dispatch on model contents may ever select a vehicle again.
+- **Lesson (twice now)**: silent behavior swaps under an unchanged interface string are instrument death. Arm strings must pin EVERY behavior-relevant choice.
