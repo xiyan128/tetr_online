@@ -180,6 +180,26 @@ pub fn generate_with_hold<B: Occupancy>(
     placements
 }
 
+/// [`generate_with_hold`] without path tracking — same placements in the same
+/// canonical order, empty paths. For interior search plies (ply-2+), whose
+/// placements are committed by pose and never rendered to inputs.
+pub fn generate_with_hold_pathless<B: Occupancy>(
+    board: &B,
+    start: &ActivePiece,
+    hold: Option<PieceType>,
+    queue_front: Option<PieceType>,
+    spawn_for: impl Fn(PieceType) -> ActivePiece,
+) -> Vec<Placement> {
+    let mut placements = enumerate_impl(board, start, false, false);
+    if let Some(swapped_in) = hold.or(queue_front) {
+        let swapped_start = spawn_for(swapped_in);
+        let mut held = enumerate_impl(board, &swapped_start, true, false);
+        placements.append(&mut held);
+    }
+    sort_placements(&mut placements);
+    placements
+}
+
 /// Core BFS. `used_hold` is stamped onto every emitted placement and, when set,
 /// prefixes each path with [`Move::Hold`].
 /// Reused breadth-first scratch for [`enumerate`]. The BFS runs once per candidate
@@ -201,6 +221,20 @@ thread_local! {
 }
 
 fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> Vec<Placement> {
+    enumerate_impl(board, start, used_hold, true)
+}
+
+/// [`enumerate`] with path tracking switched off: identical BFS, identical
+/// visited/emitted logic, identical emission ORDER (the canonical tie-break) —
+/// only `Placement.path` stays empty. For search plies whose placements are
+/// never rendered to inputs (everything past ply-1), the per-node SmallVec
+/// clone+push churn is pure waste (Stage-0 deferred lever #1).
+fn enumerate_impl<B: Occupancy>(
+    board: &B,
+    start: &ActivePiece,
+    used_hold: bool,
+    track_path: bool,
+) -> Vec<Placement> {
     // Normalize the start pose: the search re-derives reachable poses from scratch,
     // so it begins from a clean piece at the start origin AND rotation, with
     // spawn-fresh history ([`ActivePiece::at_pose`]) — no inherited lock-down or
@@ -233,8 +267,12 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
             if is_resting(board, &piece)
                 && emitted.insert((pose_key(&piece), classification_key(&piece, board)))
             {
-                let mut full_path = path.clone();
-                if used_hold {
+                let mut full_path = if track_path {
+                    path.clone()
+                } else {
+                    SmallVec::new()
+                };
+                if track_path && used_hold {
                     full_path.insert(0, Move::Hold);
                 }
                 placements.push(Placement {
@@ -249,8 +287,13 @@ fn enumerate<B: Occupancy>(board: &B, start: &ActivePiece, used_hold: bool) -> V
                 if let Some(next) = apply_move(board, &piece, mv)
                     && visited.insert((pose_key(&next), spin_rank(&next)))
                 {
-                    let mut next_path = path.clone();
-                    next_path.push(mv);
+                    let next_path = if track_path {
+                        let mut p = path.clone();
+                        p.push(mv);
+                        p
+                    } else {
+                        SmallVec::new()
+                    };
                     frontier.push_back((next, next_path));
                 }
             }
@@ -816,6 +859,32 @@ mod tests {
                         placement.path,
                     );
                 }
+            }
+        }
+    }
+
+    /// Lever #1's soundness pin: the pathless variant emits the SAME placements
+    /// in the SAME canonical order (pose+hold identity), only with empty paths.
+    #[test]
+    fn pathless_matches_pathful_modulo_paths() {
+        let board = Board::with_top_margin(10, 20, 4);
+        for pt in PieceType::all() {
+            let start = spawn_piece(pt, 10, 20);
+            let full = generate_with_hold(&board, &start, None, Some(PieceType::L), |p| {
+                spawn_piece(p, 10, 20)
+            });
+            let pathless =
+                generate_with_hold_pathless(&board, &start, None, Some(PieceType::L), |p| {
+                    spawn_piece(p, 10, 20)
+                });
+            assert_eq!(full.len(), pathless.len(), "{pt:?}: count");
+            for (a, b) in full.iter().zip(&pathless) {
+                assert_eq!(
+                    (a.rotation(), a.origin(), a.used_hold, a.piece_type()),
+                    (b.rotation(), b.origin(), b.used_hold, b.piece_type()),
+                    "{pt:?}: order/pose"
+                );
+                assert!(b.path.is_empty(), "{pt:?}: pathless carries a path");
             }
         }
     }

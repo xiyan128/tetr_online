@@ -219,6 +219,23 @@ pub fn hold_placements(state: &SearchState) -> Vec<Placement> {
     )
 }
 
+/// [`hold_placements`] without path tracking — the same placements in the same
+/// canonical order, empty paths. For INTERIOR search plies only: their
+/// placements advance state by pose ([`SearchState::commit_placement`]) and are
+/// never rendered to inputs, so per-node path bookkeeping is pure waste
+/// (Stage-0 deferred lever #1). Never use for ply-1 roots (their paths ARE the
+/// input synthesis).
+pub fn hold_placements_pathless(state: &SearchState) -> Vec<Placement> {
+    let (w, h) = (state.board.width(), state.board.height());
+    crate::ai::movegen::generate_with_hold_pathless(
+        &state.board,
+        &state.active,
+        state.hold,
+        state.queue.first().copied(),
+        move |pt| spawn_piece(pt, w, h),
+    )
+}
+
 /// The final decision shared by both multi-ply planners: the ply-1 placement whose
 /// backed-up score is maximal, with the **first** maximum winning (`>` scan over
 /// `root_best` in canonical order) so the result is deterministic (BEAM.md §4).

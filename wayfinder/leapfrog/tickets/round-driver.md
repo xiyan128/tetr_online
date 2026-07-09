@@ -121,3 +121,7 @@ Anchors for the "promoted" r7: **0-32 vs beam:cc2@w8d5** (v3 scores 24-8) and 0-
 ## Forensic: the degeneracy began at ROUND-6 (r6 anchor = 0-32)
 
 `guided:r6/net` vs `beam:cc2@w8d5`: **0-32** — the first fine-tuned round was already the glass cannon; the celebrated 31-17 "value improvement" vs v3 was part of the degenerate direction (hypothesis: the grounded corpus's net-seat wins were largely rush-kills → z=+1 taught rush=win; the value head learned to love rush states). Mechanism hypotheses, in test order: (1) homogeneous grounded pool (already fixed, A-r8); (2) fine-tune LR 1e-3 too hot for a 1-epoch delta (standard fix: 1e-4); (3) SSL/aux gradient mix. **Decision rule:** round-8 (lineage r7, diversified pool) faces the anchor veto — if voided, restart lineage from v3 under the hardened methodology; if THAT degenerates, drop the fine-tune LR.
+
+## Round-8: H1_VOIDED_BY_ANCHOR(0/48) — the hardened gate works autonomously
+
+The r7-lineage candidate again "beat" v3 at the SPRT gate (llr +2.96, 103 pairs) and scored **0/48 vs the CC2 anchor** → auto-voided by the A-r8 rule, no human in the loop. Diversified data did NOT rehabilitate the exploit lineage. Per the pre-registered decision rule: **lineage restarts from round0_v3** (round-9, launched); if the v3-restart also fails the anchor, the fine-tune LR (1e-3) is the next suspect (drop to 1e-4).

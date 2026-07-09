@@ -210,7 +210,10 @@ impl BeamPlanner {
     /// An empty filter result is ignored — restriction must never manufacture
     /// a resignation or silently terminate a live branch.
     fn filtered_placements(filter: Option<&RootFilter>, state: &SearchState) -> Vec<Placement> {
-        let all = hold_placements(state);
+        // Interior plies never render inputs: pathless enumeration (identical
+        // placements + order, no per-node SmallVec churn). Ply-1 roots come
+        // from `seed()`, which keeps the pathful `hold_placements`.
+        let all = crate::ai::search::hold_placements_pathless(state);
         match filter {
             Some(f) if !all.is_empty() => {
                 let picked = f(state, all.clone());
@@ -237,7 +240,17 @@ impl BeamPlanner {
     /// legal placement) seeds an *empty* run — the fingerprint still records it,
     /// so re-rooting at the same dead state stays a no-op.
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> BeamRun {
-        let roots = Self::filtered_placements(self.placement_filter.as_ref(), state);
+        // Ply-1 roots keep their paths (input synthesis); the filter applies the same way.
+        let roots = {
+            let all = hold_placements(state);
+            match &self.placement_filter {
+                Some(f) if !all.is_empty() => {
+                    let picked = f(state, all.clone());
+                    if picked.is_empty() { all } else { picked }
+                }
+                _ => all,
+            }
+        };
 
         // Fork + transition each root child in canonical order, through the shared
         // fork → classify pre-lock → commit helper. Root children score with the
