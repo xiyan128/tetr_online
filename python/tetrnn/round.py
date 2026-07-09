@@ -32,6 +32,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import shutil
 import subprocess
 import sys
 import time
@@ -102,30 +103,38 @@ def main() -> None:
 
     # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
     # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
-    if not (corpus / "cc2").exists():
-        half = args.games // 2
-        for tag, extra, base in [
-            ("cc2", ["--opp-cc2"], datagen_seeds),
-            ("mirror", [], datagen_seeds + half),
-        ]:
-            text = sh(
-                [
-                    str(BIN), "datagen",
-                    "--net", lineage,
-                    "--topm", str(args.topm),
-                    "--width", width, "--depth", depth,
-                    "--games", str(half),
-                    "--seeds", str(base),
-                    "--workers", str(args.workers),
-                    *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
-                    *extra,
-                    "--out", str(corpus / tag),
-                ],
-                rdir / f"datagen_{tag}.log",
-            )
-            row[f"datagen_{tag}"] = last_json(text)
-    else:
-        print(f"datagen: {corpus} exists — skipping")
+    # Resume checks the RECEIPT, not the dir: a killed datagen leaves partial
+    # shards, and dir-existence would silently train on an incomplete corpus.
+    half = args.games // 2
+    for tag, extra, base in [
+        ("cc2", ["--opp-cc2"], datagen_seeds),
+        ("mirror", [], datagen_seeds + half),
+    ]:
+        receipt = corpus / tag / "receipt.json"
+        if receipt.exists():
+            print(f"datagen {tag}: receipt exists — skipping")
+            row[f"datagen_{tag}"] = json.loads(receipt.read_text())
+            continue
+        if (corpus / tag).exists():
+            print(f"datagen {tag}: partial dir without receipt — regenerating")
+            shutil.rmtree(corpus / tag)
+        text = sh(
+            [
+                str(BIN), "datagen",
+                "--net", lineage,
+                "--topm", str(args.topm),
+                "--width", width, "--depth", depth,
+                "--games", str(half),
+                "--seeds", str(base),
+                "--workers", str(args.workers),
+                *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
+                *extra,
+                "--out", str(corpus / tag),
+            ],
+            rdir / f"datagen_{tag}.log",
+        )
+        row[f"datagen_{tag}"] = last_json(text)
+        receipt.write_text(json.dumps(row[f"datagen_{tag}"]))
 
     # 2. replay mix: this round's shards + every 4th base-corpus shard.
     if not mix.exists():
