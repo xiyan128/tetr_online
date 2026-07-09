@@ -582,7 +582,8 @@ mod divergence_probe {
             rain_period: 8,
             sudden_death: true,
         };
-        for seed in [989000000u64] {
+        {
+            let seed = 989000000u64;
             // Harness path: the trusted versus loop with controller factories.
             let arm = Arm::from_str(&format!("guided:{dir}@m12w8d5")).unwrap();
             let fa0 = arm.factory();
