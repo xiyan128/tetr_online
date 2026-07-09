@@ -68,7 +68,8 @@ def duel_line(text: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--round", type=int, required=True)
-    ap.add_argument("--incumbent", required=True, help="model dir (e.g. round0_v3)")
+    ap.add_argument("--incumbent", required=True, help="gate opponent (advances only on PASS)")
+    ap.add_argument("--lineage", default=None, help="training/datagen net (default: incumbent). A-r7: lineage chains from the newest net (AZ-standard); the incumbent advances only on gate PASS.")
     ap.add_argument("--base-corpus", required=True, help="grounded base corpus for the replay mix")
     ap.add_argument("--scratch", required=True)
     ap.add_argument("--games", type=int, default=1200)
@@ -90,14 +91,15 @@ def main() -> None:
     duel_seeds = 993_000_000 + n * 1_000_000
     gate_seeds = 994_000_000 + n * 1_000_000
     t0 = time.time()
-    row: dict = {"round": n, "incumbent": args.incumbent, "games": args.games}
+    lineage = args.lineage or args.incumbent
+    row: dict = {"round": n, "incumbent": args.incumbent, "lineage": lineage, "games": args.games}
 
     # 1. datagen (grounded two-arm, consistent vehicle).
     if not (corpus / "w0").exists():
         text = sh(
             [
                 str(BIN), "datagen",
-                "--net", args.incumbent,
+                "--net", lineage,
                 "--topm", str(args.topm),
                 "--width", width, "--depth", depth,
                 "--games", str(args.games),
@@ -130,7 +132,7 @@ def main() -> None:
             [
                 "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
                 "tetrnn.train", str(mix), str(net), "1",
-                f"--init={args.incumbent}", "--ssl",
+                f"--init={lineage}", "--ssl",
             ],
             rdir / "train.log",
         )

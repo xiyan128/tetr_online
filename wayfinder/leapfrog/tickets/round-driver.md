@@ -99,3 +99,9 @@ Round-4's gate: **H0Accepted (llr −3.02; 23 split, 11-2 sweeps to v3)** — th
 - **Slot-guided BEATS the full beam 12-4** at matched w8d5 (same net leaf) — the learned prior's top-12 restriction actively out-plays unrestricted width: learned selectivity > brute breadth, the leapfrog mechanism measured. (The per-child vehicle only drew 6-6/8-8.)
 - **Slot-guided beats the CC2 teacher config 24-8 (0.75)** (vs per-child's 21-11) — the strongest fully-learned bot yet.
 - T16 round driver BUILT (`python/tetrnn/round.py`): one resumable command per round; encodes all five-round lessons; JSON ledger. Round-6 = the first fully-consistent round (slot vehicle end-to-end, grounded two-arm data, fine-tune+SSL).
+
+## Round-6 (first fully-consistent round): H0, but the VALUE SIGN FLIPPED
+
+Ledger: gate H0Accepted (55 pairs, llr −3.04 — a longer, closer race than rounds 1-5); **value duel 31-17 FOR the candidate** (first value improvement of the campaign; prior best 23-41 against); policy 23-25 parity. The grounded two-arm data + fine-tune + SSL recipe fixed value-learnability as designed — per-round deltas are just sub-threshold for a p1=0.55 vehicle gate.
+
+**Amendment A-r7 (logged, balanced-rigor): training LINEAGE decouples from PROMOTION.** Each round fine-tunes from and generates data with the NEWEST net (AZ-standard continuous training); the INCUMBENT (gate opponent/deployment candidate) advances only on gate PASS (pre-registered strictness preserved). Driver updated (`--lineage`). Round-7 chains from round-6's net.
