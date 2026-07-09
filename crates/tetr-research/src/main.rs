@@ -495,10 +495,15 @@ fn main() -> std::io::Result<()> {
                                 seeds + i,
                                 (seeds + i) as u32,
                             )?;
-                            let idx = match res.result {
-                                tetr_research::versus::VersusResult::AWins => 0,
-                                tetr_research::versus::VersusResult::BWins => 1,
-                                tetr_research::versus::VersusResult::Draw => 2,
+                            // Two-arm mode: count NET-seat wins, not seat-A
+                            // wins — the net seat alternates by game parity,
+                            // so seat accounting reads ~50-50 by construction.
+                            let net_is_seat_a = !opp_cc2 || (seeds + i).is_multiple_of(2);
+                            let idx = match (res.result, net_is_seat_a) {
+                                (tetr_research::versus::VersusResult::Draw, _) => 2,
+                                (tetr_research::versus::VersusResult::AWins, true)
+                                | (tetr_research::versus::VersusResult::BWins, false) => 0,
+                                _ => 1,
                             };
                             wld[idx] += 1;
                             i += n_workers as u64;
@@ -528,7 +533,7 @@ fn main() -> std::io::Result<()> {
                     "out": out.display().to_string(),
                     "wall_secs": secs,
                     "games_per_hr": games as f64 * 3600.0 / secs,
-                    "a_b_draw": wld,
+                    "net_opp_draw": wld,
                 })
             );
             Ok(())
