@@ -66,3 +66,10 @@ Measured via onnxruntime-python on the fixed-batch graphs, **while contended by 
 `tetr-nn` feature `coreml`: `OrtBackend` (bucketed fixed-batch MLProgram sessions {34,68,128,480}, pad-up, chunk-down) + `OrtNetEvaluator` (evaluate_leaves twin of NetEvaluator) + the datagen seam (`--features coreml` + `TETR_ORT=1`). Rust-measured: **33k @ b68 / 78k @ b480 evals/s (contended)** = 5-11× BLAS. Export side: single-file graphs (`external_data=False` — ort rc.12 mangles external-data paths) + fixed buckets.
 
 **Amdahl verdict at the current vehicle:** datagen A/B (same seeds) = 1,345 → 1,511 games/hr (**1.12×**) — the action-indexed head already removed eval from the datagen critical path (top-12 = ~12 evals/node; bookkeeping+encode dominate). The backend's value is the NEXT phase: deep-config races (w68+ leaf batches at the champion-parity budget) and b480 fusion-server datagen. Default build pulls no ort; gate unaffected.
+
+## Perf block (2026-07-09 night): the bookkeeping ladder opens
+
+Duel-path profile (macOS sample): `Net::embed_boards` (im2col glue) tops on-CPU cost, but the Amdahl reality at m12 configs is that eval is amortized — **search bookkeeping is the wall** (matches the historical movegen-44%/memmove-22% profile). Actions:
+- Net arms now honor `TETR_ORT` (CoreML leaf eval in duels/gates too) — play-identical on paired seeds; the win arrives at deep configs.
+- **Stage-0 deferred lever #3 LANDED**: partial selection in `ranked_frontier` (bit-identical: 280 tests + exact champion-duel replay 6-6-0/[2,10,0]). Est 5-8%; idle measurement pending.
+- Queued from the same ledger, in order: #1 pathless BFS for internal plies (8-15%), #2 deferred materialization of speculative continuations (~10%), #4 bitboard movegen (25-30%, rewrite risk — research mature references first).
