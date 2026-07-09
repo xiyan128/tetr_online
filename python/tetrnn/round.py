@@ -1,18 +1,21 @@
 """One resumable command per expert-iteration round (leapfrog T16).
 
-Encodes the pipeline proven by hand in rounds 1-5, with the lessons burned in:
-consistent vehicle end-to-end (the guided slot beam drives datagen AND the
-gates), grounded two-arm data (net vs CC2 — mirror self-play z is weakly
-predictable), fine-tune from the incumbent (from-scratch regresses), SSL aux
-on (the best value read), static completed-Q targets (live-logit quarantined),
-first-tie argmax + seat parity (driver == harness, seed-matched).
+Encodes the campaign's burned-in lessons: consistent vehicle end-to-end (the
+guided beam drives datagen AND the gates), a DIVERSIFIED self-play pool (half
+grounded net-vs-CC2, half mirror — homogeneous pools bred a parent-exploiting
+degenerate, A-r8), fine-tune from the LINEAGE net (from-scratch regresses;
+lineage chains from the newest net while the INCUMBENT advances only on
+promotion, A-r7), SSL aux on, static completed-Q targets (live-logit
+quarantined), and — load-bearing — promotion requires the incumbent gate PASS
+**and** no-regression vs the fixed CC2 anchor (self-play lineages game
+incumbent-only gates, A-r8).
 
 Steps (each skipped if its output already exists — rerun == resume):
-  1. datagen   — two-arm grounded games via `tetr-research datagen --opp-cc2`
-  2. mix       — replay symlinks: round shards + every 4th incumbent-corpus shard
-  3. train     — fine-tune from the incumbent (--init, --ssl), 1 epoch
-  4. duels     — policy/value isolation reads vs the incumbent (telemetry)
-  5. gate      — latched pair-GSPRT guided-vs-guided (p1=0.55): the verdict
+  1. datagen   — half `--opp-cc2` grounded + half mirror, per-mode subdirs
+  2. mix       — replay symlinks: round shards + every 4th base-corpus shard
+  3. train     — fine-tune from the lineage net (--init, --ssl), 1 epoch
+  4. duels     — policy/value isolation + the CC2 ANCHOR duel (telemetry+veto)
+  5. gate      — latched pair-GSPRT guided-vs-guided vs the incumbent
   6. ledger    — one JSON line appended to <scratch>/rounds.jsonl
 
 Seed regions (disjoint by construction, all logged):
