@@ -220,6 +220,7 @@ pub fn datagen_game(
 /// grounded data; policy qnorm is per-decision scale-free so mixed score
 /// units are safe for the current recipe — only the quarantined boot-value
 /// would care).
+#[allow(clippy::too_many_arguments)]
 pub fn datagen_game_vs(
     writer: &mut ShardWriter,
     evals: [&dyn Evaluator; 2],
