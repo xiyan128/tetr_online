@@ -118,7 +118,17 @@ fn play_decision(
     if placements.is_empty() {
         return (None, 0, true);
     }
-    let argmax = (0..scores.len()).max_by_key(|&i| scores[i]).unwrap_or(0);
+    // FIRST maximum wins on ties — the planner's own back-up rule (`>`), and
+    // load-bearing: CC2 integer evals tie on ~55% of decisions, and
+    // `max_by_key` (last max) made the CC2 seat play systematically different,
+    // pathological moves vs real CC2 (round-6 postmortem: lost ~1200-0 to the
+    // net while the trusted duel says ~even).
+    let mut argmax = 0;
+    for i in 1..scores.len() {
+        if scores[i] > scores[argmax] {
+            argmax = i;
+        }
+    }
 
     // Served children: the resulting state after each placement, encoded as the
     // net sees it (opponent-blind, matching the net arms).
