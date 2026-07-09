@@ -79,6 +79,7 @@ def main() -> None:
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--topm", type=int, default=12)
     ap.add_argument("--wd", default="w8d5")
+    ap.add_argument("--lr", default=None, help="fine-tune LR override (A-r10: 1e-3 rewrites the policy wholesale in one epoch — every lineage variant became an anchor-failing incumbent-exploiter; 1e-4 is the small-delta regime)")
     args = ap.parse_args()
 
     n = args.round
@@ -143,6 +144,7 @@ def main() -> None:
                 "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
                 "tetrnn.train", str(mix), str(net), "1",
                 f"--init={lineage}", "--ssl",
+                *([f"--lr={args.lr}"] if args.lr else []),
             ],
             rdir / "train.log",
         )

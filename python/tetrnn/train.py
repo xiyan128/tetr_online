@@ -222,6 +222,10 @@ def main() -> None:
         if a == "--boot-value":
             boot_value = True
     ssl = "--ssl" in sys.argv[4:]
+    lr = LR
+    for a in sys.argv[4:]:
+        if a.startswith("--lr="):
+            lr = float(a.split("=", 1)[1])
     a3 = "--a3" in sys.argv[4:]
     if a3:
         print("A3 per-source heads: r1 shards train all heads; r0 shards train VALUE(+ssl) only")
@@ -291,7 +295,8 @@ def main() -> None:
         model.feat_std.copy_(torch.as_tensor(std))
         print(f"whitening from train children [{time.time()-t0:.0f}s]")
 
-    opt = torch.optim.AdamW(model.parameters(), lr=LR)
+    print(f"lr={lr}")
+    opt = torch.optim.AdamW(model.parameters(), lr=lr)
     rng = np.random.default_rng(SEED)
     for epoch in range(epochs):
         model.train()
