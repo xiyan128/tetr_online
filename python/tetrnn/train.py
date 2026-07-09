@@ -64,16 +64,20 @@ def run_batch(
     policy_heads: bool = True,
 ) -> tuple[torch.Tensor, dict]:
     """Forward one batch of decisions from one shard; return (loss, metrics)."""
-    groups, rows, opp_rows, played_local, zc = [], [], [], [], []
-    for g, d in enumerate(dec_idx):
-        lo, hi = int(shard.child_offset[d]), int(shard.child_offset[d + 1])
-        rows.extend(range(lo, hi))
-        groups.extend([g] * (hi - lo))
-        opp_rows.extend([d] * (hi - lo))
-        played_local.append(len(rows) - (hi - lo) + int(shard.decision[d, 3]))
-        zc.append(z_class(shard.decision[d, 5]))
-    rows = np.asarray(rows)
-    groups_np = np.asarray(groups)
+    # Vectorized gather (exact-A/B-verified against the loop form): children of
+    # decision d are the contiguous rows child_offset[d]..child_offset[d+1].
+    lo = shard.child_offset[dec_idx].astype(np.int64)
+    hi = shard.child_offset[dec_idx + 1].astype(np.int64)
+    counts = hi - lo
+    total = int(counts.sum())
+    starts = np.zeros(len(dec_idx), dtype=np.int64)
+    starts[1:] = np.cumsum(counts)[:-1]
+    # rows = concat(arange(lo_g, hi_g)) via one arange + per-group offsets.
+    rows = np.arange(total, dtype=np.int64) - np.repeat(starts, counts) + np.repeat(lo, counts)
+    groups_np = np.repeat(np.arange(len(dec_idx), dtype=np.int64), counts)
+    opp_rows = np.repeat(dec_idx, counts)
+    played_local = (starts + shard.decision[dec_idx, 3].astype(np.int64)).tolist()
+    zc = [z_class(z) for z in shard.decision[dec_idx, 5]]
     groups_t = torch.as_tensor(groups_np, device=device)
 
     own = torch.as_tensor(unpack_plane(shard.child_own[rows]), device=device).unsqueeze(1)
@@ -166,10 +170,13 @@ def run_batch(
         # top-1 agreement with the search argmax; z_hat spread (start-gate).
         with torch.no_grad():
             lg = logit.detach().cpu().numpy()
-            arg_local = np.zeros(n_groups, dtype=np.int64)
+            # Groups are contiguous runs: per-group argmax via maximum.reduceat,
+            # first-max index recovered by scanning each group's slice once.
+            gmaxes = np.maximum.reduceat(lg, starts)
+            arg_local = np.empty(n_groups, dtype=np.int64)
             for g in range(n_groups):
-                sel = np.flatnonzero(groups_np == g)
-                arg_local[g] = int(sel[lg[sel].argmax()] - sel[0])
+                s0, c = int(starts[g]), int(counts[g])
+                arg_local[g] = int(np.argmax(lg[s0 : s0 + c] >= gmaxes[g]))
             search_arg = shard.decision[dec_idx, 4]
             m["top1"] = float((arg_local == search_arg).mean())
             p = torch.softmax(wdl, dim=1)
