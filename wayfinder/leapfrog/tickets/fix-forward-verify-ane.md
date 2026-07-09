@@ -38,3 +38,9 @@ The im2col memory traffic exactly accounts for the measured wall-clock, so the f
 ## T13 progress (2026-07-09): ONNX export landed, parity tail unresolved
 
 `python/tetrnn/export_onnx.py` exports `net_leaf.onnx` + `net_slots.onnx` (dynamic batch, opset 17) from any model dir; verified loadable in onnxruntime. Parity vs the torch forward: **median fp16-scale (~1e-4, k/4096 steps from the exporter's graph optimization) but the tail spikes to ~1e-1 on some inputs** — likely a boundary unit flipping under reduced precision, amplified through the trunk. Fine for datagen-grade eval; **investigate before using the graph in gating races.** Next: ort/CoreML EP integration in Rust (the rl-branch OnnxEvaluator is the reference) + the ANE throughput re-measurement on this net.
+
+## Parity tail RESOLVED (2026-07-09): test artifact, graph is faithful
+
+The ~1e-1 "tail" was my test's fault: random values fed into **training-constant features** (std floored at MIN_STD=1e-6) standardize to ~3e6 and blow trunk activations to ~5e5, where fp32 reorder noise is large in ABSOLUTE terms (2e-7 RELATIVE). With in-distribution inputs (z clamped ±3): **relative parity median 2.3e-7, max 3.2e-6**. The export path is fully validated for the ort/CoreML integration.
+
+**Latent landmine noted:** opp features + venue clocks are constant-zero in ALL current training (OppCtx::default) → their whitening std is floored → any future distribution shift in those features (e.g. wiring `set_opponent`) multiplies by ~1e6. When the two-board path activates, re-derive whitening or exclude constant features from standardization.
