@@ -119,14 +119,23 @@ def _summary(dir: str) -> None:
     print(f"  children/decision: min={cp.min()} med={int(np.median(cp))} max={cp.max()}")
     print(f"  z histogram (loss/draw/win): {z_hist}")
     print(f"  end_reason histogram (0=topout,1=escalation,2=truecap): {end_hist}")
-    print(f"  live root score range: [{score_min}, {score_max}]; death-dominated children: {death_scores}/{n_child}")
+    print(
+        f"  live root score range: [{score_min}, {score_max}]; "
+        f"death-dominated children: {death_scores}/{n_child}"
+    )
     # Spot-check one decision: obs shapes + that played/argmax index in range.
     s0 = read_shard(paths[0])
     d0 = s0.decision[0]
     ch = s0.children_of(0)
     own = unpack_plane(s0.child_own[ch])
-    print(f"  decision[0]: game={d0[0]} seat={d0[1]} ply={d0[2]} played={d0[3]} argmax={d0[4]} z={d0[5]}")
-    print(f"    children={ch.stop-ch.start} own_planes={own.shape} feats={s0.child_feats[ch].shape}")
+    print(
+        f"  decision[0]: game={d0[0]} seat={d0[1]} ply={d0[2]} "
+        f"played={d0[3]} argmax={d0[4]} z={d0[5]}"
+    )
+    print(
+        f"    children={ch.stop - ch.start} own_planes={own.shape} "
+        f"feats={s0.child_feats[ch].shape}"
+    )
     assert d0[3] < ch.stop - ch.start and d0[4] < ch.stop - ch.start, "played/argmax out of range"
     print("  OK: data contract verified")
 

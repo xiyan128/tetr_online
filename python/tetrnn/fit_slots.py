@@ -36,7 +36,8 @@ N_SLOTS = 104
 
 
 def cache_embeddings(model, files: list[str]) -> tuple[torch.Tensor, torch.Tensor, np.ndarray]:
-    """One trunk pass per parent decision -> (emb [D, TRUNK], slot_target [D, N_SLOTS], best_slot [D])."""
+    """One trunk pass per parent decision ->
+    (emb [D, TRUNK], slot_target [D, N_SLOTS], best_slot [D])."""
     embs, targets, bests = [], [], []
     for f in files:
         sh = read_shard(f)
@@ -64,7 +65,7 @@ def cache_embeddings(model, files: list[str]) -> tuple[torch.Tensor, torch.Tenso
 
 def hit_at(logits: torch.Tensor, best: np.ndarray, k: int) -> float:
     top = torch.topk(logits, k, dim=1).indices.numpy()
-    return float(np.mean([b in row for b, row in zip(best, top)]))
+    return float(np.mean([b in row for b, row in zip(best, top, strict=True)]))
 
 
 def main() -> None:
@@ -103,8 +104,10 @@ def main() -> None:
                 ho_logits = head(ho_emb)
                 ho_ce = -(ho_t * torch.log_softmax(ho_logits, dim=1)).sum(1).mean()
             print(
-                f"epoch {epoch + 1}: train sCE {tot / n:.3f} | holdout sCE {float(ho_ce):.3f} "
-                f"hit@12 {hit_at(ho_logits, ho_best, 12):.3f} hit@24 {hit_at(ho_logits, ho_best, 24):.3f}",
+                f"epoch {epoch + 1}: train sCE {tot / n:.3f} | "
+                f"holdout sCE {float(ho_ce):.3f} "
+                f"hit@12 {hit_at(ho_logits, ho_best, 12):.3f} "
+                f"hit@24 {hit_at(ho_logits, ho_best, 24):.3f}",
                 flush=True,
             )
 

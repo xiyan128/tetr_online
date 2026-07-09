@@ -73,15 +73,33 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--round", type=int, required=True)
     ap.add_argument("--incumbent", required=True, help="gate opponent (advances only on PASS)")
-    ap.add_argument("--lineage", default=None, help="training/datagen net (default: incumbent). A-r7: lineage chains from the newest net (AZ-standard); the incumbent advances only on gate PASS.")
+    ap.add_argument(
+        "--lineage",
+        default=None,
+        help="training/datagen net (default: incumbent). A-r7: lineage chains from the "
+        "newest net (AZ-standard); the incumbent advances only on gate PASS.",
+    )
     ap.add_argument("--base-corpus", required=True, help="grounded base corpus for the replay mix")
     ap.add_argument("--scratch", required=True)
     ap.add_argument("--games", type=int, default=1200)
     ap.add_argument("--workers", type=int, default=6)
     ap.add_argument("--topm", type=int, default=12)
     ap.add_argument("--wd", default="w8d5")
-    ap.add_argument("--lr", default=None, help="fine-tune LR override (A-r10: 1e-3 rewrites the policy wholesale in one epoch — every lineage variant became an anchor-failing incumbent-exploiter; 1e-4 is the small-delta regime)")
-    ap.add_argument("--vehicle", choices=["guided", "sguided"], default="guided", help="EXPLICIT vehicle, end-to-end (datagen + duels + gate): guided = per-child ranker (validated, slow), sguided = slot ranker (fast; qualify hit@12 + anchor first). The hidden chooser is how rounds 6-10 died (0cebd90).")
+    ap.add_argument(
+        "--lr",
+        default=None,
+        help="fine-tune LR override (A-r10: 1e-3 rewrites the policy wholesale in one "
+        "epoch — every lineage variant became an anchor-failing incumbent-exploiter; "
+        "1e-4 is the small-delta regime)",
+    )
+    ap.add_argument(
+        "--vehicle",
+        choices=["guided", "sguided"],
+        default="guided",
+        help="EXPLICIT vehicle, end-to-end (datagen + duels + gate): guided = per-child "
+        "ranker (validated, slow), sguided = slot ranker (fast; qualify hit@12 + anchor "
+        "first). The hidden chooser is how rounds 6-10 died (0cebd90).",
+    )
     args = ap.parse_args()
 
     n = args.round
@@ -162,7 +180,10 @@ def main() -> None:
         )
     else:
         print(f"train: {net} exists — skipping")
-    row["train_tail"] = (rdir / "train.log").read_text().strip().splitlines()[-3:] if (rdir / "train.log").exists() else []
+    train_log = rdir / "train.log"
+    row["train_tail"] = (
+        train_log.read_text().strip().splitlines()[-3:] if train_log.exists() else []
+    )
 
     # 4. isolation duels (telemetry, not verdicts).
     cand_guided = f"{args.vehicle}:{net}@m{args.topm}{args.wd}"

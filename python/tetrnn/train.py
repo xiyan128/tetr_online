@@ -112,7 +112,7 @@ def run_batch(
                 completed_q_target(sc, logits=lg_np[pos : pos + n_ch])
             )
             pos += n_ch
-        batch_targets = {int(d): t for d, t in zip(dec_idx, live_targets)}
+        batch_targets = {int(d): t for d, t in zip(dec_idx, live_targets, strict=True)}
     else:
         batch_targets = {int(d): targets[d] for d in dec_idx}
     pi = torch.as_tensor(
@@ -134,7 +134,7 @@ def run_batch(
     if boot_value:
         Z_SCALE = 10_000.0
         boots = []
-        for g, d in enumerate(dec_idx):
+        for d in dec_idx:
             lo = int(shard.child_offset[d])
             sc = float(shard.child_score[lo + int(shard.decision[d, 3])])
             boots.append(-1.0 if sc < -1_000_000 else float(np.tanh(sc / Z_SCALE)))
@@ -254,7 +254,10 @@ def main() -> None:
         # its round-0 parent; gate H0Accepted llr -2.97). The sound reanalyze
         # form needs the GENERATOR net's frozen logits (store child_gen_logit in
         # shards at datagen time). Kept only as evidence; do not use for rounds.
-        print("WARNING: live-logit mode is UNSOUND (round-1 postmortem) — training anyway for A/B use only")
+        print(
+            "WARNING: live-logit mode is UNSOUND (round-1 postmortem) — "
+            "training anyway for A/B use only"
+        )
 
     paths = shard_paths(corpus_dir)
     assert paths, f"no shards in {corpus_dir}"
@@ -268,7 +271,9 @@ def main() -> None:
     print(f"targets: N_eff median={np.median(effs):.2f} (band [2.5,6])")
 
     import os
-    device = torch.device(os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu"))
+    device = torch.device(
+        os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu")
+    )
     model = TetrNet().to(device)
     if init_dir:
         # Fine-tune: load an exported checkpoint (round-2+ continues the SAME
