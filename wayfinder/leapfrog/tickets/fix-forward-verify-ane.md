@@ -44,3 +44,19 @@ The im2col memory traffic exactly accounts for the measured wall-clock, so the f
 The ~1e-1 "tail" was my test's fault: random values fed into **training-constant features** (std floored at MIN_STD=1e-6) standardize to ~3e6 and blow trunk activations to ~5e5, where fp32 reorder noise is large in ABSOLUTE terms (2e-7 RELATIVE). With in-distribution inputs (z clamped ±3): **relative parity median 2.3e-7, max 3.2e-6**. The export path is fully validated for the ort/CoreML integration.
 
 **Latent landmine noted:** opp features + venue clocks are constant-zero in ALL current training (OppCtx::default) → their whitening std is floored → any future distribution shift in those features (e.g. wiring `set_opponent`) multiplies by ~1e6. When the two-board path activates, re-derive whitening or exclude constant features from standardization.
+
+## ANE/CoreML RE-VERIFIED on the two-board net (2026-07-09) — the throughput future
+
+Measured via onnxruntime-python on the fixed-batch graphs, **while contended by a running round** (lower bounds):
+
+| backend | b=1 | b=34 | b=68 | b=128 | b=480 | b=1024 |
+|---|--:|--:|--:|--:|--:|--:|
+| our BLAS forward (uncontended ref) | 4.4k | 6.2k | — | 6.7k | 6.7k | 6.9k |
+| tract (pure Rust) — REFUTED | 1.8k | 1.4k | 1.3k | 1.2k | 0.7k | 0.8k |
+| ort CPU (MLAS) | 3.0k | 6.2k | 9.4k | 9.1k | 6.7k | 5.8k |
+| **ort CoreML EP (MLProgram)** | — | — | **30.0k** | — | **116.7k** | — |
+| ort CoreML (force CPU+ANE only) | — | — | 13.4k | — | 13.4k | — |
+
+**CoreML MLProgram (default compute units — GPU+ANE dispatch) = 4-17× our forward**, exceeding the rl-branch's recorded receipts, on the real two-board net. Gotchas burned in: the EP needs `ModelFormat: MLProgram` (the default NeuralNetwork format fails init on partitioned opset-18 graphs: "model_path must not be empty"); fixed-batch graphs (the dynamo exporter's dynamic-batch graph also breaks tract's shape inference).
+
+**Remaining build:** the Rust `ort` integration (feature `coreml`, MLProgram flag; rl-branch `onnx.rs` is the reference) as a tetr-nn evaluator backend for datagen + the guided filter. With per-sibling batches (~68) at 30k evals/s, datagen forward cost drops ~4×; a cross-game fusion server at b≈480 unlocks the 116k regime.
