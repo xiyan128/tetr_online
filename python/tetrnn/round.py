@@ -116,8 +116,13 @@ def main() -> None:
     gate_seeds = 994_000_000 + n * 1_000_000
     t0 = time.time()
     lineage = args.lineage or args.incumbent
-    row: dict = {"round": n, "incumbent": args.incumbent, "lineage": lineage, "games": args.games,
-                 "vehicle": args.vehicle}
+    row: dict = {
+        "round": n,
+        "incumbent": args.incumbent,
+        "lineage": lineage,
+        "games": args.games,
+        "vehicle": args.vehicle,
+    }
 
     # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
     # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
@@ -138,16 +143,26 @@ def main() -> None:
             shutil.rmtree(corpus / tag)
         text = sh(
             [
-                str(BIN), "datagen",
-                "--net", lineage,
-                "--topm", str(args.topm),
-                "--width", width, "--depth", depth,
-                "--games", str(half),
-                "--seeds", str(base),
-                "--workers", str(args.workers),
+                str(BIN),
+                "datagen",
+                "--net",
+                lineage,
+                "--topm",
+                str(args.topm),
+                "--width",
+                width,
+                "--depth",
+                depth,
+                "--games",
+                str(half),
+                "--seeds",
+                str(base),
+                "--workers",
+                str(args.workers),
                 *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
                 *extra,
-                "--out", str(corpus / tag),
+                "--out",
+                str(corpus / tag),
             ],
             rdir / f"datagen_{tag}.log",
         )
@@ -171,9 +186,18 @@ def main() -> None:
     if not (net / "config.json").exists():
         sh(
             [
-                "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
-                "tetrnn.train", str(mix), str(net), "1",
-                f"--init={lineage}", "--ssl",
+                "uv",
+                "run",
+                "--directory",
+                str(REPO / "python"),
+                "python",
+                "-m",
+                "tetrnn.train",
+                str(mix),
+                str(net),
+                "1",
+                f"--init={lineage}",
+                "--ssl",
                 *([f"--lr={args.lr}"] if args.lr else []),
             ],
             rdir / "train.log",
@@ -197,8 +221,19 @@ def main() -> None:
         ("anchor_duel", cand_guided, "beam:cc2@w8d5", duel_seeds + 200_000),
     ]:
         text = sh(
-            [str(BIN), "duel", "--a", a, "--b", b, "--pairs", "24",
-             "--seeds", str(seeds), "--allow-dirty"],
+            [
+                str(BIN),
+                "duel",
+                "--a",
+                a,
+                "--b",
+                b,
+                "--pairs",
+                "24",
+                "--seeds",
+                str(seeds),
+                "--allow-dirty",
+            ],
             rdir / f"{tag}.log",
         )
         row[tag] = duel_line(text)
@@ -214,8 +249,19 @@ def main() -> None:
         row["verdict"] = f"ANCHOR_FAIL({anchor_wins}/48)"
     else:
         text = sh(
-            [str(BIN), "gate", "--a", cand_guided, "--b", inc_guided,
-             "--seeds", str(gate_seeds), "--max-pairs", "120", "--allow-dirty"],
+            [
+                str(BIN),
+                "gate",
+                "--a",
+                cand_guided,
+                "--b",
+                inc_guided,
+                "--seeds",
+                str(gate_seeds),
+                "--max-pairs",
+                "120",
+                "--allow-dirty",
+            ],
             rdir / "gate.log",
         )
         row["gate"] = duel_line(text)

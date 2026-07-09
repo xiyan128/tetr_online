@@ -108,9 +108,7 @@ def run_batch(
         for d in dec_idx:
             n_ch = int(shard.child_offset[d + 1]) - int(shard.child_offset[d])
             sc = shard.child_score[shard.children_of(int(d))]
-            live_targets.append(
-                completed_q_target(sc, logits=lg_np[pos : pos + n_ch])
-            )
+            live_targets.append(completed_q_target(sc, logits=lg_np[pos : pos + n_ch]))
             pos += n_ch
         batch_targets = {int(d): t for d, t in zip(dec_idx, live_targets, strict=True)}
     else:
@@ -271,6 +269,7 @@ def main() -> None:
     print(f"targets: N_eff median={np.median(effs):.2f} (band [2.5,6])")
 
     import os
+
     device = torch.device(
         os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu")
     )
@@ -292,9 +291,7 @@ def main() -> None:
             else:
                 renamed[k] = v
         missing, unexpected = model.load_state_dict(renamed, strict=False)
-        missing = [
-            m for m in missing if not (m.startswith("feat_") or m.startswith("ssl_head"))
-        ]
+        missing = [m for m in missing if not (m.startswith("feat_") or m.startswith("ssl_head"))]
         assert not unexpected, f"unexpected keys: {unexpected}"
         assert not missing, f"missing keys: {missing}"
         print(f"initialized from {init_dir}")
@@ -312,7 +309,7 @@ def main() -> None:
         mean, std = whitening_stats(train_paths)
         model.feat_mean.copy_(torch.as_tensor(mean))
         model.feat_std.copy_(torch.as_tensor(std))
-        print(f"whitening from train children+parents [{time.time()-t0:.0f}s]")
+        print(f"whitening from train children+parents [{time.time() - t0:.0f}s]")
 
     print(f"lr={lr}")
     opt = torch.optim.AdamW(model.parameters(), lr=lr)
@@ -372,7 +369,7 @@ def main() -> None:
             f"epoch {epoch}: train pCE={trm['policy_ce']:.3f} vCE={trm['value_ce']:.3f} "
             f"sCE={trm.get('slot_ce', 0.0):.3f} | holdout pCE={hom['policy_ce']:.3f} "
             f"vCE={hom['value_ce']:.3f} sCE={hom.get('slot_ce', 0.0):.3f} "
-            f"top1={hom['top1']:.3f} z_std={hom['z_hat_std']:.3f} [{time.time()-te:.0f}s]",
+            f"top1={hom['top1']:.3f} z_std={hom['z_hat_std']:.3f} [{time.time() - te:.0f}s]",
             flush=True,
         )
         # Export every epoch: a partial run still yields a loadable model.

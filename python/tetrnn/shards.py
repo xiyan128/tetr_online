@@ -133,8 +133,7 @@ def _summary(dir: str) -> None:
         f"played={d0[3]} argmax={d0[4]} z={d0[5]}"
     )
     print(
-        f"    children={ch.stop - ch.start} own_planes={own.shape} "
-        f"feats={s0.child_feats[ch].shape}"
+        f"    children={ch.stop - ch.start} own_planes={own.shape} feats={s0.child_feats[ch].shape}"
     )
     assert d0[3] < ch.stop - ch.start and d0[4] < ch.stop - ch.start, "played/argmax out of range"
     print("  OK: data contract verified")

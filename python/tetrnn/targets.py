@@ -86,6 +86,7 @@ def n_eff(pi: np.ndarray) -> float:
 # ---------------------------------------------------------------------------
 # Self-checks: the two load-bearing properties + edge cases.
 
+
 def _tests() -> None:
     rng = np.random.default_rng(0)
 

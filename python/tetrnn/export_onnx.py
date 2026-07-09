@@ -123,7 +123,7 @@ def main() -> None:
         got = sess.run(None, {"own": own.numpy(), "opp": opp.numpy(), "feats": feats.numpy()})[0]
         rel = np.abs(got - want) / np.maximum(np.abs(want), 1.0)
         print(f"onnxruntime parity (relative): median={np.median(rel):.1e} max={rel.max():.1e}")
-        assert rel.max() < 1e-4, f"relative parity {rel.max():.2e}" 
+        assert rel.max() < 1e-4, f"relative parity {rel.max():.2e}"
     except ImportError:
         print("onnxruntime not installed — parity check skipped (graphs still exported)")
 
