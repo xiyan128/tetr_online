@@ -15,6 +15,17 @@ Each shard is a safetensors file written by `tetr-nn::shards::ShardWriter`
 
 The decision's policy target is derived from `child_score` over its children;
 the value target is `z`.
+
+GENERATOR-EVAL IDENTITY (the C6 scale-trap guard): `child_score` units depend
+on the eval that ran the search — CC2 integer units for CC2-driven seats,
+net-contract units (z_scale·ẑ + attack_w·attack) for net seats. The identity
+is encoded STRUCTURALLY, not in the schema: the round driver writes per-mode
+subdirs (`corpus/cc2/`, `corpus/mirror/`) and the replay-mix symlink names
+preserve them (`shard-r8cc2w0-…`, `shard-r8mirrorw0-…`, `shard-base-…`). In
+two-arm (`cc2`) games the net seat is `game_id % 2`; mirror games are all-net;
+`base` (round-0) corpora are all-CC2. Anything consuming scores in absolute
+units (e.g. a value bootstrap) MUST resolve identity through these names —
+never mix units through one transform (the round-3 lesson).
 """
 
 from __future__ import annotations
