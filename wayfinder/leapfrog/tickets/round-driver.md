@@ -165,3 +165,5 @@ Why was the slot head near-uniform (held-out hit@12 0.33 vs random 0.20 vs per-c
 - gate H1 + anchor ≥18/48 → the campaign's first honest PROMOTION.
 - gate H0 + anchor healthy → chain lineage (A-r7), run rounds 12-13; reassess the compounding hypothesis only after ≥3 consistent-vehicle rounds.
 - anchor FAIL → the incumbent-exploit mechanism is REAL (not a vehicle artifact) — then and only then re-test LR 1e-4 (A-r10's clean shot) and the pool-composition levers.
+
+**v4 epoch-0 early read (2026-07-09): the whitening fix REVIVES the slot path.** Parent trunk std 1.37 (v3: 0.00 — dead); slot hit@12 **0.816** / hit@16 0.874 / hit@24 0.937 after ONE epoch (v3's dead-trunk head: 0.34/0.42/0.60). Epochs 1-2 pending; the m16/m24 dial (~4.5×/3× cheaper than per-child) is the fallback if hit@12 plateaus under the 0.85-0.90 bar. Epoch-0 snapshotted (`round0_v4_e0`).
