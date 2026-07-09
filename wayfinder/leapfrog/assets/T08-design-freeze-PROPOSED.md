@@ -56,3 +56,8 @@ Everything else is proposed to proceed on the defaults above. On ratification, t
 4. **Gate sensitivity:** p1=0.55 latched for round-to-round promotion (fast); the final showdown vs the champion uses a larger pair budget and reports effect size + CI, not just a binary verdict.
 
 The design is FROZEN on these terms. The strike moves to execution, infra-first.
+
+## Gate-battery references (measured 2026-07-09, this machine)
+
+- Champion `tp:cc2@w128d9` solo: **0.787 APP** @ cap-150 (holdout convention) / **0.8194** @ cap-600 (holdout-long) — cross-checks the recorded 0.8225.
+- Champion-ladder duel rungs available: `beam:cc2@w8d5` (teacher), `tp:cc2@w16d7` (knee), …, `tp:cc2@w128d9` (the bar). Current best fully-learned bot: `guided:round0_v3@m12w8d5` = 24-8 over the teacher; 0-32 lineage degenerates VOIDED per A-r8.
