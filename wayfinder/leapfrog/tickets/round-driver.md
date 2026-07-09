@@ -154,3 +154,14 @@ Why was the slot head near-uniform (held-out hit@12 0.33 vs random 0.20 vs per-c
 **Vehicle economics measured (2026-07-09):** per-child datagen = 112 games/hr @2 workers BLAS (≈330/hr @6 ≈ 3.6h/round for 1200 games); TETR_ORT CoreML is SLOWER here (80/hr — single-state filter forwards are ANE-latency-bound). The slot vehicle (one forward/node) is the only structural path to fast rounds — hence the retrain-first order.
 
 **Control receipts (2026-07-09, explicit-ranker binary 0cebd90):** `guided:` (per-child) v3 vs `beam:cc2@w8d5` on 992M = **9-7 over 16 full-length games** (375s); `sguided:` (slot) same seeds = **0-16 in 15s** (instant suicide). The original 24-8 was 16 pairs (32 games) — the 8-pair control's 9-7 is compatible with it under sampling noise, but the run's receipt can't prove which ranker the stale binary ran (spec.json recorded the TREE's commit, eb39302+dirty, not the binary's; games.jsonl is unflushed/empty). Fixed forward: receipts now embed the BINARY's build commit (`build_commit`/`build_dirty` in spec.json). v3's true anchor strength = somewhere in the 9-7/32-ish..24-8/32 band; the per-child vehicle is competitive either way, and v4's anchor read will supersede it.
+
+## PRE-REGISTRATION (2026-07-09, before v4 data): the v4 gate + round-11 decision tree
+
+**v4 validates as the new base** iff (b) `guided:v4` vs `guided:v3` is not clearly worse (≥6/16-ish; they share corpus+recipe — parity expected, the whitening fix should only ADD parent-trunk life) AND (c) v4's CC2 anchor lands in/above v3's 9-7..24-8 band. If v4 clearly regresses on either: suspect the schedule delta (3 full epochs vs v3's accidental 1) — fall back to the epoch-0 snapshot (`round0_v4_e0`) and re-read (b)/(c) before any deeper surgery.
+
+**Slot vehicle qualifies for round-11** iff (a) hit@12 materially closes on the per-child bar (≥0.85-0.90; v3's dead-trunk read was 0.34, per-child 0.996) AND (d) `sguided:v4` anchors ≥ parity-band vs CC2 AND (e) sguided-vs-guided parity is not a collapse. Qualified → round-11 runs `--vehicle sguided` (fast rounds, ~13 vs ~73 forwards/node). Not qualified → `--vehicle guided` at 1200 games (~4-6h/round, measured 112 games/hr @2w) and slot rehab continues in parallel (fit_slots on the live trunk / m=16-24 dial as fallback).
+
+**Round-11 verdict tree (recipe: driver defaults, lineage=incumbent=validated base, LR default 1e-3):**
+- gate H1 + anchor ≥18/48 → the campaign's first honest PROMOTION.
+- gate H0 + anchor healthy → chain lineage (A-r7), run rounds 12-13; reassess the compounding hypothesis only after ≥3 consistent-vehicle rounds.
+- anchor FAIL → the incumbent-exploit mechanism is REAL (not a vehicle artifact) — then and only then re-test LR 1e-4 (A-r10's clean shot) and the pool-composition levers.
