@@ -125,3 +125,7 @@ Anchors for the "promoted" r7: **0-32 vs beam:cc2@w8d5** (v3 scores 24-8) and 0-
 ## Round-8: H1_VOIDED_BY_ANCHOR(0/48) — the hardened gate works autonomously
 
 The r7-lineage candidate again "beat" v3 at the SPRT gate (llr +2.96, 103 pairs) and scored **0/48 vs the CC2 anchor** → auto-voided by the A-r8 rule, no human in the loop. Diversified data did NOT rehabilitate the exploit lineage. Per the pre-registered decision rule: **lineage restarts from round0_v3** (round-9, launched); if the v3-restart also fails the anchor, the fine-tune LR (1e-3) is the next suspect (drop to 1e-4).
+
+## Round-9: H1_VOIDED_BY_ANCHOR(0/48) — the v3-restart degenerates in ONE round → the LR is the suspect
+
+Fresh lineage from v3, diversified pool, one epoch of fine-tune at LR 1e-3: policy 14-34, value 9-39, **anchor 0/48**, and STILL "beats" v3 at the gate (llr +2.98) — the fourth consecutive incumbent-beating/anchor-failing candidate. Per the decision rule, the training step itself is now implicated: **LR 1e-3 on a 1-epoch fine-tune rewrites the policy wholesale toward the exploitable patterns of the very opponent whose games are in the corpus** (the mix's grounded half contains the incumbent's own play — beating the incumbent while failing the anchor is opponent-overfitting, not strength). **A-r10: `--lr` flag added; round-10 running at 1e-4** (the small-delta regime). If 1e-4 holds the anchor but gains nothing, the schedule between (LR × epochs × data share) becomes a measured sweep.
