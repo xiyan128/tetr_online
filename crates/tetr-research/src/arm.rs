@@ -319,7 +319,7 @@ fn net_leaf_eval(dir: &Path) -> Box<dyn Evaluator> {
     Box::new(NetEvaluator::load(dir).expect("arm model dir loads"))
 }
 
-/// Build the policy-top-m [`RootFilter`]: one batched policy forward over the
+/// Build the policy-top-m [`RootFilter`](tetr_core::ai::search::RootFilter): one batched policy forward over the
 /// state's children, keep the m highest-logit LIVE placements (dead children
 /// never earn a beam root). Returns empty when every child is dead — the
 /// planner's defensive fallback then searches all roots (never a manufactured
@@ -365,7 +365,7 @@ pub fn policy_top_m(dir: &Path, m: usize) -> tetr_core::ai::search::RootFilter {
     })
 }
 
-/// Build the SLOT-ranker [`RootFilter`]: ONE forward of the parent state
+/// Build the SLOT-ranker [`RootFilter`](tetr_core::ai::search::RootFilter): ONE forward of the parent state
 /// ranks every placement via the action-indexed head (obs::placement_slot) —
 /// ~one eval per NODE instead of one per child, the guided vehicle's
 /// throughput lever. Live-ness is not known without committing, so dead
