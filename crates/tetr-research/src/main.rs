@@ -303,6 +303,27 @@ fn run_instrument(
     Ok(())
 }
 
+/// The datagen net evaluator: the CoreML backend when built with `--features
+/// coreml`, `TETR_ORT=1` is set, and the model dir carries `net_leaf_b*.onnx`
+/// graphs (5-11x the BLAS forward on Apple silicon); the BLAS `NetEvaluator`
+/// otherwise. Duels/gates keep the BLAS path (deterministic receipts).
+fn load_net_eval(dir: &std::path::Path) -> Box<dyn tetr_core::ai::eval::Evaluator> {
+    #[cfg(feature = "coreml")]
+    if std::env::var("TETR_ORT").is_ok() {
+        match tetr_nn::ort_backend::OrtNetEvaluator::load(dir) {
+            Ok(e) => {
+                eprintln!("datagen eval: CoreML backend ({})", dir.display());
+                return Box::new(e);
+            }
+            Err(e) => eprintln!("CoreML backend unavailable ({e}); falling back to BLAS"),
+        }
+    }
+    Box::new(
+        tetr_nn::serve::NetEvaluator::load(dir)
+            .unwrap_or_else(|e| die(&format!("net load {}: {e}", dir.display()))),
+    )
+}
+
 fn main() -> std::io::Result<()> {
     match Cli::parse().command {
         Command::Run { eval, bots, rt } => execute(&find_or_die(&eval), &bots, &rt),
@@ -413,10 +434,7 @@ fn main() -> std::io::Result<()> {
         } => {
             use tetr_research::datagen::BeamConfig;
             let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
-                Some(dir) => Box::new(
-                    tetr_nn::serve::NetEvaluator::load(dir)
-                        .unwrap_or_else(|e| die(&format!("net load {}: {e}", dir.display()))),
-                ),
+                Some(dir) => load_net_eval(dir),
                 None => Box::new(tetr_core::ai::Cc2Evaluator::new(
                     tetr_core::ai::eval::Cc2Weights::attack_tuned(),
                 )),
@@ -449,10 +467,7 @@ fn main() -> std::io::Result<()> {
                     let wld_ref = &wld_total;
                     handles.push(scope.spawn(move || -> std::io::Result<()> {
                         let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match net_ref {
-                            Some(dir) => Box::new(
-                                tetr_nn::serve::NetEvaluator::load(dir)
-                                    .map_err(|e| std::io::Error::other(e.to_string()))?,
-                            ),
+                            Some(dir) => load_net_eval(dir),
                             None => Box::new(tetr_core::ai::Cc2Evaluator::new(
                                 tetr_core::ai::eval::Cc2Weights::attack_tuned(),
                             )),

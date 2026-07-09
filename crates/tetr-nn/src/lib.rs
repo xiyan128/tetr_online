@@ -18,6 +18,8 @@
 
 pub mod net;
 pub mod obs;
+#[cfg(feature = "coreml")]
+pub mod ort_backend;
 pub mod serve;
 pub mod shards;
 

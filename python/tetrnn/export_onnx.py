@@ -82,6 +82,26 @@ def main() -> None:
             output_names=["out"],
             dynamic_axes=dyn,
             opset_version=17,
+            external_data=False,
+        )
+        print(f"exported {out}")
+    # Fixed-batch leaf graphs for the CoreML backend (static plans are ~5x the
+    # dynamic graph on the CoreML EP; buckets match tetr-nn ort_backend::BUCKETS).
+    for n in (34, 68, 128, 480):
+        exn = (
+            torch.zeros(n, 1, 40, 10),
+            torch.zeros(n, 1, 40, 10),
+            torch.zeros(n, 85),
+        )
+        out = dir / f"net_leaf_b{n}.onnx"
+        torch.onnx.export(
+            LeafWrap(model),
+            exn,
+            str(out),
+            input_names=["own", "opp", "feats"],
+            output_names=["out"],
+            opset_version=17,
+            external_data=False,
         )
         print(f"exported {out}")
 

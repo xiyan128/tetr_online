@@ -38,3 +38,6 @@ workspace = true
 # Property tests for the arm grammar: fuzz the parser (never panics) and pin
 # the Display round-trip (a parsed arm's receipt identity re-parses).
 proptest = "1"
+
+[features]
+coreml = ["tetr-nn/coreml"]
