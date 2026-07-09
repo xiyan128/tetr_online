@@ -80,6 +80,7 @@ def main() -> None:
     ap.add_argument("--topm", type=int, default=12)
     ap.add_argument("--wd", default="w8d5")
     ap.add_argument("--lr", default=None, help="fine-tune LR override (A-r10: 1e-3 rewrites the policy wholesale in one epoch — every lineage variant became an anchor-failing incumbent-exploiter; 1e-4 is the small-delta regime)")
+    ap.add_argument("--vehicle", choices=["guided", "sguided"], default="guided", help="EXPLICIT vehicle, end-to-end (datagen + duels + gate): guided = per-child ranker (validated, slow), sguided = slot ranker (fast; qualify hit@12 + anchor first). The hidden chooser is how rounds 6-10 died (0cebd90).")
     args = ap.parse_args()
 
     n = args.round
@@ -96,7 +97,8 @@ def main() -> None:
     gate_seeds = 994_000_000 + n * 1_000_000
     t0 = time.time()
     lineage = args.lineage or args.incumbent
-    row: dict = {"round": n, "incumbent": args.incumbent, "lineage": lineage, "games": args.games}
+    row: dict = {"round": n, "incumbent": args.incumbent, "lineage": lineage, "games": args.games,
+                 "vehicle": args.vehicle}
 
     # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
     # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
@@ -115,6 +117,7 @@ def main() -> None:
                     "--games", str(half),
                     "--seeds", str(base),
                     "--workers", str(args.workers),
+                    *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
                     *extra,
                     "--out", str(corpus / tag),
                 ],
@@ -153,8 +156,8 @@ def main() -> None:
     row["train_tail"] = (rdir / "train.log").read_text().strip().splitlines()[-3:] if (rdir / "train.log").exists() else []
 
     # 4. isolation duels (telemetry, not verdicts).
-    cand_guided = f"guided:{net}@m{args.topm}{args.wd}"
-    inc_guided = f"guided:{args.incumbent}@m{args.topm}{args.wd}"
+    cand_guided = f"{args.vehicle}:{net}@m{args.topm}{args.wd}"
+    inc_guided = f"{args.vehicle}:{args.incumbent}@m{args.topm}{args.wd}"
     for tag, a, b, seeds in [
         ("policy_duel", f"policy:{net}", f"policy:{args.incumbent}", duel_seeds),
         ("value_duel", f"value:{net}", f"value:{args.incumbent}", duel_seeds + 100_000),

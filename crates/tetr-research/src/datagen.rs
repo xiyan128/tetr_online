@@ -75,6 +75,10 @@ pub struct BeamConfig {
     /// Guided-vehicle restriction: net policy top-m placements per node
     /// (0 = unrestricted). Requires a net dir (the filter's ranker).
     pub top_m: usize,
+    /// Rank with the slot head (one parent forward) instead of the per-child
+    /// policy head — the vehicles must stay EXPLICIT end-to-end (the hidden
+    /// has_slot_head() chooser is how rounds 6-10 died; see 0cebd90).
+    pub slot_filter: bool,
 }
 
 fn planner(cfg: BeamConfig, net_dir: Option<&std::path::Path>) -> BeamPlanner {
@@ -84,6 +88,9 @@ fn planner(cfg: BeamConfig, net_dir: Option<&std::path::Path>) -> BeamPlanner {
         BeamPlanner::new(cfg.width)
     };
     match (cfg.top_m, net_dir) {
+        (m, Some(dir)) if m > 0 && cfg.slot_filter => {
+            base.with_root_filter(crate::arm::slot_top_m(dir, m))
+        }
         (m, Some(dir)) if m > 0 => base.with_root_filter(crate::arm::guided_filter(dir, m)),
         _ => base,
     }
@@ -372,6 +379,7 @@ mod tests {
             depth: 4,
             transpose: true,
             top_m: 0,
+            slot_filter: false,
         };
         // Pressured venue so games end fast.
         let venue = VersusFormat {
@@ -440,6 +448,7 @@ mod tests {
             depth: 3,
             transpose: true,
             top_m: 6,
+            slot_filter: false,
         };
         let venue = VersusFormat {
             max_plies: 30,
@@ -490,6 +499,7 @@ mod tests {
             depth: 5,
             transpose: true,
             top_m: 0,
+            slot_filter: false,
         };
         let venue = VersusFormat {
             max_plies: 240,
@@ -619,6 +629,7 @@ mod divergence_probe {
                 depth: 5,
                 transpose: true,
                 top_m: 12,
+                slot_filter: false,
             };
             let mut writer = ShardWriter::create(&tmp, 100_000).unwrap();
             let out2 = datagen_game(

@@ -130,6 +130,10 @@ enum Command {
         /// needs --net).
         #[arg(long, default_value_t = 0)]
         topm: usize,
+        /// Rank the top-m with the slot head (one parent forward) instead of
+        /// the per-child policy head. Vehicles are explicit, never inferred.
+        #[arg(long)]
+        slot_vehicle: bool,
         /// Parallel workers (games partitioned round-robin; each worker owns
         /// out/wN/ so shard numbering never collides).
         #[arg(long, default_value_t = 1)]
@@ -425,6 +429,7 @@ fn main() -> std::io::Result<()> {
             width,
             depth,
             topm,
+            slot_vehicle,
             games,
             seeds,
             out,
@@ -444,6 +449,7 @@ fn main() -> std::io::Result<()> {
                 depth,
                 transpose: true,
                 top_m: topm,
+                slot_filter: slot_vehicle,
             };
             let venue_fmt = tetr_research::versus::VersusFormat {
                 max_plies: venue.max_plies,
