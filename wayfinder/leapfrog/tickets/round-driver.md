@@ -111,3 +111,9 @@ Ledger: gate H0Accepted (55 pairs, llr −3.04 — a longer, closer race than ro
 `gate | H1Accepted after 74 pairs (llr +3.05)` — the round-7 net (lineage: v3 → r6 → r7, each round = fresh grounded self-play + fine-tune + SSL, static completed-Q targets) **beats incumbent round0_v3 at the vehicle level** under the pre-registered p1=0.55 latched gate. Value duel 30-18 (second consecutive value win); policy 20-28 (the value is carrying it — consistent with search-outcomes-are-value-driven). **The expert-iteration loop compounds.** The A-r7 lineage decoupling was the unlock: single-round deltas are sub-threshold, but two chained rounds cleared the strict gate.
 
 **Incumbent advances: `r7/net` is the new incumbent.** Round-8 launched (lineage = incumbent = r7). Next anchors for the promoted net: CC2 teacher (was 24-8 for v3), the champion ladder (tp:cc2@w16d7 upward), solo (baseline 0.0 — unchanged axis).
+
+## Round 7 promotion VOIDED by anchor evidence — the non-transitivity tripwire fired
+
+Anchors for the "promoted" r7: **0-32 vs beam:cc2@w8d5** (v3 scores 24-8) and 0-32 vs tp:cc2@w16d7, all instant-topout games. r7 genuinely beats v3 head-to-head (the gate was честный) — it evolved a **parent-exploiting glass cannon** (attack-rush that kills its ancestor before its own stack collapses; CC2 downstacks the rush). Classic self-play strategy collapse — the design's pre-registered non-transitivity tripwire, fired for real. **Incumbent rolled back to round0_v3.**
+
+**A-r8 (committed):** (1) promotion now requires the gate PASS **AND** anchor no-regression (guided candidate ≥18/48 vs the fixed CC2 anchor — v3 scores ~36/48); the anchor duel joins every round's telemetry. (2) Self-play pool diversified: half grounded-vs-CC2, half mirror (a homogeneous pool bred the exploit). Round-8 relaunched: lineage r7 (momentum retained — the anchor gate now catches degenerates), incumbent v3.
