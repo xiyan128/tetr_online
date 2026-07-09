@@ -60,3 +60,9 @@ Measured via onnxruntime-python on the fixed-batch graphs, **while contended by 
 **CoreML MLProgram (default compute units — GPU+ANE dispatch) = 4-17× our forward**, exceeding the rl-branch's recorded receipts, on the real two-board net. Gotchas burned in: the EP needs `ModelFormat: MLProgram` (the default NeuralNetwork format fails init on partitioned opset-18 graphs: "model_path must not be empty"); fixed-batch graphs (the dynamo exporter's dynamic-batch graph also breaks tract's shape inference).
 
 **Remaining build:** the Rust `ort` integration (feature `coreml`, MLProgram flag; rl-branch `onnx.rs` is the reference) as a tetr-nn evaluator backend for datagen + the guided filter. With per-sibling batches (~68) at 30k evals/s, datagen forward cost drops ~4×; a cross-game fusion server at b≈480 unlocks the 116k regime.
+
+## T13 BUILT (2026-07-09): the CoreML backend is in the tree
+
+`tetr-nn` feature `coreml`: `OrtBackend` (bucketed fixed-batch MLProgram sessions {34,68,128,480}, pad-up, chunk-down) + `OrtNetEvaluator` (evaluate_leaves twin of NetEvaluator) + the datagen seam (`--features coreml` + `TETR_ORT=1`). Rust-measured: **33k @ b68 / 78k @ b480 evals/s (contended)** = 5-11× BLAS. Export side: single-file graphs (`external_data=False` — ort rc.12 mangles external-data paths) + fixed buckets.
+
+**Amdahl verdict at the current vehicle:** datagen A/B (same seeds) = 1,345 → 1,511 games/hr (**1.12×**) — the action-indexed head already removed eval from the datagen critical path (top-12 = ~12 evals/node; bookkeeping+encode dominate). The backend's value is the NEXT phase: deep-config races (w68+ leaf batches at the champion-parity budget) and b480 fusion-server datagen. Default build pulls no ort; gate unaffected.
