@@ -74,13 +74,13 @@ impl Arm {
             Arm::Spec(spec) => spec.controller(seed),
             Arm::NetBeam { dir, width, depth } => full_strength(
                 Box::new(BeamPlanner::new(*width)),
-                Box::new(NetEvaluator::load(dir).expect("arm model dir loads")),
+                net_leaf_eval(dir),
                 SearchBudget::beam(*depth),
                 seed,
             ),
             Arm::NetValue { dir } => full_strength(
                 Box::new(BeamPlanner::new(1)),
-                Box::new(NetEvaluator::load(dir).expect("arm model dir loads")),
+                net_leaf_eval(dir),
                 SearchBudget::beam(1),
                 seed,
             ),
@@ -267,6 +267,21 @@ impl PolicyMind {
     }
 }
 
+/// The arm's net leaf evaluator: the CoreML backend when the build carries
+/// `--features coreml`, `TETR_ORT=1` is set, and bucket graphs exist (5-11x
+/// the BLAS forward — the profiled duel cost is ~70% im2col glue); the BLAS
+/// `NetEvaluator` otherwise. The receipt identity (the arm string) is
+/// unchanged; runs that care record the backend via the TETR_ORT env.
+fn net_leaf_eval(dir: &Path) -> Box<dyn Evaluator> {
+    #[cfg(feature = "coreml")]
+    if std::env::var("TETR_ORT").is_ok() {
+        if let Ok(e) = tetr_nn::ort_backend::OrtNetEvaluator::load(dir) {
+            return Box::new(e);
+        }
+    }
+    Box::new(NetEvaluator::load(dir).expect("arm model dir loads"))
+}
+
 /// Build the policy-top-m [`RootFilter`]: one batched policy forward over the
 /// state's children, keep the m highest-logit LIVE placements (dead children
 /// never earn a beam root). Returns empty when every child is dead — the
@@ -448,7 +463,12 @@ mod tests {
             Ok(Arm::NetPolicy { .. })
         ));
         match "guided:models/round0@m12w8d5".parse::<Arm>() {
-            Ok(Arm::GuidedBeam { dir, m, width, depth }) => {
+            Ok(Arm::GuidedBeam {
+                dir,
+                m,
+                width,
+                depth,
+            }) => {
                 assert_eq!(
                     (dir.to_str().unwrap(), m, width, depth),
                     ("models/round0", 12, 8, 5)
