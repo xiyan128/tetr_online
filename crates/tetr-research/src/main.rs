@@ -151,6 +151,17 @@ enum Command {
         #[command(flatten)]
         venue: VenueArgs,
     },
+    /// Solo marathon APP for an ARM, matching `marathon-holdout`'s convention
+    /// (16 VALIDATION seeds, piece cap 150) so the read is directly comparable
+    /// to the champion's recorded holdout APP.
+    Solo {
+        #[arg(long)]
+        arm: tetr_research::arm::Arm,
+        #[arg(long, default_value_t = 16)]
+        seeds_n: usize,
+        #[arg(long, default_value_t = 150)]
+        max_pieces: u32,
+    },
 }
 
 /// Default wall-clock budget for an instrument run: 6 hours, a safety cap on a
@@ -355,6 +366,39 @@ fn main() -> std::io::Result<()> {
                 },
             )
         }
+        Command::Solo {
+            arm,
+            seeds_n,
+            max_pieces,
+        } => {
+            let seeds = tetr_research::seeds::seed_set_from(
+                tetr_research::seeds::regions::VALIDATION,
+                seeds_n,
+            );
+            let stats = tetr_research::marathon::evaluate_capped(
+                &arm.factory(),
+                &seeds,
+                tetr_research::marathon::DEFAULT_MAX_FRAMES,
+                max_pieces,
+            );
+            let apps: Vec<f32> = stats
+                .outcomes
+                .iter()
+                .map(|o| o.attack_per_piece())
+                .collect();
+            println!(
+                "{}",
+                json!({
+                    "experiment": "solo",
+                    "arm": arm.to_string(),
+                    "seeds_n": seeds_n, "max_pieces": max_pieces,
+                    "mean_app": apps.iter().sum::<f32>() / apps.len().max(1) as f32,
+                    "apps": apps,
+                    "topped": stats.outcomes.iter().filter(|o| o.topped_out).count(),
+                })
+            );
+            Ok(())
+        }
         Command::Datagen {
             net,
             width,
@@ -452,6 +496,7 @@ fn main() -> std::io::Result<()> {
                 Ok(())
             })?;
             let wld = *wld_total.lock().expect("wld lock");
+            let _ = &wld;
             let secs = t0.elapsed().as_secs_f64();
             println!(
                 "{}",
