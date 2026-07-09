@@ -105,3 +105,9 @@ Round-4's gate: **H0Accepted (llr −3.02; 23 split, 11-2 sweeps to v3)** — th
 Ledger: gate H0Accepted (55 pairs, llr −3.04 — a longer, closer race than rounds 1-5); **value duel 31-17 FOR the candidate** (first value improvement of the campaign; prior best 23-41 against); policy 23-25 parity. The grounded two-arm data + fine-tune + SSL recipe fixed value-learnability as designed — per-round deltas are just sub-threshold for a p1=0.55 vehicle gate.
 
 **Amendment A-r7 (logged, balanced-rigor): training LINEAGE decouples from PROMOTION.** Each round fine-tunes from and generates data with the NEWEST net (AZ-standard continuous training); the INCUMBENT (gate opponent/deployment candidate) advances only on gate PASS (pre-registered strictness preserved). Driver updated (`--lineage`). Round-7 chains from round-6's net.
+
+## ⭐ ROUND 7: H1Accepted — THE FIRST PROMOTION (2026-07-09)
+
+`gate | H1Accepted after 74 pairs (llr +3.05)` — the round-7 net (lineage: v3 → r6 → r7, each round = fresh grounded self-play + fine-tune + SSL, static completed-Q targets) **beats incumbent round0_v3 at the vehicle level** under the pre-registered p1=0.55 latched gate. Value duel 30-18 (second consecutive value win); policy 20-28 (the value is carrying it — consistent with search-outcomes-are-value-driven). **The expert-iteration loop compounds.** The A-r7 lineage decoupling was the unlock: single-round deltas are sub-threshold, but two chained rounds cleared the strict gate.
+
+**Incumbent advances: `r7/net` is the new incumbent.** Round-8 launched (lineage = incumbent = r7). Next anchors for the promoted net: CC2 teacher (was 24-8 for v3), the champion ladder (tp:cc2@w16d7 upward), solo (baseline 0.0 — unchanged axis).
