@@ -93,3 +93,9 @@ Round-4's gate: **H0Accepted (llr −3.02; 23 split, 11-2 sweeps to v3)** — th
 - After the fix, still wrong: **seed-matched experiment** (same `guided:v3` mirror arms, same seeds): duel harness ≈ 88s/game; my driver ≈ 70 decisions/game in 5s. The driver structurally produces shorter/weaker games than the controller harness for identical inputs. Even round-0's CC2-mirror (~146 plies/game) was ~2-3× shorter than harness CC2 mirrors (escalation-length).
 - **Scope of damage:** all datagen corpora carry this behavioral skew (round-0's teacher was "driver-CC2", not harness-CC2). Internal comparisons between nets trained on consistent data retain validity (the round ladder's relative reads stand), and ALL duel/gate results are trusted-harness (the 21-11 milestone stands). But the loop's data plant must match the harness before any further rounds.
 - **Next probe (designed):** instrument one seed — log per-ply (placement pose, board height) in both the driver and a harness-driven game; diff to the FIRST divergent ply. Candidate mechanisms: gravity/think-time frames absent in the driver (pieces placed from spawn height with dt=0 while controllers pass real dt frames), replay/desync subtleties, spawn-wait differences.
+
+## The TRUE (slot) vehicle's first harness reads (post-fix, 2026-07-09)
+
+- **Slot-guided BEATS the full beam 12-4** at matched w8d5 (same net leaf) — the learned prior's top-12 restriction actively out-plays unrestricted width: learned selectivity > brute breadth, the leapfrog mechanism measured. (The per-child vehicle only drew 6-6/8-8.)
+- **Slot-guided beats the CC2 teacher config 24-8 (0.75)** (vs per-child's 21-11) — the strongest fully-learned bot yet.
+- T16 round driver BUILT (`python/tetrnn/round.py`): one resumable command per round; encodes all five-round lessons; JSON ledger. Round-6 = the first fully-consistent round (slot vehicle end-to-end, grounded two-arm data, fine-tune+SSL).
