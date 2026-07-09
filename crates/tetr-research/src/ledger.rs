@@ -109,7 +109,16 @@ fn git_metadata() -> Value {
         .output()
         .ok()
         .and_then(|output| output.status.success().then_some(!output.stdout.is_empty()));
-    json!({ "commit": commit, "dirty": dirty })
+    // The tree's state (above) says what the CHECKOUT looked like; the build
+    // fields say what code actually RAN. They disagree exactly when the
+    // binary is stale — the failure mode that voided the 2026-07-09 anchor
+    // night. Receipts carry both so it can never hide again.
+    json!({
+        "commit": commit,
+        "dirty": dirty,
+        "build_commit": env!("TETR_BUILD_COMMIT"),
+        "build_dirty": env!("TETR_BUILD_DIRTY"),
+    })
 }
 
 fn compact_utc(time: SystemTime) -> io::Result<String> {
