@@ -105,6 +105,25 @@ fn play_decision(
     if hold_placements(state).is_empty() {
         return (None, 0, true);
     }
+    if std::env::var("TETR_DATAGEN_TRACE").is_ok() {
+        let mut miny = [99i32; 10];
+        let arr = state.board.to_array2d();
+        for x in 0..10 {
+            for y in 0..arr.height() {
+                if arr.get_cell_kind(x as isize, y as isize).is_some() {
+                    miny[x] = y as i32;
+                    break;
+                }
+            }
+        }
+        eprintln!(
+            "DTRACE seat={} n={} piece={:?} miny={:?}",
+            meta.seat,
+            meta.ply,
+            state.active.piece_type(),
+            miny
+        );
+    }
     think_to_completion(beam, state, eval, SearchBudget::beam(depth));
 
     // The decision's placements ARE the beam's roots — under a placement
@@ -497,5 +516,124 @@ mod tests {
             decisions as f64 / secs,
         );
         let _ = std::fs::remove_dir_all(&dir);
+    }
+}
+
+#[cfg(test)]
+mod divergence_probe {
+    use super::*;
+    use crate::arm::Arm;
+    use std::str::FromStr;
+
+    /// Wraps a controller and logs column min-y at each new-piece moment —
+    /// the harness half of the divergence diff (the driver half is
+    /// TETR_DATAGEN_TRACE in play_decision).
+    struct Tracing {
+        inner: Box<dyn PlayerController>,
+        tag: &'static str,
+        last: Option<(tetr_core::engine::PieceType, usize)>,
+        n: u32,
+    }
+
+    impl PlayerController for Tracing {
+        fn poll(&mut self, snapshot: &EngineSnapshot) -> InputFrame {
+            if let Some(active) = &snapshot.active {
+                let sig = (active.piece_type, snapshot.board_cells.len());
+                if self.last != Some(sig) {
+                    self.last = Some(sig);
+                    let mut miny = [99i32; 10];
+                    for c in &snapshot.board_cells {
+                        let x = c.x as usize;
+                        if x < 10 {
+                            miny[x] = miny[x].min(c.y as i32);
+                        }
+                    }
+                    eprintln!(
+                        "HTRACE {} n={} piece={:?} miny={:?}",
+                        self.tag, self.n, active.piece_type, miny
+                    );
+                    self.n += 1;
+                }
+            }
+            self.inner.poll(snapshot)
+        }
+    }
+
+    /// Datagen defect #3 probe: same arm, same seed — harness game vs driver
+    /// game. Prints ply counts; run with --nocapture. The driver should match
+    /// the harness (both deterministic, reaction 0, blocking venue).
+    /// cargo test --release -p tetr-research divergence -- --ignored --nocapture
+    #[test]
+    #[ignore]
+    fn driver_vs_harness_same_seed() {
+        // The v3 net via env (the fixture net's games are much longer — nets
+        // differ in style; the probe must compare like with like).
+        let dir_owned = std::env::var("PROBE_NET").unwrap_or_else(|_| {
+            concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../tetr-nn/tests/fixtures/round0"
+            )
+            .into()
+        });
+        let dir = dir_owned.as_str();
+        let venue = VersusFormat {
+            max_plies: 240,
+            rain_period: 8,
+            sudden_death: true,
+        };
+        for seed in [989000000u64] {
+            // Harness path: the trusted versus loop with controller factories.
+            let arm = Arm::from_str(&format!("guided:{dir}@m12w8d5")).unwrap();
+            let fa0 = arm.factory();
+            let fb0 = arm.factory();
+            let fa = move |s: u64| -> Box<dyn PlayerController> {
+                Box::new(Tracing {
+                    inner: fa0(s),
+                    tag: "A",
+                    last: None,
+                    n: 0,
+                })
+            };
+            let fb = move |s: u64| -> Box<dyn PlayerController> {
+                Box::new(Tracing {
+                    inner: fb0(s),
+                    tag: "B",
+                    last: None,
+                    n: 0,
+                })
+            };
+            let out = crate::versus::play_versus_format(&fa, &fb, seed, venue);
+            eprintln!(
+                "harness seed {seed}: plies={} result={:?} end={:?}",
+                out.plies, out.result, out.end_reason
+            );
+
+            // Driver path: same arm config through datagen_game.
+            let tmp = std::env::temp_dir().join(format!("tetr-divergence-{seed}"));
+            let _ = std::fs::remove_dir_all(&tmp);
+            let eval = tetr_nn::serve::NetEvaluator::load(dir).expect("net");
+            let cfg = BeamConfig {
+                width: 8,
+                depth: 5,
+                transpose: true,
+                top_m: 12,
+            };
+            let mut writer = ShardWriter::create(&tmp, 100_000).unwrap();
+            let out2 = datagen_game(
+                &mut writer,
+                &eval,
+                cfg,
+                Some(std::path::Path::new(dir)),
+                &venue,
+                seed,
+                seed as u32,
+            )
+            .unwrap();
+            eprintln!(
+                "driver  seed {seed}: plies={} result={:?} end={:?}",
+                out2.plies_total, out2.result, out2.end_reason
+            );
+            let _ = std::fs::remove_dir_all(&tmp);
+        }
     }
 }

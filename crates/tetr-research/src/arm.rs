@@ -98,7 +98,7 @@ impl Arm {
                 width,
                 depth,
             } => full_strength(
-                Box::new(BeamPlanner::transposing(*width).with_root_filter(policy_top_m(dir, *m))),
+                Box::new(BeamPlanner::transposing(*width).with_root_filter(guided_filter(dir, *m))),
                 Box::new(NetEvaluator::load(dir).expect("arm model dir loads")),
                 SearchBudget::beam(*depth),
                 seed,
