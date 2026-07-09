@@ -197,14 +197,28 @@ def shard_targets(shard: Shard) -> list[np.ndarray]:
 
 
 def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    """Mean/std over all training children, one streaming pass (Welford-ish
-    via sum/sumsq — features are bounded so this is numerically fine)."""
+    """Mean/std over EVERY feature row the net serves — children AND parents —
+    one streaming pass (sum/sumsq; features are bounded so this is fine).
+
+    Child-only stats were the 2026-07-09 slot-head killer: the current-piece
+    one-hot (dims 43-49) is constant-zero in child rows (post-placement), so
+    its std floored to 1e-6 and PARENT rows standardized to z=1e6 — the trunk
+    went ReLU-dead on every parent forward and the slot head could only learn
+    marginal slot popularity (a state-blind filter -> suicide play). A dim
+    constant across this union is genuinely never-informative; the floor only
+    ever divides zero for it. (The same landmine waits on the constant-zero
+    opp/venue dims if set_opponent is wired — recompute whitening whenever the
+    obs distribution grows a new live dim.)"""
     n, s, s2 = 0, 0.0, 0.0
     for p in paths:
-        f = read_shard(p).child_feats.astype(np.float64)
-        n += f.shape[0]
-        s = s + f.sum(axis=0)
-        s2 = s2 + (f * f).sum(axis=0)
+        sh = read_shard(p)
+        for f in (sh.child_feats, sh.parent_feats):
+            if f is None:
+                continue
+            f = f.astype(np.float64)
+            n += f.shape[0]
+            s = s + f.sum(axis=0)
+            s2 = s2 + (f * f).sum(axis=0)
     mean = s / n
     var = np.maximum(s2 / n - mean * mean, 0.0)
     return mean.astype(np.float32), np.sqrt(var).astype(np.float32)
