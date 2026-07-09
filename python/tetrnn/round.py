@@ -126,12 +126,16 @@ def main() -> None:
 
     # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
     # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
+    # The halves are seed-disjoint and independent, so they run CONCURRENTLY
+    # on split workers (round-11 receipts: the mirror half alone was 3.2h at
+    # full workers — serial halves dominated the round's wall-clock).
     # Resume checks the RECEIPT, not the dir: a killed datagen leaves partial
     # shards, and dir-existence would silently train on an incomplete corpus.
     half = args.games // 2
-    for tag, extra, base in [
-        ("cc2", ["--opp-cc2"], datagen_seeds),
-        ("mirror", [], datagen_seeds + half),
+    procs: list[tuple[str, subprocess.Popen, Path]] = []
+    for tag, extra, base, workers in [
+        ("cc2", ["--opp-cc2"], datagen_seeds, (args.workers + 1) // 2),
+        ("mirror", [], datagen_seeds + half, args.workers // 2),
     ]:
         receipt = corpus / tag / "receipt.json"
         if receipt.exists():
@@ -141,31 +145,35 @@ def main() -> None:
         if (corpus / tag).exists():
             print(f"datagen {tag}: partial dir without receipt — regenerating")
             shutil.rmtree(corpus / tag)
-        text = sh(
-            [
-                str(BIN),
-                "datagen",
-                "--net",
-                lineage,
-                "--topm",
-                str(args.topm),
-                "--width",
-                width,
-                "--depth",
-                depth,
-                "--games",
-                str(half),
-                "--seeds",
-                str(base),
-                "--workers",
-                str(args.workers),
-                *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
-                *extra,
-                "--out",
-                str(corpus / tag),
-            ],
-            rdir / f"datagen_{tag}.log",
-        )
+        cmd = [
+            str(BIN),
+            "datagen",
+            "--net",
+            lineage,
+            "--topm",
+            str(args.topm),
+            "--width",
+            width,
+            "--depth",
+            depth,
+            "--games",
+            str(half),
+            "--seeds",
+            str(base),
+            "--workers",
+            str(workers),
+            *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
+            *extra,
+            "--out",
+            str(corpus / tag),
+        ]
+        print("+", " ".join(cmd), flush=True)
+        log = (rdir / f"datagen_{tag}.log").open("w")
+        procs.append((tag, subprocess.Popen(cmd, stdout=log, stderr=log), receipt))
+    for tag, proc, receipt in procs:
+        if proc.wait() != 0:
+            raise SystemExit(f"datagen {tag} failed rc={proc.returncode}")
+        text = (rdir / f"datagen_{tag}.log").read_text()
         row[f"datagen_{tag}"] = last_json(text)
         receipt.write_text(json.dumps(row[f"datagen_{tag}"]))
 
