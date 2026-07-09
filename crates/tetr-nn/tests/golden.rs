@@ -174,7 +174,6 @@ fn batched_forward_matches_one_by_one() {
     }
 }
 
-
 /// Ad-hoc parity probe: point TETR_GOLDEN_DIR at any model dir carrying a
 /// golden_v2.json (e.g. a trained net + REAL-observation goldens dumped by
 /// tetrnn.goldens) and run with --ignored.
