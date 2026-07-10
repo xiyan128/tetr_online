@@ -1,0 +1,2994 @@
+{
+  "schema_version": 1,
+  "campaign": "leapfrog",
+  "generated_at": "2026-07-09T14:15:00-07:00",
+  "known_tickets": [
+    "T00",
+    "T01",
+    "T02",
+    "T03",
+    "T04",
+    "T05",
+    "T06",
+    "T07",
+    "T08",
+    "T09",
+    "T10",
+    "T11",
+    "T12",
+    "T13",
+    "T14",
+    "T15",
+    "T16",
+    "T17",
+    "T18",
+    "T19",
+    "T20",
+    "T21",
+    "T22",
+    "T23",
+    "T24",
+    "T25",
+    "T26",
+    "T27",
+    "T28",
+    "T29",
+    "T30"
+  ],
+  "roots": {
+    "repo": {
+      "kind": "repository",
+      "env": "TETR_EVIDENCE_REPO",
+      "default": "."
+    },
+    "local-runs-20260709": {
+      "kind": "external-ephemeral",
+      "env": "TETR_LEAPFROG_LOCAL_RUNS",
+      "default": "runs"
+    },
+    "legacy-scratch-20260709": {
+      "kind": "external-ephemeral",
+      "env": "TETR_LEAPFROG_LEGACY_SCRATCH",
+      "default": "/private/tmp/claude-501/-Users-xiyan-Development-tetr-online/41fef582-0a14-433e-8a55-78d6420f70ad/scratchpad"
+    }
+  },
+  "artifacts": [
+    {
+      "id": "inventory.scratch-20260709",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "hash-inventory"
+      ],
+      "reason": "Hash-bearing inventory of the observed legacy scratch tree.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T19-scratch-artifacts.v1.json",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "1126e82a469fd78f0dcaab2ff099e0766fc3a732327827471d4144b3aca42f11"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "inventory.july-run-receipts",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "hash-inventory"
+      ],
+      "reason": "Names and hashes all 62 July duels and 9 July gates known at the observation boundary.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T19-run-receipts.v1.json",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "7d91bde4a1424bef0515bea758fe0b1b1ae936b190a5c1586d0fd86783270d66"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "requirement.purity-t01",
+      "kind": "requirement",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "requirement"
+      ],
+      "reason_codes": [
+        "reviewed-requirement"
+      ],
+      "reason": "Reviewed deployment-purity requirement; not a strength result.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T01-purity-contract.md",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "369fc8ef064f27c47c3e3bd07e4cd6d97f1bcc4131c421ae6849dd9639f1921a"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "repair.completed-q-t18",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "test"
+      ],
+      "reason_codes": [
+        "repaired-contract"
+      ],
+      "reason": "Reviewed target semantics, tests, and fail-closed legacy entry points; real-corpus telemetry remains descriptive only.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/tickets/repair-completedq-contract.md",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "0a1ba16952bfb4c832eedcac9b7c7804dcab1724b0bead9780bdd2116560920d"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "fixture.pyref",
+      "kind": "test-fixture",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "test"
+      ],
+      "reason_codes": [
+        "synthetic-cross-language-fixture"
+      ],
+      "reason": "Synthetic parity fixture only; it carries no performance claim.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "crates/tetr-nn/tests/fixtures/pyref",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "011e6b1f61a1aab62201b23cc53d036fc05f6b86ebeab320bc32158939bead7f"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "baseline.elo-pareto",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "baseline"
+      ],
+      "reason_codes": [
+        "historical-family-characterization"
+      ],
+      "reason": "Clean historical attack-tuned-family characterization, not final learned-bot evidence.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "analysis/elo-pareto",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "cbb7d0fb2b8d2b176c4c105142be8165e6a13075de79b7ef50ae1af974626dc9"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "baseline.champion.marathon-holdout",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "baseline"
+      ],
+      "reason_codes": [
+        "clean-git",
+        "nonempty-raw-events",
+        "registered-champion"
+      ],
+      "reason": "Registered champion historical marathon holdout: 0.8225 APP over 16 games.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "local-runs-20260709",
+        "path": "20260612-083859-marathon-holdout-24880",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "b1c60628e87d452261179e8005ae85920642c27b2b96fd473a6642f8e7c1c415"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "baseline.champion.marathon-long",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "baseline"
+      ],
+      "reason_codes": [
+        "clean-git",
+        "nonempty-raw-events",
+        "registered-champion"
+      ],
+      "reason": "Registered champion historical long holdout: mean 0.817807 over 12 games.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "local-runs-20260709",
+        "path": "20260612-084256-marathon-holdout-long-32814",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "0bd11f02c9f0406fe94881b0aed99b945e9692a269314557a0525cb89a167b4b"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "baseline.champion.downstack",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "baseline"
+      ],
+      "reason_codes": [
+        "clean-git",
+        "nonempty-raw-events",
+        "registered-champion"
+      ],
+      "reason": "Registered champion historical downstack baseline: 17.1667 pieces over 6 clears.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "local-runs-20260709",
+        "path": "20260612-084734-downstack-47055",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "c3255b51eeca5ca15bb1a52903d328eb81c4ce1ca85f46c2c2d26fbb27cac673"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "baseline.champion.race",
+      "kind": "report",
+      "validity": "valid",
+      "eligible_uses": [
+        "forensic",
+        "baseline"
+      ],
+      "reason_codes": [
+        "clean-git",
+        "nonempty-raw-events",
+        "registered-champion"
+      ],
+      "reason": "Registered champion clean historical race: 63-0-1 versus attack-tuned depth 3.",
+      "replacement_tickets": [],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "local-runs-20260709",
+        "path": "20260612-084739-race-47152",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "fb3ed85c4f6ea2f0d5a0b80b2111ae47ba18dc646a0698228861fcec99ee1a1c"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.report.throughput-t03",
+      "kind": "report",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mislabeled-champion-arm",
+        "hardware-specific"
+      ],
+      "reason": "Microbenchmarks remain diagnostic, but the tp:cc2 row is not the registered attack-tuned champion and is not pure-vehicle throughput.",
+      "replacement_tickets": [
+        "T13",
+        "T04"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T03-throughput-measurements.md",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "137574d35b5677117cd37dcbbbd7068eddeb9c37836b2a3b6e001c177de95e74"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.report.design-freeze-t08",
+      "kind": "report",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "validity-reset",
+        "impure-vehicle"
+      ],
+      "reason": "Old design freeze contains withdrawn vehicle, strength, and solo claims.",
+      "replacement_tickets": [
+        "T30"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T08-design-freeze-PROPOSED.md",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "b4333a49d7d236a72061e2fb5f25f37f9dbbc3727becb3396ca19d34b9346c37"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.report.gate0a-t11",
+      "kind": "report",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "arm-identity-mismatch",
+        "unsupported-summary"
+      ],
+      "reason": "Historical positions are forensic, but default-CC2 rollouts and attack-tuned rescoring do not establish registered-champion recall.",
+      "replacement_tickets": [
+        "T05",
+        "T20",
+        "T21",
+        "T22",
+        "T11"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T11-gate0a-findings.md",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "8bf3d4549fa820a93d575bf0a61f2a566f831dbc0c819b8f8fe5bdfeee6379e4"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.fixture-round0",
+      "kind": "model",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "prior-campaign-fixture",
+        "impure-composition"
+      ],
+      "reason": "Prior rl/strike round-0 fixture used in diagnostics; never a leapfrog incumbent.",
+      "replacement_tickets": [
+        "T05",
+        "T26",
+        "T30"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "crates/tetr-nn/tests/fixtures/round0",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "648f326e76186d1d30e044474fbdfa71986afbb538abf898204d75b32075dc5b"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.conv-rb1",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "value-only-deployment",
+        "not-policy-wdl-system"
+      ],
+      "reason": "Historical value-net/ANE precedent, not the required end-to-end learned policy and terminal-WDL system.",
+      "replacement_tickets": [
+        "T05",
+        "T26"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "models/conv_rb1",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "2c54f7047bc565194c24d98b6c5933e47464a52dfeabf9668ceec7c1312a2672"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round0-v2",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "legacy-completed-q",
+        "schema-v1",
+        "impure-composition",
+        "missing-provenance"
+      ],
+      "reason": "Legacy round-0 model; v4 repairs whitening only and none satisfies the repaired target, purity, context, or provenance stack.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_v2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "53c8f7a604df3a4c0f022b64d589da45194fdd810914d66274bce40199fa9aad"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round0-v3",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "legacy-completed-q",
+        "schema-v1",
+        "impure-composition",
+        "missing-provenance"
+      ],
+      "reason": "Legacy round-0 model; v4 repairs whitening only and none satisfies the repaired target, purity, context, or provenance stack.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_v3",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "3df68c76cd2c3ac6e2717254b9ab7646c40c443029daa90c253bf865cb6d7e67"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round0-v4-e0",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "legacy-completed-q",
+        "schema-v1",
+        "impure-composition",
+        "missing-provenance"
+      ],
+      "reason": "Legacy round-0 model; v4 repairs whitening only and none satisfies the repaired target, purity, context, or provenance stack.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_v4_e0",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "0875403129d15b6ca41cc3c3c0390bf1bdfc0698cb3a771854ad8119c920685c"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round0-v4-e1",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "legacy-completed-q",
+        "schema-v1",
+        "impure-composition",
+        "missing-provenance"
+      ],
+      "reason": "Legacy round-0 model; v4 repairs whitening only and none satisfies the repaired target, purity, context, or provenance stack.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_v4_e1",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "0d82b068e39443d041d91f9a2a652ce43c496347278b3b024f96924468cc94f1"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round0-v4",
+      "kind": "model",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "legacy-completed-q",
+        "schema-v1",
+        "impure-composition",
+        "missing-provenance"
+      ],
+      "reason": "Legacy round-0 model; v4 repairs whitening only and none satisfies the repaired target, purity, context, or provenance stack.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_v4",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "f702feabe47f6008dde2e9a7c72e7009dc6432d7e1e0bd9d929ac3d3c1c23eba"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round1",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "legacy-completed-q",
+        "mutable-replay",
+        "nondeterministic-gate"
+      ],
+      "reason": "Round 1-5 lineage is void: invalid target/schema ancestry, mutable replay, unbound builds/arms, and non-reconstructible gates.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.mix.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round1_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "895a640daa1c28a241eda62f142fb73adae00c60405e21150deeaba726442f81"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round2",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "legacy-completed-q",
+        "mutable-replay",
+        "nondeterministic-gate"
+      ],
+      "reason": "Round 1-5 lineage is void: invalid target/schema ancestry, mutable replay, unbound builds/arms, and non-reconstructible gates.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round2_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "f1100d1b79bf7eb848780a973300e34e89dda293af115f3a23b49509baf087de"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round3",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "legacy-completed-q",
+        "mutable-replay",
+        "nondeterministic-gate"
+      ],
+      "reason": "Round 1-5 lineage is void: invalid target/schema ancestry, mutable replay, unbound builds/arms, and non-reconstructible gates.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round3_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "4bc8e027ac150db8ef94c1170e1001df99e567ce1e7370b66c6b8573e511bb90"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round4",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "legacy-completed-q",
+        "mutable-replay",
+        "nondeterministic-gate"
+      ],
+      "reason": "Round 1-5 lineage is void: invalid target/schema ancestry, mutable replay, unbound builds/arms, and non-reconstructible gates.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round4_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "e42424809d2647c48bd4c0b0c8ef019f5ce3c895a423740b536ae501dae98e8c"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round5",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "legacy-completed-q",
+        "mutable-replay",
+        "nondeterministic-gate"
+      ],
+      "reason": "Round 1-5 lineage is void: invalid target/schema ancestry, mutable replay, unbound builds/arms, and non-reconstructible gates.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round5_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "b8c43d232b5ff01d2b7a6300d1c5500432c2dfd1e959e3120f6ce3c1a371b060"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round6",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "hidden-content-dependent-vehicle",
+        "schema-v1",
+        "impure-composition",
+        "empty-gate-events"
+      ],
+      "reason": "Round 6-10 lineage is void: hidden vehicle selection contaminated data and gates on top of the reset-wide target, purity, seed, identity, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round6"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r6/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "8f62e8da4736c2ce69efb9c18102ed1933a296c9642bed5059dac66008dfe742"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round7",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "hidden-content-dependent-vehicle",
+        "schema-v1",
+        "impure-composition",
+        "empty-gate-events"
+      ],
+      "reason": "Round 6-10 lineage is void: hidden vehicle selection contaminated data and gates on top of the reset-wide target, purity, seed, identity, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round6",
+        "legacy.mix.round7"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r7/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "64f2eb5f41d3f69ae0713ea05c9dd0c001bb9384a361eb0d26549c8cecf5f453"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round8",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "hidden-content-dependent-vehicle",
+        "schema-v1",
+        "impure-composition",
+        "empty-gate-events"
+      ],
+      "reason": "Round 6-10 lineage is void: hidden vehicle selection contaminated data and gates on top of the reset-wide target, purity, seed, identity, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round7",
+        "legacy.mix.round8"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r8/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "6beafa8583927e63d98db59a0a7a41fb882a9d0970584294b4565c6e38fda146"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round9",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "hidden-content-dependent-vehicle",
+        "schema-v1",
+        "impure-composition",
+        "empty-gate-events"
+      ],
+      "reason": "Round 6-10 lineage is void: hidden vehicle selection contaminated data and gates on top of the reset-wide target, purity, seed, identity, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round9"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r9/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "4629f956a9fa411d37a13e2c961d296f6f4551f64fd015fa9f0a07ec1097f4ec"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round10",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-ancestry",
+        "hidden-content-dependent-vehicle",
+        "schema-v1",
+        "impure-composition",
+        "empty-gate-events"
+      ],
+      "reason": "Round 6-10 lineage is void: hidden vehicle selection contaminated data and gates on top of the reset-wide target, purity, seed, identity, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3",
+        "legacy.mix.round10"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r10/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "2ea738f88841a9feb276ed9a05ab2b8e2439696bcacd8dd8b474b6aa6418442e"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.dev-missing",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "missing-artifact",
+        "unhashed-model",
+        "empty-event-witness"
+      ],
+      "reason": "A July receipt cites this model path, but the model is gone and no content identity was recorded.",
+      "replacement_tickets": [
+        "T20",
+        "T28"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "missing",
+        "root": "legacy-scratch-20260709",
+        "path": "dev_model",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-descriptor-v1",
+          "value": "2dddee21f9b58cb733a5a8c4ac4e1a067df764f1ed451418fed7e50f7b8b8bdd"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round1b-missing",
+      "kind": "model",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "missing-artifact",
+        "unhashed-model",
+        "invalid-round1"
+      ],
+      "reason": "The round1b model cited by logs and a July receipt is gone and was never hash-bound.",
+      "replacement_tickets": [
+        "T20",
+        "T23",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "missing",
+        "root": "legacy-scratch-20260709",
+        "path": "round1b_net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-descriptor-v1",
+          "value": "d07f7f87402c929a099b68f58c20ed8f10cc13fd602988892bef3c878bec293d"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.model.round11-in-flight",
+      "kind": "model",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "in-flight",
+        "legacy-stack",
+        "unknown-future-content"
+      ],
+      "reason": "Round 11 net did not exist at the observation boundary; any eventual output remains exploratory.",
+      "replacement_tickets": [
+        "T20",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "in-flight",
+        "root": "legacy-scratch-20260709",
+        "path": "r11/net",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-descriptor-v1",
+          "value": "b10c4aa0d912881147bc1294272410b3f338a2b3a168ca09ad0c6184aff3a969"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round0",
+      "kind": "corpus",
+      "validity": "superseded",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_full_v2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "38ad4e5a03786c56feabb3def61b1c439b5ff46fe7ad05f8759b381fae4aeaf1"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round1",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round1_corpus_p",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "dcaf3cba49035fb3afb5556b774f71609bcab7908b0f8ad8aea0901e0cdbaa66"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round6",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r6/corpus",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "a210a2dc93365c7a8c0177be52d9b113cfe598ff679b0df747c43f40dee67494"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round7",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round6"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r7/corpus",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "75426a48074831358364b5e5a0b11c78f86015091a88efd700792a3ccb42b090"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round8-cc2",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round7"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r8/corpus/cc2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "4bb553038547608f69162fd326d1c33f35e413207f25baeb5000d8425a880da6"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round8-mirror",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round7"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r8/corpus/mirror",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "d96cfb4181c7eea4c015239ef84ca8f5cc7f86c4735ca7ad37595ac15746e6f6"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round9-cc2",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r9/corpus/cc2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "7907045695bbb6b2e9a8bb5937c40f4eef9d50e731cb08b33441db62030ef43a"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round9-mirror",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r9/corpus/mirror",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "4a1989aac7bfaf342476489285e7e42a89e9291305b76810425acc824ad27c96"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round10-cc2",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r10/corpus/cc2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "28b4f0f936b701abf692ff052233d86cfcf0fc0ea392d233b090aa5916a81e50"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round10-mirror",
+      "kind": "corpus",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r10/corpus/mirror",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "6f082a6be4d130ec0b1ef85dc935b3f7acec5ea36cf896a1744168cc006eabe7"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round11-cc2",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v4"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r11/corpus/cc2",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "28805a9de4b9069fa6aa9d18b60e74b489403b7d98da4aecda456257115c4246"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.round11-mirror",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v4"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r11/corpus/mirror",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "21b48115f70e38a5413d252f3ec3fb252041a5e3c0887a3b4fb3b1db82376312"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.probe-dg-blas",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "probe_dg_blas",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "7a52c2b18e7100b0cdbb7eb796d3468e152aa2b32280e4df481de2b5fb7ef01f"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.r1-throughput",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r1_throughput",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "979675e6b878587ebfc9dee3dcade2d0f3cc670852552f6e8420397183e2b69a"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.trace-pc",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "trace_pc",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "f73ffc94ecb2666810883c0577741aa07c62804d7428185256ee31e995f2e2c5"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.corpus.trace-sv",
+      "kind": "corpus",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "schema-v1",
+        "missing-legal-actions",
+        "missing-frozen-logits",
+        "missing-provenance"
+      ],
+      "reason": "Legacy or diagnostic shard set cannot reconstruct the repaired completed-Q target and is not eligible for clean training.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28",
+        "T29"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "trace_sv",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "2b27f8fd733516824039938f05bb6a691b90b705cae0420984be6929cc00c30b"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round1",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round1_mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "207af4d23b3e5cf1b848de9b5c4bfaa07477192ace422e1c48a4b51e59bc9f97"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round6",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round6"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r6/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "c953d4f286415119f7135e1c1367d0a669d50c3493ac610e360e13c30f8ce804"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round7",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round7"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r7/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "1f2cb6b34352619076f1d030845e98dfb2581c0b29cda75f38279bf4b6080152"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round8",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round8-cc2",
+        "legacy.corpus.round8-mirror"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r8/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "fbe5aaae84a6ba7d2476a073c61a6a03961ca03385ce055abf046cfdcc3eb71e"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round9",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round9-cc2",
+        "legacy.corpus.round9-mirror"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r9/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "d03faee04170489898c4151e9af5f41abedf4365776f8a527867e7d7e53f1ced"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round10",
+      "kind": "mix",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round10-cc2",
+        "legacy.corpus.round10-mirror"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r10/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "0cd9b68db3119138d219cb15f01a2f8aafa9a4e319acf9d755e42c95780d503f"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.mix.round11",
+      "kind": "mix",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "mutable-symlinks",
+        "existence-based-resume",
+        "invalid-corpus-ancestry"
+      ],
+      "reason": "Mutable symlink replay mix has no immutable source-corpus manifest.",
+      "replacement_tickets": [
+        "T23",
+        "T28"
+      ],
+      "derived_from": [
+        "legacy.corpus.round0",
+        "legacy.corpus.round11-cc2",
+        "legacy.corpus.round11-mirror"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r11/mix",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "06f0328cc04b681eaf02142c4a2ef139e9b3c44f0c4e52958a32d2a81e8e14ed"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.0",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v2"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round0_battery_results.txt",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "2f3f596cee9f3e654d74e29211675eab65d54d2d62d11bedadfd3c54f4282a15"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.1",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round1"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round1_gate_clean.txt",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "8f5999d39c6e9ca5496effd47cc14e59c0a727c855961cbda0374eeeaee10eeb"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.2",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round2"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round2_gate.txt",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "dfd388d5b606aeb2ea5096f0e64b8b49223b553ab4ee1baabc40ac6c79dab9be"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.3",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round3"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "train_r3.log",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "e12a4191e1e06a058b7e9e9444d23cd03322d755fce783e4a1cf8ea14a8baf22"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.4",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round4"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "round4_gate.txt",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "6bb8e46218469a026c73bb5a445fdb0b7f21926a928993d2b2e308552d8f98b3"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.5",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round5"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "train_r5.log",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "9983c40239fc04811e48b7f366755e5ae7d3c2edb92e386837b2817cca0ce7f8"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.6",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round6"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r6",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "e43dbc44b38473e6969946feb4bf3f3e56b226f0f90b9dc291457497cf3a0550"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.7",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round7"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r7",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "795b704448839179c33d500dc33986d94728dd541a3ce34a219305d2fe800753"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.8",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round8"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r8",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "bda6fa89fc68b5fe4213d0acd1aa580e60bf0167d915e4a50fa4d4b2a5fcf542"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.9",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round9"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r9",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "204932030edd9997debb642377af1e27f26b843a2b8931473e8d74460351839d"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.10",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "invalid-round-stack",
+        "non-reconstructible-gate",
+        "unbound-arm-build-seeds"
+      ],
+      "reason": "Historical round receipt cannot authorize lineage, promotion, compounding, purity, or champion-relative strength.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round10"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "r10",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-tree-v1",
+          "value": "5a3549196c9f631063b9b883039f72f362a77f0f0a709b43dc7bd3ea3bc17a51"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.round.11",
+      "kind": "round-receipt",
+      "validity": "exploratory",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "in-flight",
+        "legacy-stack",
+        "future-output-quarantine"
+      ],
+      "reason": "Round 11 may finish diagnostically, but its whole subtree and future outputs are barred from incumbent and lineage selection.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.model.round0-v4",
+        "legacy.corpus.round11-cc2",
+        "legacy.corpus.round11-mirror",
+        "legacy.mix.round11"
+      ],
+      "observation": {
+        "state": "in-flight",
+        "root": "legacy-scratch-20260709",
+        "path": "r11",
+        "scope": "subtree",
+        "digest": {
+          "algorithm": "sha256-descriptor-v1",
+          "value": "bf235501a3980e0efdf5f2354f6ccd509c95e644d8cfb2f8c04c2b54c2367d22"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.ledger.rounds6-10",
+      "kind": "round-receipt",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "void-ledger",
+        "invalid-round-stack"
+      ],
+      "reason": "Ledger contains rounds 6-10 plus an explicit forensic VOID note; no row is promotable.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T28",
+        "T16"
+      ],
+      "derived_from": [
+        "legacy.round.6",
+        "legacy.round.7",
+        "legacy.round.8",
+        "legacy.round.9",
+        "legacy.round.10"
+      ],
+      "observation": {
+        "state": "present",
+        "root": "legacy-scratch-20260709",
+        "path": "rounds.jsonl",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "03fc9053a1325cb87f70fcdd11641283dc21da686b20b79460a46aca21148794"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    },
+    {
+      "id": "legacy.july-run-set",
+      "kind": "run-set",
+      "validity": "void",
+      "eligible_uses": [
+        "forensic"
+      ],
+      "reason_codes": [
+        "dirty-git-tree",
+        "empty-event-stream",
+        "raw-path-arms",
+        "overlapping-seeds"
+      ],
+      "reason": "All 71 known July duel/gate specs are dirty and every event stream is empty; the linked inventory names each receipt.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T28"
+      ],
+      "derived_from": [],
+      "observation": {
+        "state": "present",
+        "root": "repo",
+        "path": "wayfinder/leapfrog/assets/T19-run-receipts.v1.json",
+        "scope": "exact",
+        "digest": {
+          "algorithm": "sha256-file-v1",
+          "value": "7d91bde4a1424bef0515bea758fe0b1b1ae936b190a5c1586d0fd86783270d66"
+        },
+        "observed_at": "2026-07-09T14:15:00-07:00",
+        "members": []
+      },
+      "candidate_model_id": null
+    }
+  ],
+  "retracted_claims": [
+    {
+      "id": "claim.t08.design-freeze",
+      "source": "T08 — Resolution / T08 design-freeze asset",
+      "claim": "The old learned-system design was frozen and authorized.",
+      "validity": "superseded",
+      "reason": "The frozen vehicle and evidence stack fail the reset contracts.",
+      "replacement_tickets": [
+        "T30"
+      ]
+    },
+    {
+      "id": "claim.t12.operator",
+      "source": "T12 — Resolution",
+      "claim": "The Gumbel operator was built, fast, and strength-neutral (including 1370 games/hour and stale 12-4/24-8 reads).",
+      "validity": "void",
+      "reason": "The measured operator was not the specified pure operator; short-game throughput and stale/hidden binary reads cannot authorize it.",
+      "replacement_tickets": [
+        "T13",
+        "T25",
+        "T26"
+      ]
+    },
+    {
+      "id": "claim.t15.round1-authorized",
+      "source": "T15 — Resolution / commit fd2fddf",
+      "claim": "Completed-Q was correct and round 1 was authorized by 35-29, 11-5, and 16-0.",
+      "validity": "void",
+      "reason": "Legacy c=12 targets fail adversarial Mctx semantics and the receipts are dirty/event-empty.",
+      "replacement_tickets": [
+        "T18",
+        "T23",
+        "T29",
+        "T05"
+      ]
+    },
+    {
+      "id": "claim.t04.final-gate-freeze",
+      "source": "T04 — prior Resolution",
+      "claim": "The final champion/solo gate was frozen and local 0.787/0.8194 references were authoritative.",
+      "validity": "superseded",
+      "reason": "The arm shorthand was not the registered champion and the final identity, seeds, events, and pure vehicle were not frozen.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T26",
+        "T04"
+      ]
+    },
+    {
+      "id": "claim.t07.gate0b",
+      "source": "T07 — prior Resolution / 31-1 result",
+      "claim": "The 31-1 legacy beam-versus-policy result passed Gate-0b and authorized the operator.",
+      "validity": "void",
+      "reason": "It did not test the specified Gumbel/completed-Q operator or curve and has no reconstructible pair stream.",
+      "replacement_tickets": [
+        "T05",
+        "T18",
+        "T22",
+        "T25",
+        "T26",
+        "T07"
+      ]
+    },
+    {
+      "id": "claim.t11.gate0a",
+      "source": "T11 — prior Resolution",
+      "claim": "Gate-0a established registered-champion survival recall and roughly 5x lift.",
+      "validity": "void",
+      "reason": "The table peaks at 3.1x and default-CC2 rollouts were rescored with a different profile; neither arm is the immutable registered champion.",
+      "replacement_tickets": [
+        "T05",
+        "T20",
+        "T21",
+        "T22",
+        "T11"
+      ]
+    },
+    {
+      "id": "claim.t14.driver-complete",
+      "source": "T14 — prior Resolution",
+      "claim": "The datagen driver was validity-complete.",
+      "validity": "superseded",
+      "reason": "Legacy schema, identity, seed, counterbalance, provenance, and resume contracts are incomplete.",
+      "replacement_tickets": [
+        "T27",
+        "T28",
+        "T14"
+      ]
+    },
+    {
+      "id": "claim.t16.round-driver-complete",
+      "source": "T16 — historical round narrative",
+      "claim": "The driver and rounds 1-11 constituted a valid compounding campaign.",
+      "validity": "void",
+      "reason": "Every lineage round inherits reset-wide defects; the driver uses raw paths, mutable mixes, overlapping seeds, completion-order gates, and empty events.",
+      "replacement_tickets": [
+        "T05",
+        "T14",
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T30",
+        "T16"
+      ]
+    },
+    {
+      "id": "claim.t10.zero-solo",
+      "source": "T10 — 0.0 APP / solo-race narrative",
+      "claim": "The learned bot's single-player baseline was 0.0 and later July solo aggregates supported comparison.",
+      "validity": "void",
+      "reason": "Solo bypassed run receipts and the learned path was contaminated by hidden/impure vehicle behavior.",
+      "replacement_tickets": [
+        "T04",
+        "T10",
+        "T22",
+        "T24",
+        "T26",
+        "T28"
+      ]
+    },
+    {
+      "id": "claim.fully-learned-v3-r11",
+      "source": "Map/tickets/commit subjects describing v3 or rounds 6-11 as fully learned",
+      "claim": "The historical net-search path was fully learned and venue-conditioned.",
+      "validity": "void",
+      "reason": "serve.rs composes hand attack reward, beam.rs applies SPEC_DECAY, and production opponent/venue context stays default.",
+      "replacement_tickets": [
+        "T24",
+        "T25",
+        "T26",
+        "T30"
+      ]
+    },
+    {
+      "id": "claim.champion-shorthand",
+      "source": "T03/T04/T16 and scratch champion/anchor reads using tp:cc2 or beam:cc2",
+      "claim": "The shorthand selected the registered probe-tp128d9 attack-tuned champion.",
+      "validity": "void",
+      "reason": "Arm parsing uses default CC2 weights while the registered champion and datagen teacher use attack-tuned weights.",
+      "replacement_tickets": [
+        "T20",
+        "T04"
+      ]
+    },
+    {
+      "id": "claim.t03.champion-throughput",
+      "source": "T03 — tp:cc2@w128d9 table row",
+      "claim": "The registered champion ran at 278 games/hour.",
+      "validity": "superseded",
+      "reason": "That row used the wrong default-weight shorthand; only the microbenchmark diagnosis remains descriptive.",
+      "replacement_tickets": [
+        "T13",
+        "T04"
+      ]
+    },
+    {
+      "id": "claim.round1-round10-compounding",
+      "source": "T16 — rounds 1-10 results and causal amendments",
+      "claim": "Promotion, anchor, and mechanism narratives proved or disproved compounding.",
+      "validity": "void",
+      "reason": "Invalid ancestry, vehicle selection, identities, overlapping seeds, dirty builds, and empty streams make all authorization and causal reads void.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T30",
+        "T16"
+      ]
+    },
+    {
+      "id": "claim.round11-authorizing",
+      "source": "T16 — A-r11 / first consistent-vehicle narrative",
+      "claim": "Round 11 could promote or seed the clean lineage.",
+      "validity": "void",
+      "reason": "Explicit per-child selection does not repair legacy shards, target, purity, context, identity, seed, replay, resume, and receipt defects.",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05",
+        "T16"
+      ]
+    },
+    {
+      "id": "claim.t18.corpus-total",
+      "source": "T18 — Descriptive real-corpus audit",
+      "claim": "The four listed populations totalled 887,344 decisions.",
+      "validity": "void",
+      "reason": "The listed counts sum to 831,518; the prose total was corrected and remains descriptive without input manifests.",
+      "replacement_tickets": [
+        "T23",
+        "T29"
+      ]
+    },
+    {
+      "id": "claim.t16.r11-shards",
+      "source": "T16 — Round 11 exploratory narrative",
+      "claim": "The grounded Round 11 half produced 72 shards.",
+      "validity": "void",
+      "reason": "The observed corpus contains 92 grounded shards; the receipt itself omits shard count and hashes.",
+      "replacement_tickets": [
+        "T23",
+        "T27",
+        "T28"
+      ]
+    },
+    {
+      "id": "claim.old-solo-references",
+      "source": "T08/T04/scratch champ_solo600",
+      "claim": "July 0.0/0.225/0.787/0.8194 aggregates were validity-grade solo baselines.",
+      "validity": "void",
+      "reason": "The solo command emitted only aggregate stdout and bypassed dirty refusal, run spec, and per-game events.",
+      "replacement_tickets": [
+        "T04",
+        "T10",
+        "T22",
+        "T28"
+      ]
+    }
+  ],
+  "path_quarantines": [
+    {
+      "id": "quarantine.july-08-runs",
+      "root": "repo",
+      "prefix": "runs/20260708-",
+      "match": "path-prefix",
+      "validity": "void",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T28"
+      ],
+      "reason": "Every July 8 duel/gate receipt is dirty and event-empty."
+    },
+    {
+      "id": "quarantine.july-09-runs",
+      "root": "repo",
+      "prefix": "runs/20260709-",
+      "match": "path-prefix",
+      "validity": "exploratory",
+      "replacement_tickets": [
+        "T20",
+        "T21",
+        "T22",
+        "T28"
+      ],
+      "reason": "Known July 9 receipts and any later in-flight Round 11 receipts are non-promotable."
+    },
+    {
+      "id": "quarantine.round11-subtree",
+      "root": "legacy-scratch-20260709",
+      "prefix": "r11",
+      "match": "subtree",
+      "validity": "exploratory",
+      "replacement_tickets": [
+        "T20",
+        "T23",
+        "T24",
+        "T25",
+        "T26",
+        "T27",
+        "T28",
+        "T29",
+        "T05"
+      ],
+      "reason": "The entire live legacy Round 11 subtree is excluded from the clean lineage."
+    }
+  ]
+}

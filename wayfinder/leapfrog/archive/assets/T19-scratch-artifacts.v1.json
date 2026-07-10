@@ -1,0 +1,109 @@
+{
+  "schema_version": 1,
+  "campaign": "leapfrog",
+  "observed_at": "2026-07-09T14:15:00-07:00",
+  "root_env": "TETR_LEAPFROG_LEGACY_SCRATCH",
+  "root_observed": "/private/tmp/claude-501/-Users-xiyan-Development-tetr-online/41fef582-0a14-433e-8a55-78d6420f70ad/scratchpad",
+  "tree_scheme": "sha256-tree-v1",
+  "models": {
+    "columns": ["id", "path", "validity", "tree_sha256", "weights_sha256", "config_sha256"],
+    "rows": [
+      ["legacy.model.round0-v2", "round0_v2", "superseded", "53c8f7a604df3a4c0f022b64d589da45194fdd810914d66274bce40199fa9aad", "459c923ccb1486c158a2fa34934737d8681f2d980294915470468a0f053a40d1", "41ac1a2a7fc5380ba4909388523bfa9ff3746c9451dda3c52512434ad25de071"],
+      ["legacy.model.round0-v3", "round0_v3", "superseded", "3df68c76cd2c3ac6e2717254b9ab7646c40c443029daa90c253bf865cb6d7e67", "13b61bc999a659eba682fbfd154c21bf2a858f4c8c5fb233f7cf45c88414dc75", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round0-v4-e0", "round0_v4_e0", "superseded", "0875403129d15b6ca41cc3c3c0390bf1bdfc0698cb3a771854ad8119c920685c", "b03c5c34bbc860f550ee3c8169352e34bb8f7a1960272e75b849cc20d94c9678", "042c0b07e1db13a6a5ba353936e95f13bb15fa8ed2d6bdb840798a8d6c513012"],
+      ["legacy.model.round0-v4-e1", "round0_v4_e1", "superseded", "0d82b068e39443d041d91f9a2a652ce43c496347278b3b024f96924468cc94f1", "cd3f4e2231ea6eb15f414ea847eb130eaca76d4ebd41cfaf8c9610051d9289b1", "042c0b07e1db13a6a5ba353936e95f13bb15fa8ed2d6bdb840798a8d6c513012"],
+      ["legacy.model.round0-v4", "round0_v4", "superseded", "f702feabe47f6008dde2e9a7c72e7009dc6432d7e1e0bd9d929ac3d3c1c23eba", "3ab36544f37691d28433f9df42c7b71e5a4561584d941ea5bdd0fcaf5b024034", "042c0b07e1db13a6a5ba353936e95f13bb15fa8ed2d6bdb840798a8d6c513012"],
+      ["legacy.model.round1", "round1_net", "void", "895a640daa1c28a241eda62f142fb73adae00c60405e21150deeaba726442f81", "90b1c7c0fd0891a0126150733a8b60981d786076714f1dba9fc757a97eb26fb4", "8b492bce7e797e3a8a6d2af91c33a642e0300056499f7baaf800612869a366be"],
+      ["legacy.model.round2", "round2_net", "void", "f1100d1b79bf7eb848780a973300e34e89dda293af115f3a23b49509baf087de", "9a0bd547599a13263f891ceed0ade38fca01e8e4742c27853c1541be413134db", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round3", "round3_net", "void", "4bc8e027ac150db8ef94c1170e1001df99e567ce1e7370b66c6b8573e511bb90", "5ba7532cc33692565cfef087313c466f6215b27f70d53e7448449fd851ba22ce", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round4", "round4_net", "void", "e42424809d2647c48bd4c0b0c8ef019f5ce3c895a423740b536ae501dae98e8c", "9ec1fa3c781340ca351c2ba86ab8d9ecf0138d070e49582a40a102283cd93989", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round5", "round5_net", "void", "b8c43d232b5ff01d2b7a6300d1c5500432c2dfd1e959e3120f6ce3c1a371b060", "c152e117c9be65a04a5da0d25bcffc4094d52642324245a0d95f69e9b054da9a", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round6", "r6/net", "void", "8f62e8da4736c2ce69efb9c18102ed1933a296c9642bed5059dac66008dfe742", "8e741af5ca3b1febd6e506142d196bdadaf468e9ed0bc42fa5fd5407cf057c4e", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round7", "r7/net", "void", "64f2eb5f41d3f69ae0713ea05c9dd0c001bb9384a361eb0d26549c8cecf5f453", "d8be7d300f1f5c183dd7386ad163d4e07237e076bca327b807344ad961f35d56", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round8", "r8/net", "void", "6beafa8583927e63d98db59a0a7a41fb882a9d0970584294b4565c6e38fda146", "ed56f6b34f61a72e5e05f5015d3dbd13ee73073c3216c04e271dea4dfcb54ab9", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round9", "r9/net", "void", "4629f956a9fa411d37a13e2c961d296f6f4551f64fd015fa9f0a07ec1097f4ec", "6ae4bfd1ce8fe7b8153c689ac3e37a6730330dcfa15844510f2c1613861a53f3", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.round10", "r10/net", "void", "2ea738f88841a9feb276ed9a05ab2b8e2439696bcacd8dd8b474b6aa6418442e", "615c77992618ebef8e63b5552528521615c0b2a8d8e7de743fa4f5315b666154", "821b6940d927fd75836e642916673f6200a4ad3ab57339b7711bb97fbb273a2b"],
+      ["legacy.model.dev-missing", "dev_model", "void", null, null, null],
+      ["legacy.model.round1b-missing", "round1b_net", "void", null, null, null],
+      ["legacy.model.round11-in-flight", "r11/net", "exploratory", null, null, null]
+    ]
+  },
+  "corpora": {
+    "columns": ["id", "path", "validity", "shards", "bytes", "tree_sha256"],
+    "rows": [
+      ["legacy.corpus.round0", "round0_full_v2", "superseded", 482, 14196315888, "38ad4e5a03786c56feabb3def61b1c439b5ff46fe7ad05f8759b381fae4aeaf1"],
+      ["legacy.corpus.round1", "round1_corpus_p", "void", 66, 1954589748, "dcaf3cba49035fb3afb5556b774f71609bcab7908b0f8ad8aea0901e0cdbaa66"],
+      ["legacy.corpus.round6", "r6/corpus", "void", 54, 808098269, "a210a2dc93365c7a8c0177be52d9b113cfe598ff679b0df747c43f40dee67494"],
+      ["legacy.corpus.round7", "r7/corpus", "void", 59, 887439724, "75426a48074831358364b5e5a0b11c78f86015091a88efd700792a3ccb42b090"],
+      ["legacy.corpus.round8-cc2", "r8/corpus/cc2", "void", 30, 433573241, "4bb553038547608f69162fd326d1c33f35e413207f25baeb5000d8425a880da6"],
+      ["legacy.corpus.round8-mirror", "r8/corpus/mirror", "void", 48, 248691789, "d96cfb4181c7eea4c015239ef84ca8f5cc7f86c4735ca7ad37595ac15746e6f6"],
+      ["legacy.corpus.round9-cc2", "r9/corpus/cc2", "void", 30, 406283901, "7907045695bbb6b2e9a8bb5937c40f4eef9d50e731cb08b33441db62030ef43a"],
+      ["legacy.corpus.round9-mirror", "r9/corpus/mirror", "void", 42, 221215944, "4a1989aac7bfaf342476489285e7e42a89e9291305b76810425acc824ad27c96"],
+      ["legacy.corpus.round10-cc2", "r10/corpus/cc2", "void", 30, 400050324, "28b4f0f936b701abf692ff052233d86cfcf0fc0ea392d233b090aa5916a81e50"],
+      ["legacy.corpus.round10-mirror", "r10/corpus/mirror", "void", 42, 219621428, "6f082a6be4d130ec0b1ef85dc935b3f7acec5ea36cf896a1744168cc006eabe7"],
+      ["legacy.corpus.round11-cc2", "r11/corpus/cc2", "exploratory", 92, 1695072564, "28805a9de4b9069fa6aa9d18b60e74b489403b7d98da4aecda456257115c4246"],
+      ["legacy.corpus.round11-mirror", "r11/corpus/mirror", "exploratory", 111, 733908552, "21b48115f70e38a5413d252f3ec3fb252041a5e3c0887a3b4fb3b1db82376312"],
+      ["legacy.corpus.probe-dg-blas", "probe_dg_blas", "exploratory", 4, 57350947, "7a52c2b18e7100b0cdbb7eb796d3468e152aa2b32280e4df481de2b5fb7ef01f"],
+      ["legacy.corpus.r1-throughput", "r1_throughput", "exploratory", 1, 4014959, "979675e6b878587ebfc9dee3dcade2d0f3cc670852552f6e8420397183e2b69a"],
+      ["legacy.corpus.trace-pc", "trace_pc", "exploratory", 1, 1322709, "f73ffc94ecb2666810883c0577741aa07c62804d7428185256ee31e995f2e2c5"],
+      ["legacy.corpus.trace-sv", "trace_sv", "exploratory", 1, 1043964, "2b27f8fd733516824039938f05bb6a691b90b705cae0420984be6929cc00c30b"]
+    ]
+  },
+  "mixes": {
+    "columns": ["id", "path", "validity", "links", "tree_sha256"],
+    "rows": [
+      ["legacy.mix.round1", "round1_mix", "void", 186, "207af4d23b3e5cf1b848de9b5c4bfaa07477192ace422e1c48a4b51e59bc9f97"],
+      ["legacy.mix.round6", "r6/mix", "void", 175, "c953d4f286415119f7135e1c1367d0a669d50c3493ac610e360e13c30f8ce804"],
+      ["legacy.mix.round7", "r7/mix", "void", 180, "1f2cb6b34352619076f1d030845e98dfb2581c0b29cda75f38279bf4b6080152"],
+      ["legacy.mix.round8", "r8/mix", "void", 199, "fbe5aaae84a6ba7d2476a073c61a6a03961ca03385ce055abf046cfdcc3eb71e"],
+      ["legacy.mix.round9", "r9/mix", "void", 193, "d03faee04170489898c4151e9af5f41abedf4365776f8a527867e7d7e53f1ced"],
+      ["legacy.mix.round10", "r10/mix", "void", 193, "0cd9b68db3119138d219cb15f01a2f8aafa9a4e319acf9d755e42c95780d503f"],
+      ["legacy.mix.round11", "r11/mix", "exploratory", 324, "06f0328cc04b681eaf02142c4a2ef139e9b3c44f0c4e52958a32d2a81e8e14ed"]
+    ]
+  },
+  "round_trees": {
+    "columns": ["round", "path", "validity", "tree_sha256"],
+    "rows": [
+      [6, "r6", "void", "e43dbc44b38473e6969946feb4bf3f3e56b226f0f90b9dc291457497cf3a0550"],
+      [7, "r7", "void", "795b704448839179c33d500dc33986d94728dd541a3ce34a219305d2fe800753"],
+      [8, "r8", "void", "bda6fa89fc68b5fe4213d0acd1aa580e60bf0167d915e4a50fa4d4b2a5fcf542"],
+      [9, "r9", "void", "204932030edd9997debb642377af1e27f26b843a2b8931473e8d74460351839d"],
+      [10, "r10", "void", "5a3549196c9f631063b9b883039f72f362a77f0f0a709b43dc7bd3ea3bc17a51"]
+    ]
+  },
+  "receipts": {
+    "columns": ["path", "validity", "bytes", "sha256"],
+    "rows": [
+      ["round0_battery_results.txt", "void", 2796, "2f3f596cee9f3e654d74e29211675eab65d54d2d62d11bedadfd3c54f4282a15"],
+      ["gpi_baseline.txt", "void", 551, "234d153f56fee773378634b4986fede2a5979f0d1b524e115d215daf09c2f988"],
+      ["guided_strength.txt", "exploratory", 444, "33626c4c4c6239a6387726e8468989cf0fb260e51bc8052c80daa341a4740293"],
+      ["slot_strength.txt", "exploratory", 611, "9ab113957d76b34588408d7fce8ae040069934ed8eeddd49b605d8511299f8c6"],
+      ["slot_vehicle_reads.txt", "void", 224, "6d316362ba2817c24cd9e891ab7f846b2d0fe141996d4d3a0fa202488efe98d2"],
+      ["champion.txt", "void", 423, "d3d3c46c3435a86e784e609e1daee83e6f5e453f19f88e936a5897d174f558b8"],
+      ["champ_solo600.txt", "void", 48, "5fb6f74fba6aa53ecebd2b71f040fbcff01440ec9f41cf8d25b40646c261e629"],
+      ["round1_gate.txt", "void", 660, "5afa408e70b2b3943d6a3c95ae65961544fec077ad3e5cc11c0bb3493a66f435"],
+      ["round1_gate_clean.txt", "void", 663, "8f5999d39c6e9ca5496effd47cc14e59c0a727c855961cbda0374eeeaee10eeb"],
+      ["round2_gate.txt", "void", 663, "dfd388d5b606aeb2ea5096f0e64b8b49223b553ab4ee1baabc40ac6c79dab9be"],
+      ["round4_gate.txt", "void", 661, "6bb8e46218469a026c73bb5a445fdb0b7f21926a928993d2b2e308552d8f98b3"],
+      ["r6_anchor.txt", "void", 53, "75ecfc76202f77af238c3284da4e1bd7b5535a6ed3cfc73165edaed2bbaaabed"],
+      ["r7_anchors.txt", "void", 194, "5105dc4996ecc6af36aeceb76bbfeca98fbba9a72005665e9cee5a8196519c8e"],
+      ["rounds.jsonl", "void", 11792, "03fc9053a1325cb87f70fcdd11641283dc21da686b20b79460a46aca21148794"],
+      ["train_r1.log", "void", 891, "c6da0159abf47bfcf94c81a44ad72f169a3484e9ba246316ef80dca37f132b1f"],
+      ["train_r1b.log", "void", 894, "331192e0fc0e04a6fc597fb6ebe27feec1dd96d3756d16aad4ae499463caf3ce"],
+      ["train_r2pre.log", "void", 511, "4b932ee38b5c683744befae1a31ab6c3757a63c8efecffae0b31a04be283727e"],
+      ["train_r3.log", "void", 578, "e12a4191e1e06a058b7e9e9444d23cd03322d755fce783e4a1cf8ea14a8baf22"],
+      ["train_r4.log", "void", 575, "d4922722c663cebf07c1e1bae1df7651523c06b294325bf19fca948bc6ea5dd7"],
+      ["train_r5.log", "void", 657, "9983c40239fc04811e48b7f366755e5ae7d3c2edb92e386837b2817cca0ce7f8"],
+      ["round0_battery.sh", "void", 999, "4256fb22be2251ced5e7965af14e12921d16dbbf2faee2779516b796dbf863d7"],
+      ["round1_pipeline.sh", "void", 972, "ee8a1aa17d34ac216f115e17266d913c47cb3f00f57e19a6fba9d948f0a9e11f"],
+      ["r11.log", "exploratory", 541, "668a3df514719e1b5181903998703568bb9813f8f676bf6d002a2d39d4acad54"],
+      ["r11/corpus/cc2/receipt.json", "exploratory", 452, "ad2006627b1ddab1bc1470b2cf31b3e792656cf08140634ae3f6a39d69e79981"],
+      ["r11/corpus/mirror/receipt.json", "exploratory", 456, "10b0c190672e8d8f768b80ef8eaa0944b3de6d42e12dcec1b313a3c86adfd7a3"]
+    ]
+  },
+  "notes": [
+    "All campaign corpora are legacy schema 1 and omit discarded legal actions, frozen generator logits, immutable arm/build/model identity, and validity-grade provenance.",
+    "The nested round0_v4_e0/round0_v4 model duplicates round0_v4_e0 weights and config exactly.",
+    "Round 11 was still training at observation time; any later net, duel, gate, or ledger output remains exploratory under the r11 subtree quarantine."
+  ]
+}
