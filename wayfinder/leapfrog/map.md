@@ -83,8 +83,12 @@ Key prior evidence the simple design leans on:
   index of every artifact and claim in
   `archive/assets/T19-evidence-index.v1.json`). The demolition removed the
   policy/slot machinery, the target-transform stack, and the vehicle grammar.
-- Next: regenerate the round-0 corpus with the slim schema, train the first
-  value-only net, gate it, and start the loop.
+- **2026-07-10, round 0 ran**: the whole round took **4.1 minutes** (600
+  CC2 games in 69s, 3 training epochs in 61s, 48 anchor games in 114s) —
+  against the old design's 5+ hours. Baseline: holdout CE 0.679 / accuracy
+  0.56; **anchor 0-48 vs CC2** — outcome-only value from 600 games is a thin
+  evaluator, which is exactly the open question the loop now measures.
+  Ledger: `<scratch>/rounds.jsonl`. Round 1 (first self-play round) follows.
 
 # Open questions (one lever at a time)
 
