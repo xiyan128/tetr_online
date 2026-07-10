@@ -1,13 +1,11 @@
-//! The two-board P+V net: weight loading and the batched forward.
+//! The value net: weight loading and the batched forward.
 //!
 //! Architecture (fixed; `config.json` pins the conv channels):
 //!
 //! ```text
 //! plane [1,40,10] ─ conv3x3+relu ×3 ─ flatten [C·400] ─ board_fc+relu ─ 128
-//! (the SAME tower embeds own and opponent planes — siamese, one weight set)
-//! features [85] ─ whiten ─ feat_fc+relu ─ 64
-//! concat [own 128 | opp 128 | feat 64] ─ head1+relu ─ head2 ─ [5]
-//! heads: wdl logits [0..3), policy logit [3], aux tanh [4]
+//! features [70] ─ whiten ─ feat_fc+relu ─ 64
+//! concat [board 128 | feat 64] ─ head1+relu ─ head2 ─ [3]  (win/draw/loss)
 //! ```
 //!
 //! There is **one** forward and it is batched — a batch of one is the scalar
@@ -20,12 +18,12 @@
 //! in PyTorch's own layouts — conv `[cout, cin, 3, 3]` and dense `[out, in]`
 //! flatten row-major into exactly the shapes the GEMMs consume, so loading
 //! performs **no permutation** (nothing to get wrong). Parity with the
-//! exporting PyTorch model is pinned by the committed golden fixtures
+//! exporting PyTorch model is pinned by the committed golden fixture
 //! (`tests/golden.rs`).
 
 use std::path::Path;
 
-use crate::obs::{BOARD_LEN, BOARD_W, FEATURE_LEN, N_SLOTS, Obs};
+use crate::obs::{BOARD_LEN, BOARD_W, FEATURE_LEN, Obs};
 
 /// Spatial size of a plane (`40 × 10`), the per-position row count of the
 /// conv GEMMs.
@@ -36,8 +34,8 @@ const BOARD_EMB: usize = 128;
 const FEAT_EMB: usize = 64;
 /// Trunk width (`head1` output).
 const TRUNK: usize = 128;
-/// Head outputs: 3 WDL logits, 1 policy logit, 1 aux.
-const N_OUT: usize = 5;
+/// Head outputs: 3 WDL logits.
+const N_OUT: usize = 3;
 /// Whitening floor: a constant training feature has std ≈ 0, and dividing by it
 /// yields inf/NaN. Both languages clamp the divisor to this.
 const MIN_STD: f32 = 1e-6;
@@ -60,25 +58,19 @@ impl From<String> for LoadError {
     }
 }
 
-/// The leaf contract exported with the model: how a value head becomes a
-/// search score (`score = z_scale · z_hat + attack_w · attack`).
+/// The leaf contract exported with the model: how the value becomes a search
+/// score (`score = z_scale · z_hat` — a pure quantization, no hand terms).
 #[derive(Clone, Copy, Debug)]
 pub struct Contract {
     /// Scale from `z_hat ∈ (−1, 1)` to the integer score domain.
     pub z_scale: f32,
-    /// Weight of one attack line in the same domain.
-    pub attack_w: f32,
 }
 
-/// All head outputs for one leaf.
+/// The win/draw/loss logits for one state.
 #[derive(Clone, Copy, Debug)]
 pub struct Heads {
     /// Win/draw/loss logits.
     pub wdl: [f32; 3],
-    /// Policy logit (softmaxed across a sibling group by the consumer).
-    pub policy: f32,
-    /// The detached aux head, already `tanh`'d (matching the PyTorch model).
-    pub aux: f32,
 }
 
 impl Heads {
@@ -89,12 +81,6 @@ impl Heads {
         (e[0] - e[2]) / (e[0] + e[1] + e[2])
     }
 }
-
-/// A board embedding (the tower + `board_fc` output). Opaque so a serving
-/// layer can cache the opponent's per decision and hand it back to
-/// [`Net::forward`].
-#[derive(Clone, Debug, PartialEq)]
-pub struct BoardEmb(Vec<f32>);
 
 /// One conv layer: PyTorch `[cout, cin·9]` weights (row-major flatten of
 /// `[cout, cin, 3, 3]`) + bias.
@@ -127,6 +113,7 @@ pub struct Scratch {
     feats: Vec<f32>,
     /// Embedding / trunk staging.
     emb: Vec<f32>,
+    femb: Vec<f32>,
     concat: Vec<f32>,
     trunk: Vec<f32>,
     out: Vec<f32>,
@@ -139,9 +126,6 @@ pub struct Net {
     feat_fc: Dense,
     head1: Dense,
     head2: Dense,
-    /// The action-indexed policy head (one logit per [`N_SLOTS`] action slot,
-    /// forwarded on the PARENT observation). Absent on pre-slot exports.
-    slot_head: Option<Dense>,
     feat_mean: Vec<f32>,
     feat_std: Vec<f32>,
     /// The model's frozen leaf contract from `config.json`.
@@ -149,7 +133,9 @@ pub struct Net {
 }
 
 impl Net {
-    /// Load a model directory (`net_v2.safetensors` + `config.json`).
+    /// Load a model directory (`net_v2.safetensors` + `config.json`). Rejects
+    /// any schema other than 3 (older two-board/multi-head exports must fail
+    /// loudly, not degrade — silent behavior swaps voided a whole campaign).
     pub fn load(dir: impl AsRef<Path>) -> Result<Self, LoadError> {
         let dir = dir.as_ref();
         let cfg: serde_json::Value = serde_json::from_slice(
@@ -157,8 +143,11 @@ impl Net {
                 .map_err(|e| format!("{}: {e}", dir.join("config.json").display()))?,
         )
         .map_err(|e| format!("config.json: {e}"))?;
-        if cfg["schema_version"].as_u64() != Some(2) {
-            return Err(LoadError("config schema_version != 2".into()));
+        if cfg["schema_version"].as_u64() != Some(3) {
+            return Err(LoadError(format!(
+                "config schema_version {} != 3 (older exports are not loadable)",
+                cfg["schema_version"]
+            )));
         }
         let stats = |k: &str| -> Result<Vec<f32>, LoadError> {
             let v: Vec<f32> = cfg[k]
@@ -218,42 +207,37 @@ impl Net {
         }
         let last_c = *channels.last().expect("checked non-empty");
 
-        let slot_head = if st.tensor("slot_head.weight").is_ok() {
-            Some(dense("slot_head", TRUNK, N_SLOTS)?)
-        } else {
-            None
-        };
         Ok(Self {
             board_fc: dense("board_fc", last_c * HW, BOARD_EMB)?,
             feat_fc: dense("feat_fc", FEATURE_LEN, FEAT_EMB)?,
-            head1: dense("head1", 2 * BOARD_EMB + FEAT_EMB, TRUNK)?,
+            head1: dense("head1", BOARD_EMB + FEAT_EMB, TRUNK)?,
             head2: dense("head2", TRUNK, N_OUT)?,
-            slot_head,
             convs,
             feat_mean: stats("feature_mean")?,
             feat_std: stats("feature_std")?,
             contract: Contract {
                 z_scale: cfg["contract"]["z_scale"].as_f64().unwrap_or(10_000.0) as f32,
-                attack_w: cfg["contract"]["attack_w"].as_f64().unwrap_or(100.0) as f32,
             },
         })
     }
 
-    /// Embed a batch of occupancy planes through the shared tower + `board_fc`.
-    /// Used for own planes (per leaf) and the opponent plane (once per decision,
-    /// cached by the serving layer).
-    pub fn embed_boards(&self, planes: &[&[f32; BOARD_LEN]], s: &mut Scratch) -> Vec<BoardEmb> {
-        let n = planes.len();
+    /// The batched forward: each item's plane + features → WDL logits.
+    pub fn forward(
+        &self,
+        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
+        s: &mut Scratch,
+    ) -> Vec<Heads> {
+        let n = items.len();
         if n == 0 {
             return Vec::new();
         }
-        // Layout: activations as [n·HW, C] (rows are positions, columns are
-        // channels) — im2col gathers straight out of it for every layer,
-        // including the first (C = 1).
+
+        // Conv tower over all planes. Layout: activations as [n·HW, C] (rows
+        // are positions, columns are channels) — im2col gathers straight out
+        // of it for every layer, including the first (C = 1).
         s.act_a.clear();
         s.act_a
-            .extend(planes.iter().flat_map(|p| p.iter().copied()));
-
+            .extend(items.iter().flat_map(|(p, _)| p.iter().copied()));
         let mut in_a = true;
         for conv in &self.convs {
             {
@@ -297,95 +281,6 @@ impl Net {
             true,
             &mut s.emb,
         );
-        (0..n)
-            .map(|b| BoardEmb(s.emb[b * BOARD_EMB..(b + 1) * BOARD_EMB].to_vec()))
-            .collect()
-    }
-
-    /// The batched leaf forward: each item's own plane and features, under ONE
-    /// frozen opponent embedding (broadcast across the batch — the siamese
-    /// saving that makes a two-board value cost about one board per leaf).
-    pub fn forward(
-        &self,
-        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
-        opp: &BoardEmb,
-        s: &mut Scratch,
-    ) -> Vec<Heads> {
-        let n = self.trunk_batch(items, opp, s);
-        if n == 0 {
-            return Vec::new();
-        }
-        dense_batch(
-            &s.trunk,
-            n,
-            TRUNK,
-            &self.head2.w,
-            &self.head2.bias,
-            N_OUT,
-            false,
-            &mut s.out,
-        );
-
-        (0..n)
-            .map(|b| {
-                let o = &s.out[b * N_OUT..(b + 1) * N_OUT];
-                Heads {
-                    wdl: [o[0], o[1], o[2]],
-                    policy: o[3],
-                    aux: o[4].tanh(),
-                }
-            })
-            .collect()
-    }
-
-    /// The action head on PARENT observations: one forward per state, a raw
-    /// logit per action slot. Panics if the model was exported without the
-    /// slot head (pre-slot models cannot drive a guided search).
-    pub fn forward_slots(
-        &self,
-        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
-        opp: &BoardEmb,
-        s: &mut Scratch,
-    ) -> Vec<[f32; N_SLOTS]> {
-        let head = self
-            .slot_head
-            .as_ref()
-            .expect("model has no slot head (pre-slot export)");
-        let n = self.trunk_batch(items, opp, s);
-        if n == 0 {
-            return Vec::new();
-        }
-        dense_batch(
-            &s.trunk, n, TRUNK, &head.w, &head.bias, N_SLOTS, false, &mut s.out,
-        );
-        (0..n)
-            .map(|b| {
-                let mut row = [0.0f32; N_SLOTS];
-                row.copy_from_slice(&s.out[b * N_SLOTS..(b + 1) * N_SLOTS]);
-                row
-            })
-            .collect()
-    }
-
-    /// Whether this export carries the action head.
-    pub fn has_slot_head(&self) -> bool {
-        self.slot_head.is_some()
-    }
-
-    /// Shared trunk: own tower | opp (broadcast) | whitened feats -> head1,
-    /// leaving activations in `s.trunk`. Returns the batch size.
-    fn trunk_batch(
-        &self,
-        items: &[(&[f32; BOARD_LEN], &[f32; FEATURE_LEN])],
-        opp: &BoardEmb,
-        s: &mut Scratch,
-    ) -> usize {
-        let n = items.len();
-        if n == 0 {
-            return 0;
-        }
-        let planes: Vec<&[f32; BOARD_LEN]> = items.iter().map(|(p, _)| *p).collect();
-        let own = self.embed_boards(&planes, s);
 
         // Whiten features into a [n, FEATURE_LEN] batch.
         s.feats.clear();
@@ -399,7 +294,6 @@ impl Net {
                     .push((f[i] - self.feat_mean[i]) / self.feat_std[i].max(MIN_STD));
             }
         }
-        let mut femb = Vec::new();
         dense_batch(
             &s.feats,
             n,
@@ -408,18 +302,18 @@ impl Net {
             &self.feat_fc.bias,
             FEAT_EMB,
             true,
-            &mut femb,
+            &mut s.femb,
         );
 
-        // concat [own | opp (tiled) | feat] → head1 → head2.
-        let h_in = 2 * BOARD_EMB + FEAT_EMB;
+        // concat [board | feat] → head1 → head2.
+        let h_in = BOARD_EMB + FEAT_EMB;
         s.concat.clear();
         s.concat.reserve(n * h_in);
         for b in 0..n {
-            s.concat.extend_from_slice(&own[b].0);
-            s.concat.extend_from_slice(&opp.0);
             s.concat
-                .extend_from_slice(&femb[b * FEAT_EMB..(b + 1) * FEAT_EMB]);
+                .extend_from_slice(&s.emb[b * BOARD_EMB..(b + 1) * BOARD_EMB]);
+            s.concat
+                .extend_from_slice(&s.femb[b * FEAT_EMB..(b + 1) * FEAT_EMB]);
         }
         dense_batch(
             &s.concat,
@@ -431,20 +325,27 @@ impl Net {
             true,
             &mut s.trunk,
         );
-        n
+        dense_batch(
+            &s.trunk,
+            n,
+            TRUNK,
+            &self.head2.w,
+            &self.head2.bias,
+            N_OUT,
+            false,
+            &mut s.out,
+        );
+
+        (0..n)
+            .map(|b| Heads {
+                wdl: [s.out[b * N_OUT], s.out[b * N_OUT + 1], s.out[b * N_OUT + 2]],
+            })
+            .collect()
     }
 
-    /// Convenience full forward of one observation (embeds the opp plane too).
-    /// Golden tests and one-off scoring; serving caches [`embed_boards`] of the
-    /// opponent per decision instead.
-    ///
-    /// [`embed_boards`]: Self::embed_boards
+    /// Convenience forward of one observation (golden tests, one-off scoring).
     pub fn forward_obs(&self, obs: &Obs, s: &mut Scratch) -> Heads {
-        let opp = self
-            .embed_boards(&[&obs.opp_board], s)
-            .pop()
-            .expect("one plane in, one embedding out");
-        self.forward(&[(&obs.own_board, &obs.features)], &opp, s)
+        self.forward(&[(&obs.board, &obs.features)], s)
             .pop()
             .expect("one item in, one head out")
     }
@@ -598,14 +499,10 @@ mod tests {
     fn z_hat_is_the_wdl_probability_gap() {
         let h = Heads {
             wdl: [0.0, 0.0, 0.0],
-            policy: 0.0,
-            aux: 0.0,
         };
         assert!(h.z_hat().abs() < 1e-6);
         let sure_win = Heads {
             wdl: [10.0, 0.0, -10.0],
-            policy: 0.0,
-            aux: 0.0,
         };
         assert!(sure_win.z_hat() > 0.99);
     }

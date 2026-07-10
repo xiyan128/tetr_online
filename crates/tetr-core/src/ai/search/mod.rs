@@ -42,7 +42,7 @@ pub mod beam;
 pub mod best_first;
 pub mod pc_coverage;
 
-pub use beam::{BeamPlanner, RootFilter};
+pub use beam::BeamPlanner;
 pub use best_first::BestFirstPlanner;
 pub use pc_coverage::{PcCoverageConfig, PcCoveragePlanner, PcCoverageUnit};
 

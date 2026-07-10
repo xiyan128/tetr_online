@@ -152,20 +152,9 @@ pub struct BeamPlanner {
     /// recorded `new()` baselines stay byte-identical; TP variants are new
     /// registered names.
     transpose: bool,
-    /// Optional placement pre-filter applied at EVERY expansion (the root seed
-    /// and each interior/speculative node): given the node's state and its full
-    /// legal placement set, returns the subset this search may commit+evaluate
-    /// (e.g. a learned policy's top-m — the guided-beam vehicle; a cheap
-    /// action-indexed ranker makes this one forward per NODE). `None` = every
-    /// placement, byte-identical to the recorded baselines. Must be
-    /// deterministic per state (re-rooting assumes the same roots).
-    placement_filter: Option<RootFilter>,
     /// In-flight search, `None` between decisions. Reset on a new root state.
     run: Option<BeamRun>,
 }
-
-/// See [`BeamPlanner::with_root_filter`].
-pub type RootFilter = Box<dyn Fn(&SearchState, Vec<Placement>) -> Vec<Placement> + Send + Sync>;
 
 impl BeamPlanner {
     /// A beam planner of the given width, with bag speculation **on** (the default).
@@ -174,7 +163,6 @@ impl BeamPlanner {
             beam_width: beam_width.max(1),
             speculate: true,
             transpose: false,
-            placement_filter: None,
             run: None,
         }
     }
@@ -197,32 +185,6 @@ impl BeamPlanner {
         self
     }
 
-    /// Restrict each run's roots through `filter` (the policy-guided beam: a
-    /// learned prior picks which ply-1 placements deserve search). A filter
-    /// that returns an empty set is ignored for that state (all roots search)
-    /// — restriction must never manufacture a resignation.
-    pub fn with_root_filter(mut self, filter: RootFilter) -> Self {
-        self.placement_filter = Some(filter);
-        self
-    }
-
-    /// Apply the placement filter (if any) to a node's legal placements.
-    /// An empty filter result is ignored — restriction must never manufacture
-    /// a resignation or silently terminate a live branch.
-    fn filtered_placements(filter: Option<&RootFilter>, state: &SearchState) -> Vec<Placement> {
-        // Interior plies never render inputs: pathless enumeration (identical
-        // placements + order, no per-node SmallVec churn). Ply-1 roots come
-        // from `seed()`, which keeps the pathful `hold_placements`.
-        let all = crate::ai::search::hold_placements_pathless(state);
-        match filter {
-            Some(f) if !all.is_empty() => {
-                let picked = f(state, all.clone());
-                if picked.is_empty() { all } else { picked }
-            }
-            _ => all,
-        }
-    }
-
     /// The current run's per-root backed-up scores: each ply-1 placement paired
     /// with the best leaf score its subtree has achieved so far (`i32::MIN` =
     /// no scored descendant yet). Empty between decisions or on a topped-out
@@ -240,17 +202,8 @@ impl BeamPlanner {
     /// legal placement) seeds an *empty* run — the fingerprint still records it,
     /// so re-rooting at the same dead state stays a no-op.
     fn seed(&self, state: &SearchState, eval: &dyn Evaluator, max_depth: u8) -> BeamRun {
-        // Ply-1 roots keep their paths (input synthesis); the filter applies the same way.
-        let roots = {
-            let all = hold_placements(state);
-            match &self.placement_filter {
-                Some(f) if !all.is_empty() => {
-                    let picked = f(state, all.clone());
-                    if picked.is_empty() { all } else { picked }
-                }
-                _ => all,
-            }
-        };
+        // Ply-1 roots keep their paths (input synthesis).
+        let roots = hold_placements(state);
 
         // Fork + transition each root child in canonical order, through the shared
         // fork → classify pre-lock → commit helper. Root children score with the
@@ -308,7 +261,6 @@ impl BeamPlanner {
     /// Expand one parent frontier node into staged, already-scored next-generation
     /// nodes. The caller owns the node meter; this function only performs the work.
     fn expand_parent(
-        filter: Option<&RootFilter>,
         parent: &BeamNode,
         root_best: &mut [i32],
         nodes: &mut Vec<Option<BeamNode>>,
@@ -329,7 +281,7 @@ impl BeamPlanner {
             // terminal node contributes no children; its `root_best` was already
             // recorded when it entered the frontier, so the back-up keeps it.
             if speculate {
-                Self::expand_speculative(filter, parent, &mut pending, eval);
+                Self::expand_speculative(parent, &mut pending, eval);
             }
         } else {
             // Concrete: every placement of the parent's active piece. The trailing
@@ -340,7 +292,9 @@ impl BeamPlanner {
                 combo: parent.state.combo,
                 b2b: parent.state.b2b,
             };
-            for placement in Self::filtered_placements(filter, &parent.state) {
+            // Interior plies never render inputs: pathless enumeration
+            // (identical placements + order, no per-node SmallVec churn).
+            for placement in crate::ai::search::hold_placements_pathless(&parent.state) {
                 let (child, lock, t_spin) = commit_child(&parent.state, &placement);
                 pending.push(PendingChild {
                     state: child,
@@ -537,12 +491,11 @@ impl BeamPlanner {
     /// No RNG, no expectimax average — every bag-legal piece is enumerated and
     /// beam-width truncation prunes the fan-out, keeping the planner deterministic.
     fn expand_speculative(
-        filter: Option<&RootFilter>,
         parent: &BeamNode,
         pending: &mut Vec<PendingChild>,
         eval: &dyn Evaluator,
     ) {
-        let placements = Self::filtered_placements(filter, &parent.state);
+        let placements = crate::ai::search::hold_placements_pathless(&parent.state);
         let child_weight = parent.spec_weight * SPEC_DECAY;
         let parent_ctx = EvalContext {
             combo: parent.state.combo,
@@ -648,7 +601,6 @@ impl Mind for BeamPlanner {
             while spent < quantum && generation.next_parent < generation.parents.len() {
                 let parent = &generation.parents[generation.next_parent];
                 Self::expand_parent(
-                    self.placement_filter.as_ref(),
                     parent,
                     &mut generation.root_best,
                     &mut generation.nodes,

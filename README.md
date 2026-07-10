@@ -153,6 +153,11 @@ reproducible, variance-aware experiments for tuning and comparing bots: APP
 benchmark suites, bot-vs-bot versus races with SPRT stopping, and the Cold
 Clear 2 referee. See `docs/research-guide.md` for the full tour.
 
+`crates/tetr-nn` + `python/tetrnn` are the learning loop: self-play games in,
+a small win/draw/loss value net out, gated by seed-paired duels against the
+current best and a fixed hand-eval anchor. The whole system and its history
+fit on one page: [`wayfinder/leapfrog/map.md`](wayfinder/leapfrog/map.md).
+
 ## Roadmap
 
 - [x] **Engine**: pure, deterministic, guideline-correct, with a full acceptance suite.

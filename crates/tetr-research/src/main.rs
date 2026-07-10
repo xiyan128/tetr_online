@@ -113,9 +113,9 @@ enum Command {
         #[command(flatten)]
         rt: RuntimeArgs,
     },
-    /// Generate self-play decision shards (the datagen data plant). No `--net`
-    /// (CC2 eval) makes the round-0 BC corpus; a `--net <dir>` makes round-1+
-    /// self-play. Writes game-aligned shards to `--out`.
+    /// Generate self-play training shards. No `--net` (CC2 eval) makes the
+    /// round-0 bootstrap corpus; a `--net <dir>` makes round-1+ self-play.
+    /// Writes game-aligned shards under `--out/wN/`.
     Datagen {
         /// Net model dir for the leaf eval; omit for CC2 (round-0 BC corpus).
         #[arg(long)]
@@ -126,23 +126,10 @@ enum Command {
         /// Beam depth.
         #[arg(long, default_value_t = 5)]
         depth: u8,
-        /// Guided vehicle: net policy top-m placements per node (0 = off;
-        /// needs --net).
-        #[arg(long, default_value_t = 0)]
-        topm: usize,
-        /// Rank the top-m with the slot head (one parent forward) instead of
-        /// the per-child policy head. Vehicles are explicit, never inferred.
-        #[arg(long)]
-        slot_vehicle: bool,
         /// Parallel workers (games partitioned round-robin; each worker owns
         /// out/wN/ so shard numbering never collides).
         #[arg(long, default_value_t = 1)]
         workers: usize,
-        /// Two-arm mode: the opponent seat plays a plain CC2 TP-beam at the
-        /// same width/depth (grounded-opponent games; net seat alternates by
-        /// game parity). Requires --net.
-        #[arg(long)]
-        opp_cc2: bool,
         /// Number of games (seeds `base..base+games`).
         #[arg(long, default_value_t = 100)]
         games: u64,
@@ -307,25 +294,19 @@ fn run_instrument(
     Ok(())
 }
 
-/// The datagen net evaluator: the CoreML backend when built with `--features
-/// coreml`, `TETR_ORT=1` is set, and the model dir carries `net_leaf_b*.onnx`
-/// graphs (5-11x the BLAS forward on Apple silicon); the BLAS `NetEvaluator`
-/// otherwise. Duels/gates keep the BLAS path (deterministic receipts).
-fn load_net_eval(dir: &std::path::Path) -> Box<dyn tetr_core::ai::eval::Evaluator> {
-    #[cfg(feature = "coreml")]
-    if std::env::var("TETR_ORT").is_ok() {
-        match tetr_nn::ort_backend::OrtNetEvaluator::load(dir) {
-            Ok(e) => {
-                eprintln!("datagen eval: CoreML backend ({})", dir.display());
-                return Box::new(e);
-            }
-            Err(e) => eprintln!("CoreML backend unavailable ({e}); falling back to BLAS"),
-        }
+/// The datagen evaluator: the net when `--net` is given, else the one CC2
+/// (attack-tuned — the champion-family weights; the `beam:cc2` arm uses the
+/// same, so the teacher and the anchor are the SAME bot).
+fn load_eval(net: Option<&std::path::Path>) -> Box<dyn tetr_core::ai::eval::Evaluator> {
+    match net {
+        Some(dir) => Box::new(
+            tetr_nn::serve::NetEvaluator::load(dir)
+                .unwrap_or_else(|e| die(&format!("net load {}: {e}", dir.display()))),
+        ),
+        None => Box::new(tetr_core::ai::Cc2Evaluator::new(
+            tetr_core::ai::eval::Cc2Weights::attack_tuned(),
+        )),
     }
-    Box::new(
-        tetr_nn::serve::NetEvaluator::load(dir)
-            .unwrap_or_else(|e| die(&format!("net load {}: {e}", dir.display()))),
-    )
 }
 
 fn main() -> std::io::Result<()> {
@@ -428,29 +409,15 @@ fn main() -> std::io::Result<()> {
             net,
             width,
             depth,
-            topm,
-            slot_vehicle,
             games,
             seeds,
             out,
             venue,
             workers,
-            opp_cc2,
         } => {
             use tetr_research::datagen::BeamConfig;
-            let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match &net {
-                Some(dir) => load_net_eval(dir),
-                None => Box::new(tetr_core::ai::Cc2Evaluator::new(
-                    tetr_core::ai::eval::Cc2Weights::attack_tuned(),
-                )),
-            };
-            let cfg = BeamConfig {
-                width,
-                depth,
-                transpose: true,
-                top_m: topm,
-                slot_filter: slot_vehicle,
-            };
+            drop(load_eval(net.as_deref())); // validate the model dir up front
+            let cfg = BeamConfig { width, depth };
             let venue_fmt = tetr_research::versus::VersusFormat {
                 max_plies: venue.max_plies,
                 rain_period: venue.rain,
@@ -458,61 +425,31 @@ fn main() -> std::io::Result<()> {
             };
             let t0 = std::time::Instant::now();
             let n_workers = workers.max(1);
-            drop(eval); // each worker owns its eval; the probe load above validated the dir
-            let wld_total = std::sync::Mutex::new([0u64; 3]);
             std::thread::scope(|scope| -> std::io::Result<()> {
                 let mut handles = Vec::new();
                 for w in 0..n_workers {
-                    let out_w = if n_workers == 1 {
-                        out.clone()
-                    } else {
-                        out.join(format!("w{w}"))
-                    };
+                    // Every worker writes under out/wN — INCLUDING a single
+                    // worker, so a corpus has exactly one layout (a 1-worker
+                    // flat layout once silently vanished from a training mix).
+                    let out_w = out.join(format!("w{w}"));
                     let net_ref = &net;
                     let venue_ref = &venue_fmt;
-                    let wld_ref = &wld_total;
                     handles.push(scope.spawn(move || -> std::io::Result<()> {
-                        let eval: Box<dyn tetr_core::ai::eval::Evaluator> = match net_ref {
-                            Some(dir) => load_net_eval(dir),
-                            None => Box::new(tetr_core::ai::Cc2Evaluator::new(
-                                tetr_core::ai::eval::Cc2Weights::attack_tuned(),
-                            )),
-                        };
-                        let cc2 = tetr_core::ai::Cc2Evaluator::new(
-                            tetr_core::ai::eval::Cc2Weights::attack_tuned(),
-                        );
+                        let eval = load_eval(net_ref.as_deref());
                         let mut writer = tetr_nn::shards::ShardWriter::create(&out_w, 1024)?;
-                        let mut wld = [0u64; 3];
                         let mut i = w as u64;
                         while i < games {
-                            let res = tetr_research::datagen::datagen_game_vs(
+                            tetr_research::datagen::datagen_game(
                                 &mut writer,
-                                [&*eval, &cc2],
+                                &*eval,
                                 cfg,
-                                net_ref.as_deref(),
-                                opp_cc2,
                                 venue_ref,
                                 seeds + i,
                                 (seeds + i) as u32,
                             )?;
-                            // Two-arm mode: count NET-seat wins, not seat-A
-                            // wins — the net seat alternates by game parity,
-                            // so seat accounting reads ~50-50 by construction.
-                            let net_is_seat_a = !opp_cc2 || (seeds + i).is_multiple_of(2);
-                            let idx = match (res.result, net_is_seat_a) {
-                                (tetr_research::versus::VersusResult::Draw, _) => 2,
-                                (tetr_research::versus::VersusResult::AWins, true)
-                                | (tetr_research::versus::VersusResult::BWins, false) => 0,
-                                _ => 1,
-                            };
-                            wld[idx] += 1;
                             i += n_workers as u64;
                         }
                         writer.flush()?;
-                        let mut total = wld_ref.lock().expect("wld lock");
-                        for k in 0..3 {
-                            total[k] += wld[k];
-                        }
                         Ok(())
                     }));
                 }
@@ -521,19 +458,16 @@ fn main() -> std::io::Result<()> {
                 }
                 Ok(())
             })?;
-            let wld = *wld_total.lock().expect("wld lock");
-            let _ = &wld;
             let secs = t0.elapsed().as_secs_f64();
             println!(
                 "{}",
                 json!({
                     "experiment": "datagen",
                     "eval": net.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "cc2".into()),
-                    "width": width, "depth": depth, "topm": topm, "games": games, "seeds": seeds,
+                    "width": width, "depth": depth, "games": games, "seeds": seeds,
                     "out": out.display().to_string(),
                     "wall_secs": secs,
                     "games_per_hr": games as f64 * 3600.0 / secs,
-                    "net_opp_draw": wld,
                 })
             );
             Ok(())

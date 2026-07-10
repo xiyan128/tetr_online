@@ -1,40 +1,22 @@
-"""One resumable command per expert-iteration round (leapfrog T16).
+"""One command per expert-iteration round.
 
-VALIDITY RESET: new invocations are intentionally blocked.  Legacy rounds
-omit the frozen generator policy and discarded legal actions needed by the
-repaired target contract, and their other validity defects are tracked in the
-Wayfinder map. Round 11 was already in flight when the reset was declared; its
-loaded pre-guard process may still finish and write a legacy verdict, but that
-receipt is exploratory and T19 must mechanically quarantine it from future
-selection. Remove ``require_validity_stack`` only after the replacement shard,
-instrument, purity, and manifest tickets are closed.
+    datagen -> train (this round + replay of earlier rounds) -> gate
 
-Encodes the campaign's burned-in lessons: consistent vehicle end-to-end (the
-guided beam drives datagen AND the gates), a DIVERSIFIED self-play pool (half
-grounded net-vs-CC2, half mirror — homogeneous pools bred a parent-exploiting
-degenerate, A-r8), fine-tune from the LINEAGE net (from-scratch regresses;
-lineage chains from the newest net while the INCUMBENT advances only on
-promotion, A-r7), SSL aux on, static completed-Q targets (live-logit
-quarantined), and — load-bearing — promotion requires the incumbent gate PASS
-**and** no-regression vs the fixed CC2 anchor (self-play lineages game
-incumbent-only gates, A-r8).
+A candidate is kept only if it (a) beats the incumbent in a seed-paired duel
+AND (b) does not regress against the fixed CC2 anchor (`beam:cc2@w8d5`).
+Round 0 has no incumbent: its corpus comes from CC2 self-play (the only CC2
+supervision in the campaign) and its net is accepted on the anchor read alone.
 
-Steps (each skipped if its output already exists — rerun == resume):
-  1. datagen   — half `--opp-cc2` grounded + half mirror, per-mode subdirs
-  2. mix       — replay symlinks: round shards + every 4th base-corpus shard
-  3. train     — fine-tune from the lineage net (--init, --ssl), 1 epoch
-  4. duels     — policy/value isolation + the CC2 ANCHOR duel (telemetry+veto)
-  5. gate      — latched pair-GSPRT guided-vs-guided vs the incumbent
-  6. ledger    — one JSON line appended to <scratch>/rounds.jsonl
-
-Seed regions (disjoint by construction, all logged):
-  datagen: 3_000_000 + round * 100_000        (games consume +games)
-  duels:   993_000_000 + round * 1_000_000
-  gate:    994_000_000 + round * 1_000_000
+Seeds: datagen uses `--seed-base + round * 1_000_000` (games consume one seed
+each); duels use a disjoint region derived the same way from `--duel-base`.
+Every step's receipt lands in `<scratch>/rN/` and one JSON line per round is
+appended to `<scratch>/rounds.jsonl`. Steps re-run from scratch if their
+output is missing; a completed datagen is detected by its receipt file, never
+by directory existence (a killed run leaves partial shards).
 
 Usage:
-  uv run python -m tetrnn.round --round N --incumbent <model-dir> \
-      --base-corpus <round0-corpus-dir> --scratch <dir> [--games 1200]
+  uv run python -m tetrnn.round --round N --scratch <dir>
+      [--incumbent <model-dir>] [--games 600] [--wd w8d5] [--workers 6]
 """
 
 from __future__ import annotations
@@ -51,21 +33,11 @@ REPO = Path(__file__).resolve().parents[2]
 BIN = REPO / "target/release/tetr-research"
 
 
-def require_validity_stack() -> None:
-    """Fail before datagen: legacy rounds cannot produce promotable evidence."""
-    raise RuntimeError(
-        "expert-iteration campaign paused by the validity reset: complete the "
-        "shard-v2, immutable-arm, seed, deterministic-gate, opponent-context, "
-        "pure-search, manifest, and cross-language CI repairs first"
-    )
-
-
-def sh(cmd: list[str], log: Path | None = None) -> str:
+def sh(cmd: list[str], log: Path) -> str:
     print("+", " ".join(str(c) for c in cmd), flush=True)
     out = subprocess.run(cmd, capture_output=True, text=True)
     text = out.stdout + out.stderr
-    if log:
-        log.write_text(text)
+    log.write_text(text)
     if out.returncode != 0:
         print(text[-2000:], file=sys.stderr)
         raise SystemExit(f"step failed rc={out.returncode}: {cmd[0]}")
@@ -80,227 +52,122 @@ def last_json(text: str) -> dict:
     raise SystemExit("no JSON receipt in output")
 
 
-def duel_line(text: str) -> str:
+def duel_summary(text: str) -> str:
     for line in text.splitlines():
-        if line.startswith("duel |") or line.startswith("gate |"):
+        if line.startswith(("duel |", "gate |")):
             return line.strip()
     return "?"
+
+
+def wins_of(summary: str) -> int:
+    """'duel | A 11-5-0 over 16 games | ...' -> 11."""
+    return int(summary.split("|")[1].strip().split()[1].split("-")[0])
 
 
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--round", type=int, required=True)
-    ap.add_argument("--incumbent", required=True, help="gate opponent (advances only on PASS)")
-    ap.add_argument(
-        "--lineage",
-        default=None,
-        help="training/datagen net (default: incumbent). A-r7: lineage chains from the "
-        "newest net (AZ-standard); the incumbent advances only on gate PASS.",
-    )
-    ap.add_argument("--base-corpus", required=True, help="grounded base corpus for the replay mix")
     ap.add_argument("--scratch", required=True)
-    ap.add_argument("--games", type=int, default=1200)
+    ap.add_argument("--incumbent", default=None, help="current best model dir (omit for round 0)")
+    ap.add_argument("--games", type=int, default=600)
     ap.add_argument("--workers", type=int, default=6)
-    ap.add_argument("--topm", type=int, default=12)
-    ap.add_argument("--wd", default="w8d5")
-    ap.add_argument(
-        "--lr",
-        default=None,
-        help="fine-tune LR override (A-r10: 1e-3 rewrites the policy wholesale in one "
-        "epoch — every lineage variant became an anchor-failing incumbent-exploiter; "
-        "1e-4 is the small-delta regime)",
-    )
-    ap.add_argument(
-        "--vehicle",
-        choices=["guided", "sguided"],
-        default="guided",
-        help="EXPLICIT vehicle, end-to-end (datagen + duels + gate): guided = per-child "
-        "ranker (validated, slow), sguided = slot ranker (fast; qualify hit@12 + anchor "
-        "first). The hidden chooser is how rounds 6-10 died (0cebd90).",
-    )
+    ap.add_argument("--wd", default="w8d5", help="beam width/depth for datagen and duels")
+    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--pairs", type=int, default=24, help="seed pairs per duel")
+    ap.add_argument("--seed-base", type=int, default=10_000_000)
+    ap.add_argument("--duel-base", type=int, default=900_000_000)
     args = ap.parse_args()
-    require_validity_stack()
 
     n = args.round
     scratch = Path(args.scratch)
     rdir = scratch / f"r{n}"
     rdir.mkdir(parents=True, exist_ok=True)
     corpus = rdir / "corpus"
-    mix = rdir / "mix"
     net = rdir / "net"
-    ledger = scratch / "rounds.jsonl"
     width, depth = args.wd[1:].split("d")
-    datagen_seeds = 3_000_000 + n * 100_000
-    duel_seeds = 993_000_000 + n * 1_000_000
-    gate_seeds = 994_000_000 + n * 1_000_000
     t0 = time.time()
-    lineage = args.lineage or args.incumbent
-    row: dict = {
-        "round": n,
-        "incumbent": args.incumbent,
-        "lineage": lineage,
-        "games": args.games,
-        "vehicle": args.vehicle,
-    }
+    row: dict = {"round": n, "incumbent": args.incumbent, "games": args.games, "wd": args.wd}
+    if n > 0 and not args.incumbent:
+        raise SystemExit("rounds past 0 need --incumbent (the model whose self-play trains next)")
 
-    # 1. datagen — A-r8 pool diversity: half grounded (vs CC2), half mirror.
-    # A homogeneous pool let the lineage evolve a parent-exploiting degenerate.
-    # The halves are seed-disjoint and independent, so they run CONCURRENTLY
-    # on split workers (round-11 receipts: the mirror half alone was 3.2h at
-    # full workers — serial halves dominated the round's wall-clock).
-    # Resume checks the RECEIPT, not the dir: a killed datagen leaves partial
-    # shards, and dir-existence would silently train on an incomplete corpus.
-    half = args.games // 2
-    procs: list[tuple[str, subprocess.Popen, Path]] = []
-    for tag, extra, base, workers in [
-        ("cc2", ["--opp-cc2"], datagen_seeds, (args.workers + 1) // 2),
-        ("mirror", [], datagen_seeds + half, args.workers // 2),
-    ]:
-        receipt = corpus / tag / "receipt.json"
-        if receipt.exists():
-            print(f"datagen {tag}: receipt exists — skipping")
-            row[f"datagen_{tag}"] = json.loads(receipt.read_text())
-            continue
-        if (corpus / tag).exists():
-            print(f"datagen {tag}: partial dir without receipt — regenerating")
-            shutil.rmtree(corpus / tag)
-        cmd = [
-            str(BIN),
-            "datagen",
-            "--net",
-            lineage,
-            "--topm",
-            str(args.topm),
-            "--width",
-            width,
-            "--depth",
-            depth,
-            "--games",
-            str(half),
-            "--seeds",
-            str(base),
-            "--workers",
-            str(workers),
-            *(["--slot-vehicle"] if args.vehicle == "sguided" else []),
-            *extra,
-            "--out",
-            str(corpus / tag),
+    # 1. datagen: round 0 = CC2 self-play (the bootstrap teacher); later rounds
+    # = the incumbent's self-play. Resume via the receipt, not the dir.
+    receipt = corpus / "receipt.json"
+    if receipt.exists():
+        row["datagen"] = json.loads(receipt.read_text())
+        print("datagen: receipt exists — skipping")
+    else:
+        if corpus.exists():
+            print("datagen: partial dir without receipt — regenerating")
+            shutil.rmtree(corpus)
+        text = sh(
+            [
+                str(BIN), "datagen",
+                *(["--net", args.incumbent] if n > 0 and args.incumbent else []),
+                "--width", width, "--depth", depth,
+                "--games", str(args.games),
+                "--seeds", str(args.seed_base + n * 1_000_000),
+                "--workers", str(args.workers),
+                "--out", str(corpus),
+            ],
+            rdir / "datagen.log",
+        )  # fmt: skip
+        row["datagen"] = last_json(text)
+        receipt.write_text(json.dumps(row["datagen"]))
+
+    # 2. train: this round's corpus + a replay of every earlier round's.
+    if (net / "config.json").exists():
+        print(f"train: {net} exists — skipping")
+    else:
+        replay = [
+            str(scratch / f"r{k}" / "corpus")
+            for k in range(n)
+            if (scratch / f"r{k}" / "corpus" / "receipt.json").exists()
         ]
-        print("+", " ".join(cmd), flush=True)
-        log = (rdir / f"datagen_{tag}.log").open("w")
-        procs.append((tag, subprocess.Popen(cmd, stdout=log, stderr=log), receipt))
-    for tag, proc, receipt in procs:
-        if proc.wait() != 0:
-            raise SystemExit(f"datagen {tag} failed rc={proc.returncode}")
-        text = (rdir / f"datagen_{tag}.log").read_text()
-        row[f"datagen_{tag}"] = last_json(text)
-        receipt.write_text(json.dumps(row[f"datagen_{tag}"]))
-
-    # 2. replay mix: this round's shards + every 4th base-corpus shard.
-    if not mix.exists():
-        mix.mkdir()
-        k = 0
-        for f in sorted(corpus.glob("*/w*/shard-*.safetensors")):
-            tag = f.parent.parent.name
-            (mix / f"shard-r{n}{tag}{f.parent.name}-{f.name.removeprefix('shard-')}").symlink_to(f)
-        for i, f in enumerate(sorted(Path(args.base_corpus).glob("**/shard-*.safetensors"))):
-            if i % 4 == 0:
-                (mix / f"shard-base-{f.name.removeprefix('shard-')}").symlink_to(f)
-                k += 1
-        print(f"mix: {len(list(mix.iterdir()))} shards ({k} base)")
-
-    # 3. train: fine-tune from the incumbent, SSL on, static targets, 1 epoch.
-    if not (net / "config.json").exists():
         sh(
             [
-                "uv",
-                "run",
-                "--directory",
-                str(REPO / "python"),
-                "python",
-                "-m",
-                "tetrnn.train",
-                str(mix),
-                str(net),
-                "1",
-                f"--init={lineage}",
-                "--ssl",
-                *([f"--lr={args.lr}"] if args.lr else []),
+                "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
+                "tetrnn.train", str(corpus), *replay, str(net),
+                "--epochs", str(args.epochs),
             ],
             rdir / "train.log",
-        )
-    else:
-        print(f"train: {net} exists — skipping")
-    train_log = rdir / "train.log"
+        )  # fmt: skip
     row["train_tail"] = (
-        train_log.read_text().strip().splitlines()[-3:] if train_log.exists() else []
+        (rdir / "train.log").read_text().strip().splitlines()[-2:]
+        if (rdir / "train.log").exists()
+        else []
     )
 
-    # 4. isolation duels (telemetry, not verdicts).
-    cand_guided = f"{args.vehicle}:{net}@m{args.topm}{args.wd}"
-    inc_guided = f"{args.vehicle}:{args.incumbent}@m{args.topm}{args.wd}"
-    for tag, a, b, seeds in [
-        ("policy_duel", f"policy:{net}", f"policy:{args.incumbent}", duel_seeds),
-        ("value_duel", f"value:{net}", f"value:{args.incumbent}", duel_seeds + 100_000),
-        # A-r8: the FIXED-ANCHOR duel — self-play lineages can evolve
-        # parent-exploiting degenerates (r7: beat v3 at the gate, lost 0-32 to
-        # CC2). Promotion requires no-regression vs the fixed external anchor.
-        ("anchor_duel", cand_guided, "beam:cc2@w8d5", duel_seeds + 200_000),
-    ]:
+    # 3. gate: candidate vs incumbent (skipped at round 0) + the CC2 anchor.
+    cand = f"beam:{net}@{args.wd}"
+    duel_seeds = args.duel_base + n * 1_000_000
+    verdicts = []
+    if args.incumbent:
         text = sh(
-            [
-                str(BIN),
-                "duel",
-                "--a",
-                a,
-                "--b",
-                b,
-                "--pairs",
-                "24",
-                "--seeds",
-                str(seeds),
-                "--allow-dirty",
-            ],
-            rdir / f"{tag}.log",
-        )
-        row[tag] = duel_line(text)
-        print(f"{tag}: {row[tag]}")
-
-    # 5. promotion gate (the verdict) — SHORT-CIRCUITED when the anchor
-    # already failed (A-r8 veto): rounds 6-9 each burned 5-35 gate-minutes on
-    # candidates the 25-second anchor duel had already killed.
-    anchor_wins = int(row["anchor_duel"].split("|")[1].strip().split()[1].split("-")[0])
-    row["anchor_wins_of_48"] = anchor_wins
-    if anchor_wins < 18:
-        row["gate"] = "skipped (anchor veto)"
-        row["verdict"] = f"ANCHOR_FAIL({anchor_wins}/48)"
-    else:
-        text = sh(
-            [
-                str(BIN),
-                "gate",
-                "--a",
-                cand_guided,
-                "--b",
-                inc_guided,
-                "--seeds",
-                str(gate_seeds),
-                "--max-pairs",
-                "120",
-                "--allow-dirty",
-            ],
-            rdir / "gate.log",
-        )
-        row["gate"] = duel_line(text)
-        row["gate_json"] = last_json(text)
-        row["verdict"] = row["gate_json"].get("verdict")
+            [str(BIN), "duel", "--a", cand, "--b", f"beam:{args.incumbent}@{args.wd}",
+             "--pairs", str(args.pairs), "--seeds", str(duel_seeds), "--allow-dirty"],
+            rdir / "duel_incumbent.log",
+        )  # fmt: skip
+        row["vs_incumbent"] = duel_summary(text)
+        verdicts.append(wins_of(row["vs_incumbent"]) > args.pairs)  # majority of 2*pairs games
+        print(f"vs incumbent: {row['vs_incumbent']}")
+    text = sh(
+        [str(BIN), "duel", "--a", cand, "--b", "beam:cc2@w8d5",
+         "--pairs", str(args.pairs), "--seeds", str(duel_seeds + 500_000), "--allow-dirty"],
+        rdir / "duel_anchor.log",
+    )  # fmt: skip
+    row["vs_anchor"] = duel_summary(text)
+    print(f"vs anchor: {row['vs_anchor']}")
+    anchor_wins = wins_of(row["vs_anchor"])
+    row["anchor_wins"] = anchor_wins
+    # No-regression bar: a third of the anchor games (round 0 calibrates this).
+    verdicts.append(anchor_wins * 3 >= args.pairs * 2)
+    row["verdict"] = "PROMOTE" if all(verdicts) else "KEEP_INCUMBENT"
     row["wall_secs"] = round(time.time() - t0, 1)
 
-    # 6. ledger.
-    with ledger.open("a") as f:
+    with (scratch / "rounds.jsonl").open("a") as f:
         f.write(json.dumps(row) + "\n")
-    print(f"\nROUND {n}: {row['verdict']}  ({row['gate']})  [{row['wall_secs']}s]")
-    print(f"ledger: {ledger}")
+    print(f"\nROUND {n}: {row['verdict']}  (anchor {row['vs_anchor']})  [{row['wall_secs']}s]")
 
 
 if __name__ == "__main__":

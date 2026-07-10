@@ -1,376 +1,140 @@
-"""Legacy-shard trainer: explicit beam-rank distillation + terminal-WDL value.
+"""The value trainer: win/draw/loss cross-entropy on played states.
 
-Losses per decision (a sibling group of children):
-  * policy: CE(pi', softmax over the group of per-child policy logits), where
-    pi' = rank_distillation_target(child_score, frozen_generator_logits).
-  * value: CE on the PLAYED child's WDL logits vs z (win=0 / draw=1 / loss=2)
-    from the mover's perspective — the state actually visited gets the label;
-    counterfactual siblings do not.
+Each shard row is one played state + the game outcome from the mover's
+perspective; the loss is plain 3-class CE. Whitening stats come from the
+training rows (one row role — every row is served the same way). Holdout is
+every 10th shard; shard flushes are game-aligned, so that is a game-level
+split.
 
-The corpus streams SHARD BY SHARD (a full 2000-game corpus is ~13 GB unpacked
-— never resident). Shard flushes are game-aligned, so a game never spans
-shards and a shard-level split IS a game-level split (the postmortem lesson —
-decision-level splits leak). Holdout = every 10th shard.
+Usage:
+  uv run python -m tetrnn.train <corpus-dir> [<corpus-dir> ...] <out-model-dir>
+      [--epochs 3] [--init <model-dir>] [--lr 1e-3]
 
-The current shard schema does not store frozen generator logits, prove that
-filtered shards contain every legal root, or encode terminal Q on the
-evaluator's finite scale. Consequently this entry point is fail-closed. Clean
-campaign training remains paused until the provenance-rich shard schema lands;
-legacy corpora remain readable for audits but cannot produce another model.
+Multiple corpus dirs concatenate (the replay-buffer form: pass the current
+round's corpus plus earlier rounds').
 """
 
 from __future__ import annotations
 
-import sys
+import argparse
+import os
 import time
 from pathlib import Path
 
 import numpy as np
 import torch
 
-from .export import export
-from .model import N_SLOTS, TetrNet
-from .shards import FEATURE_LEN, Shard, read_shard, shard_paths, unpack_plane
-from .targets import BEAM_RANK_BETA, n_eff
+from .export import export, load
+from .model import TetrNet
+from .shards import read_shard, shard_paths, unpack_plane
 
-BATCH_DECISIONS = 64
-LR = 1e-3
-SEED = 0
+BATCH = 512
 HOLDOUT_EVERY = 10  # every 10th shard is holdout (game-aligned => game-level)
 
 
-def z_class(z: int) -> int:
+def z_class(z: np.ndarray) -> np.ndarray:
     """z=+1 -> win(0), z=0 -> draw(1), z=-1 -> loss(2) (net.rs head order)."""
-    return {1: 0, 0: 1, -1: 2}[int(z)]
-
-
-def shard_batches(shard: Shard, rng: np.random.Generator | None):
-    order = np.arange(shard.n_decisions)
-    if rng is not None:
-        rng.shuffle(order)
-    for i in range(0, len(order), BATCH_DECISIONS):
-        yield order[i : i + BATCH_DECISIONS]
-
-
-def run_batch(
-    model: TetrNet,
-    shard: Shard,
-    targets: list[np.ndarray],
-    dec_idx: np.ndarray,
-    device: torch.device,
-    metrics: bool,
-    boot_value: bool = False,
-    ssl: bool = False,
-    policy_heads: bool = True,
-) -> tuple[torch.Tensor, dict]:
-    """Forward one batch of decisions from one shard; return (loss, metrics)."""
-    # Vectorized gather (exact-A/B-verified against the loop form): children of
-    # decision d are the contiguous rows child_offset[d]..child_offset[d+1].
-    lo = shard.child_offset[dec_idx].astype(np.int64)
-    hi = shard.child_offset[dec_idx + 1].astype(np.int64)
-    counts = hi - lo
-    total = int(counts.sum())
-    starts = np.zeros(len(dec_idx), dtype=np.int64)
-    starts[1:] = np.cumsum(counts)[:-1]
-    # rows = concat(arange(lo_g, hi_g)) via one arange + per-group offsets.
-    rows = np.arange(total, dtype=np.int64) - np.repeat(starts, counts) + np.repeat(lo, counts)
-    groups_np = np.repeat(np.arange(len(dec_idx), dtype=np.int64), counts)
-    opp_rows = np.repeat(dec_idx, counts)
-    played_local = (starts + shard.decision[dec_idx, 3].astype(np.int64)).tolist()
-    zc = [z_class(z) for z in shard.decision[dec_idx, 5]]
-    groups_t = torch.as_tensor(groups_np, device=device)
-
-    own = torch.as_tensor(unpack_plane(shard.child_own[rows]), device=device).unsqueeze(1)
-    opp = torch.as_tensor(unpack_plane(shard.opp_plane[opp_rows]), device=device).unsqueeze(1)
-    feats = torch.as_tensor(shard.child_feats[rows], device=device)
-    ssl_bce = torch.zeros((), device=device)
-    if ssl:
-        heads, ssl_logits = model.serve_and_ssl(own, opp, feats)
-        target_bits = own.squeeze(1).flatten(1)
-        ssl_bce = torch.nn.functional.binary_cross_entropy_with_logits(ssl_logits, target_bits)
-    else:
-        heads = model.serve(own, opp, feats)
-
-    # Policy: grouped log-softmax over each decision's children.
-    logit = heads[:, 3]
-    n_groups = len(dec_idx)
-    gmax = torch.full((n_groups,), -torch.inf, device=device)
-    gmax.scatter_reduce_(0, groups_t, logit, reduce="amax")
-    ex = torch.exp(logit - gmax[groups_t])
-    gsum = torch.zeros(n_groups, device=device).scatter_add_(0, groups_t, ex)
-    logp = logit - gmax[groups_t] - torch.log(gsum[groups_t])
-    batch_targets = {int(d): targets[d] for d in dec_idx}
-    pi = torch.as_tensor(
-        np.concatenate([batch_targets[int(d)] for d in dec_idx]).astype(np.float32),
-        device=device,
-    )
-    policy_ce = -(pi * logp).sum() / n_groups
-
-    # Value: WDL CE on the played child of each decision.
-    played_rows = torch.as_tensor(np.asarray(played_local), device=device)
-    wdl = heads[played_rows][:, :3]
-    z_t = torch.as_tensor(np.asarray(zc), device=device)
-    value_ce = torch.nn.functional.cross_entropy(wdl, z_t)
-
-    # Search-value bootstrap (round-3): the played child's stored root score is
-    # the GENERATOR search's d5 value estimate — a dense per-decision signal
-    # (z is one label per game). Regress the differentiable z_hat toward
-    # tanh(score / Z_SCALE); death-coded scores clamp to -1.
-    if boot_value:
-        Z_SCALE = 10_000.0
-        boots = []
-        for d in dec_idx:
-            lo = int(shard.child_offset[d])
-            sc = float(shard.child_score[lo + int(shard.decision[d, 3])])
-            boots.append(-1.0 if sc < -1_000_000 else float(np.tanh(sc / Z_SCALE)))
-        p = torch.softmax(wdl, dim=1)
-        z_hat_pred = p[:, 0] - p[:, 2]
-        v_boot = torch.as_tensor(np.asarray(boots, dtype=np.float32), device=device)
-        value_ce = value_ce + ((z_hat_pred - v_boot) ** 2).mean()
-
-    # Action head: CE(slot-scattered pi', log_softmax(slot logits(parent))).
-    # Collided slots (rare same-(rot,x) placements) sum their target mass.
-    slot_ce = torch.zeros((), device=device)
-    if (
-        shard.parent_own is not None
-        and shard.parent_feats is not None
-        and shard.child_slot is not None
-    ):
-        p_own = torch.as_tensor(unpack_plane(shard.parent_own[dec_idx]), device=device).unsqueeze(1)
-        p_opp = torch.as_tensor(unpack_plane(shard.opp_plane[dec_idx]), device=device).unsqueeze(1)
-        p_feats = torch.as_tensor(shard.parent_feats[dec_idx], device=device)
-        slot_logits = model.serve_slots(p_own, p_opp, p_feats)
-        slot_target = np.zeros((n_groups, N_SLOTS), dtype=np.float32)
-        for g, d in enumerate(dec_idx):
-            t = batch_targets[int(d)]
-            lo = int(shard.child_offset[d])
-            slots = shard.child_slot[lo : lo + len(t)]
-            np.add.at(slot_target[g], slots, t.astype(np.float32))
-        st = torch.as_tensor(slot_target, device=device)
-        slot_ce = -(st * torch.log_softmax(slot_logits, dim=1)).sum(dim=1).mean()
-
-    m = {
-        "policy_ce": float(policy_ce.detach()),
-        "value_ce": float(value_ce.detach()),
-        "slot_ce": float(slot_ce.detach()),
-        "ssl_bce": float(ssl_bce.detach()),
-    }
-    if metrics:
-        # top-1 agreement with the search argmax; z_hat spread (start-gate).
-        with torch.no_grad():
-            lg = logit.detach().cpu().numpy()
-            # Groups are contiguous runs: per-group argmax via maximum.reduceat,
-            # first-max index recovered by scanning each group's slice once.
-            gmaxes = np.maximum.reduceat(lg, starts)
-            arg_local = np.empty(n_groups, dtype=np.int64)
-            for g in range(n_groups):
-                s0, c = int(starts[g]), int(counts[g])
-                arg_local[g] = int(np.argmax(lg[s0 : s0 + c] >= gmaxes[g]))
-            search_arg = shard.decision[dec_idx, 4]
-            m["top1"] = float((arg_local == search_arg).mean())
-            p = torch.softmax(wdl, dim=1)
-            z_hat = (p[:, 0] - p[:, 2]).detach().cpu().numpy()
-            m["z_hat_std"] = float(np.std(z_hat))
-
-    total = value_ce + ssl_bce
-    if policy_heads:
-        total = total + policy_ce + slot_ce
-    return total, m
-
-
-def legacy_uniform_shard_targets(shard: Shard) -> list[np.ndarray]:
-    """Removed legacy model-producing seam; use ``target_audit`` for forensics."""
-    del shard
-    raise RuntimeError(
-        "legacy uniform shard targets are audit-only; shard-v2 frozen targets are required"
-    )
+    return (1 - z).astype(np.int64)
 
 
 def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
-    """Mean/std over EVERY feature row the net serves — children AND parents —
-    one streaming pass (sum/sumsq; features are bounded so this is fine).
-
-    Child-only stats were the 2026-07-09 slot-head killer: the current-piece
-    one-hot (dims 43-49) is constant-zero in child rows (post-placement), so
-    its std floored to 1e-6 and PARENT rows standardized to z=1e6 — the trunk
-    went ReLU-dead on every parent forward and the slot head could only learn
-    marginal slot popularity (a state-blind filter -> suicide play). A dim
-    constant across this union is genuinely never-informative; the floor only
-    ever divides zero for it. (The same landmine waits on the constant-zero
-    opp/venue dims if set_opponent is wired — recompute whitening whenever the
-    obs distribution grows a new live dim.)"""
-    n = 0
-    s = np.zeros(FEATURE_LEN, dtype=np.float64)
-    s2 = np.zeros(FEATURE_LEN, dtype=np.float64)
+    """Mean/std over every training row's features, one streaming pass."""
+    n, s, s2 = 0, None, None
     for p in paths:
-        sh = read_shard(p)
-        for f in (sh.child_feats, sh.parent_feats):
-            if f is None:
-                continue
-            f = f.astype(np.float64)
-            n += f.shape[0]
-            s = s + f.sum(axis=0)
-            s2 = s2 + (f * f).sum(axis=0)
+        f = read_shard(p).feats.astype(np.float64)
+        n += f.shape[0]
+        s = f.sum(axis=0) if s is None else s + f.sum(axis=0)
+        s2 = (f * f).sum(axis=0) if s2 is None else s2 + (f * f).sum(axis=0)
+    assert s is not None and s2 is not None, "no training rows"
     mean = s / n
     var = np.maximum(s2 / n - mean * mean, 0.0)
     return mean.astype(np.float32), np.sqrt(var).astype(np.float32)
 
 
-def require_target_contract(args: list[str]) -> None:
-    """Fail closed until shards carry a reconstructible frozen target."""
-    if "live" in args or "--live" in args:
-        raise RuntimeError(
-            "live trainee-logit targets are invalid: they have no finite fixed point; "
-            "store and use frozen generator logits instead"
-        )
-    raise RuntimeError(
-        "policy training is paused: current shards lack frozen generator logits, "
-        "complete legal-action provenance, visits, finite-scale terminal Q, and raw "
-        "root values; legacy corpora are audit-only"
-    )
+def epoch_pass(
+    model: TetrNet,
+    paths: list[str],
+    device: torch.device,
+    opt: torch.optim.Optimizer | None,
+    rng: np.random.Generator | None,
+) -> tuple[float, float]:
+    """One pass over `paths` (shard-streamed). With `opt` it trains; without it
+    it evaluates. Returns (mean CE, accuracy of the WDL argmax)."""
+    total_ce, total_hit, total_n = 0.0, 0, 0
+    for p in paths:
+        shard = read_shard(p)
+        order = np.arange(shard.n_rows)
+        if rng is not None:
+            rng.shuffle(order)
+        for lo in range(0, len(order), BATCH):
+            rows = order[lo : lo + BATCH]
+            board = torch.as_tensor(unpack_plane(shard.own[rows]), device=device).unsqueeze(1)
+            feats = torch.as_tensor(shard.feats[rows], device=device)
+            target = torch.as_tensor(z_class(shard.z[rows]), device=device)
+            if opt is None:
+                with torch.no_grad():
+                    logits = model.serve(board, feats)
+                    ce = torch.nn.functional.cross_entropy(logits, target)
+            else:
+                logits = model.serve(board, feats)
+                ce = torch.nn.functional.cross_entropy(logits, target)
+                opt.zero_grad()
+                ce.backward()
+                opt.step()
+            total_ce += float(ce.detach()) * len(rows)
+            total_hit += int((logits.argmax(dim=1) == target).sum())
+            total_n += len(rows)
+    return total_ce / max(total_n, 1), total_hit / max(total_n, 1)
 
 
 def main() -> None:
-    require_target_contract(sys.argv[1:])
-    corpus_dir, out_dir = sys.argv[1], Path(sys.argv[2])
-    epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-    init_dir = None
-    boot_value = False
-    for a in sys.argv[4:]:
-        if a.startswith("--init="):
-            init_dir = a.split("=", 1)[1]
-        if a == "--boot-value":
-            boot_value = True
-    ssl = "--ssl" in sys.argv[4:]
-    lr = LR
-    for a in sys.argv[4:]:
-        if a.startswith("--lr="):
-            lr = float(a.split("=", 1)[1])
-    a3 = "--a3" in sys.argv[4:]
-    if a3:
-        print("A3 per-source heads: r1 shards train all heads; r0 shards train VALUE(+ssl) only")
-    if ssl:
-        print("SSL aux: trunk reconstructs the own plane (BCE, all child rows)")
-    if boot_value:
-        print("value bootstrap: z_hat -> tanh(played root score / Z_SCALE) + z CE")
-    paths = shard_paths(corpus_dir)
-    assert paths, f"no shards in {corpus_dir}"
-    hold_paths = paths[HOLDOUT_EVERY - 1 :: HOLDOUT_EVERY]
-    train_paths = [p for p in paths if p not in set(hold_paths)]
-    print(f"corpus: {len(paths)} shards ({len(train_paths)} train / {len(hold_paths)} holdout)")
+    ap = argparse.ArgumentParser()
+    ap.add_argument("dirs", nargs="+", help="corpus dir(s), then the output model dir last")
+    ap.add_argument("--epochs", type=int, default=3)
+    ap.add_argument("--init", default=None, help="fine-tune from this exported model dir")
+    ap.add_argument("--lr", type=float, default=1e-3)
+    args = ap.parse_args()
+    *corpora, out_dir = args.dirs
+    out = Path(out_dir)
 
-    # Target telemetry is descriptive, not an authorization gate.  A fixed
-    # effective-support promise does not follow from completed-Q.
-    s0 = read_shard(paths[0])
-    effs = np.array([n_eff(t) for t in legacy_uniform_shard_targets(s0)])
-    print(f"targets: beta={BEAM_RANK_BETA:g}, N_eff median={np.median(effs):.2f}")
-
-    import os
+    paths = [p for d in corpora for p in shard_paths(d)]
+    if not paths:
+        raise SystemExit(f"no shards under {corpora}")
+    train_paths = [p for i, p in enumerate(paths) if i % HOLDOUT_EVERY != 0]
+    holdout_paths = [p for i, p in enumerate(paths) if i % HOLDOUT_EVERY == 0]
 
     device = torch.device(
         os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu")
     )
-    model = TetrNet().to(device)
-    if init_dir:
-        # Fine-tune: load an exported checkpoint (round-2+ continues the SAME
-        # net rather than re-learning from scratch on the replay mix).
-        from safetensors.torch import load_file as load_st
-
-        sd = load_st(str(Path(init_dir) / "net_v2.safetensors"))
-        renamed = {}
-        conv_i = 0
-        for k, v in sd.items():
-            if k.startswith("conv"):
-                # conv1.weight -> convs.0.weight, conv2 -> convs.2, conv3 -> convs.4
-                n = int(k[4]) - 1
-                renamed[f"convs.{2 * n}.{k.split('.', 1)[1]}"] = v
-                conv_i += 1
-            else:
-                renamed[k] = v
-        missing, unexpected = model.load_state_dict(renamed, strict=False)
-        missing = [m for m in missing if not (m.startswith("feat_") or m.startswith("ssl_head"))]
-        assert not unexpected, f"unexpected keys: {unexpected}"
-        assert not missing, f"missing keys: {missing}"
-        print(f"initialized from {init_dir}")
     t0 = time.time()
-    if init_dir:
-        # Fine-tune keeps the CHECKPOINT's whitening (recomputing from the new
-        # mix would shift the input distribution under the loaded weights).
-        import json
-
-        cfg = json.loads((Path(init_dir) / "config.json").read_text())
-        model.feat_mean.copy_(torch.as_tensor(cfg["feature_mean"], dtype=torch.float32))
-        model.feat_std.copy_(torch.as_tensor(cfg["feature_std"], dtype=torch.float32))
-        print("whitening from checkpoint config")
+    if args.init:
+        model = load(Path(args.init))
+        print(f"init from {args.init} (whitening kept)")
     else:
+        model = TetrNet()
         mean, std = whitening_stats(train_paths)
         model.feat_mean.copy_(torch.as_tensor(mean))
         model.feat_std.copy_(torch.as_tensor(std))
-        print(f"whitening from train children+parents [{time.time() - t0:.0f}s]")
+        print(f"whitening from {len(train_paths)} train shards [{time.time() - t0:.0f}s]")
+    model.to(device).train()
+    opt = torch.optim.Adam(model.parameters(), lr=args.lr)
+    rng = np.random.default_rng(0)
 
-    print(f"lr={lr}")
-    opt = torch.optim.AdamW(model.parameters(), lr=lr)
-    rng = np.random.default_rng(SEED)
-    for epoch in range(epochs):
-        model.train()
-        te = time.time()
-        tr: dict[str, list[float]] = {}
-        shard_order = np.array(train_paths)
-        rng.shuffle(shard_order)
-        for sp in shard_order:
-            shard = read_shard(str(sp))
-            targets = legacy_uniform_shard_targets(shard)
-            ph = not (a3 and "shard-r0" in str(sp))
-            for b in shard_batches(shard, rng):
-                loss, m = run_batch(
-                    model,
-                    shard,
-                    targets,
-                    b,
-                    device,
-                    metrics=False,
-                    boot_value=boot_value,
-                    ssl=ssl,
-                    policy_heads=ph,
-                )
-                opt.zero_grad()
-                loss.backward()
-                opt.step()
-                for k, v in m.items():
-                    tr.setdefault(k, []).append(v)
-        trm = {k: float(np.mean(v)) for k, v in tr.items()}
-
+    print(f"corpus: {len(train_paths)} train / {len(holdout_paths)} holdout shards, lr={args.lr}")
+    for epoch in range(args.epochs):
+        tr_ce, tr_acc = epoch_pass(model, train_paths, device, opt, rng)
         model.eval()
-        ho: dict[str, list[float]] = {}
-        with torch.no_grad():
-            for sp in hold_paths:
-                shard = read_shard(sp)
-                targets = legacy_uniform_shard_targets(shard)
-                for b in shard_batches(shard, None):
-                    _, m = run_batch(
-                        model,
-                        shard,
-                        targets,
-                        b,
-                        device,
-                        metrics=True,
-                        boot_value=boot_value,
-                        ssl=ssl,
-                    )
-                    for k, v in m.items():
-                        ho.setdefault(k, []).append(v)
-        hom = {k: float(np.mean(v)) for k, v in ho.items()}
+        ho_ce, ho_acc = epoch_pass(model, holdout_paths, device, None, None)
+        model.train()
+        # Export every epoch: a partial run still yields a loadable model.
+        export(model.to("cpu").eval(), out)
+        model.to(device).train()
         print(
-            f"epoch {epoch}: train pCE={trm['policy_ce']:.3f} vCE={trm['value_ce']:.3f} "
-            f"sCE={trm.get('slot_ce', 0.0):.3f} | holdout pCE={hom['policy_ce']:.3f} "
-            f"vCE={hom['value_ce']:.3f} sCE={hom.get('slot_ce', 0.0):.3f} "
-            f"top1={hom['top1']:.3f} z_std={hom['z_hat_std']:.3f} [{time.time() - te:.0f}s]",
+            f"epoch {epoch}: train CE={tr_ce:.4f} acc={tr_acc:.3f} | "
+            f"holdout CE={ho_ce:.4f} acc={ho_acc:.3f} [{time.time() - t0:.0f}s]",
             flush=True,
         )
-        # Export every epoch: a partial run still yields a loadable model.
-        export(model.to("cpu"), out_dir)
-        model.to(device)
-        print(f"exported epoch {epoch} -> {out_dir}", flush=True)
+    print(f"exported {out}")
 
 
 if __name__ == "__main__":

@@ -32,7 +32,7 @@ def main() -> None:
     gen = torch.Generator().manual_seed(1)
     model.feat_mean.copy_(torch.randn(FEATURE_LEN, generator=gen) * 0.5)
     model.feat_std.copy_(torch.rand(FEATURE_LEN, generator=gen) + 0.5)
-    export(model, FIXTURE, attack_w=125.0)
+    export(model, FIXTURE)
     dump(model, FIXTURE / "golden_v2.json", n=16, seed=7)
     print(f"wrote {FIXTURE}")
 

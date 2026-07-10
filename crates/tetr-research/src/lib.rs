@@ -71,7 +71,6 @@ pub mod datagen;
 pub mod downstack;
 pub mod events;
 pub mod fixtures;
-pub mod gate0a;
 pub mod instruments;
 pub mod ledger;
 pub mod marathon;

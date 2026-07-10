@@ -1,8 +1,7 @@
 //! The observation: what the net sees, defined exactly once.
 //!
-//! One encoding for one net. An observation is **two occupancy planes** (own
-//! board and the opponent's, for the siamese conv tower) plus an
-//! **85-dim feature vector**:
+//! An observation is **one occupancy plane** (your own board) plus a
+//! **70-dim feature vector**:
 //!
 //! | offset | len | segment |
 //! |---|---|---|
@@ -15,26 +14,22 @@
 //! | `58..59` | 1  | back-to-back active |
 //! | `59..60` | 1  | pending garbage, total lines |
 //! | `60..70` | 10 | pending hole lines per column |
-//! | `70..71` | 1  | opp combo |
-//! | `71..72` | 1  | opp back-to-back |
-//! | `72..73` | 1  | opp pending total |
-//! | `73..83` | 10 | opp pending hole lines per column |
-//! | `83..84` | 1  | plies-until-rain ÷ rain period |
-//! | `84..85` | 1  | fraction of the ply cap consumed |
+//!
+//! Bots are blind to the opponent's board by rule, and no opponent context was
+//! ever wired into a production path — so there is no opponent input. (The
+//! previous two-board observation carried an all-zero opponent plane and
+//! constant-zero opponent features through every corpus and measurement; its
+//! whitening interaction caused a real training defect. History in
+//! `wayfinder/leapfrog/archive/`.)
 //!
 //! Piece indices use **declaration order** `I,J,L,O,S,T,Z` — the same order as
 //! [`PieceType::all`] and the bag bitset, *not* the colour `render_index`.
-//!
-//! Only the own half (`0..70` + the own plane) varies per search leaf; the opp
-//! half is a per-decision [`OppCtx`], frozen when the decision starts — the
-//! same freezing contract pending garbage already uses.
 //!
 //! Segment offsets, packing, and the hash live here and nowhere else: the
 //! shard writer stores these exact bytes ([`pack_plane`] + the feature f32s),
 //! so a trainer reads *what was served* rather than re-deriving it.
 
 use tetr_core::ai::SearchState;
-use tetr_core::ai::movegen::Placement;
 use tetr_core::engine::PieceType;
 
 /// Board plane height (rows): the engine's full backing board for the default
@@ -51,23 +46,6 @@ pub const PACKED_PLANE: usize = BOARD_LEN / 8;
 /// Queue slots the encoder reads (the revealed Next preview the net sees).
 pub const QUEUE_SLOTS: usize = 5;
 
-/// The fixed action vocabulary for the action-indexed policy head:
-/// `hold(2) x rotation(4) x x-origin(+2 offset, 13)` = 104 slots. One forward
-/// of the PARENT ranks all its placements by slot — the eval-count lever that
-/// makes a guided search cheap (a per-child head costs one forward per child).
-/// Rare same-(rot,x) collisions (a tuck under an overhang vs resting on top)
-/// share a slot: both get the same prior; search disambiguates by value.
-pub const N_SLOTS: usize = 2 * 4 * 13;
-
-/// Map a placement to its action slot. Origins outside the expected x range
-/// clamp into it (defensive; movegen never produces them on a 10-wide board).
-pub fn placement_slot(p: &Placement) -> u8 {
-    let hold = p.used_hold as usize;
-    let rot = p.rotation() as usize;
-    let x = (p.origin().0 + 2).clamp(0, 12) as usize;
-    (hold * 4 * 13 + rot * 13 + x) as u8
-}
-
 // Feature segment offsets (the module table). One definition; the tests pin
 // contiguity.
 const F_ACTIVE: usize = 0;
@@ -79,16 +57,8 @@ const F_COMBO: usize = F_BAG + PieceType::LEN;
 const F_B2B: usize = F_COMBO + 1;
 const F_PENDING_TOTAL: usize = F_B2B + 1;
 const F_PENDING_COLS: usize = F_PENDING_TOTAL + 1;
-/// Length of the own segment (everything a solo state determines).
-pub const OWN_FEATURES: usize = F_PENDING_COLS + BOARD_W;
-const F_OPP_COMBO: usize = OWN_FEATURES;
-const F_OPP_B2B: usize = F_OPP_COMBO + 1;
-const F_OPP_PENDING_TOTAL: usize = F_OPP_B2B + 1;
-const F_OPP_PENDING_COLS: usize = F_OPP_PENDING_TOTAL + 1;
-const F_RAIN_FRAC: usize = F_OPP_PENDING_COLS + BOARD_W;
-const F_CAP_FRAC: usize = F_RAIN_FRAC + 1;
-/// Full feature-vector length (own 70 + opp 13 + clock 2).
-pub const FEATURE_LEN: usize = F_CAP_FRAC + 1;
+/// Full feature-vector length.
+pub const FEATURE_LEN: usize = F_PENDING_COLS + BOARD_W;
 
 /// A stable `0..7` piece index in declaration order `I,J,L,O,S,T,Z` — identical
 /// to [`PieceType::all`]'s order and the bag bit layout, so every one-hot and
@@ -106,100 +76,29 @@ pub fn piece_index(piece: PieceType) -> usize {
     }
 }
 
-/// The opponent context a decision is evaluated under: the opposing seat after
-/// its last completed lock, captured once per own decision and pinned for that
-/// decision's whole search (plus the driver's venue clock).
-#[derive(Clone, Debug, PartialEq)]
-pub struct OppCtx {
-    /// Opponent occupancy plane, same layout as an own plane (`y = 0` floor;
-    /// locked cells only — a falling piece may still move, so it is not real).
-    pub board: [f32; BOARD_LEN],
-    /// Opponent combo counter.
-    pub combo: u32,
-    /// Opponent Back-to-Back chain active.
-    pub b2b: bool,
-    /// Opponent's incoming garbage, `(lines, hole_col)` oldest first.
-    pub pending: Vec<(u32, usize)>,
-    /// Plies until the next rain drop ÷ rain period (`0.0` when rain is off).
-    pub rain_frac: f32,
-    /// Fraction of the venue's hard ply cap already consumed.
-    pub cap_frac: f32,
-}
-
-impl Default for OppCtx {
-    /// A neutral context (empty board, no chain, no pressure, clock at zero) —
-    /// the solo/bring-up stand-in, NOT a valid versus observation.
-    fn default() -> Self {
-        Self {
-            board: [0.0; BOARD_LEN],
-            combo: 0,
-            b2b: false,
-            pending: Vec::new(),
-            rain_frac: 0.0,
-            cap_frac: 0.0,
-        }
-    }
-}
-
-impl OppCtx {
-    /// Build from the opposing engine's snapshot + the driver's venue clock.
-    pub fn from_snapshot(
-        snap: &tetr_core::engine::EngineSnapshot,
-        rain_frac: f32,
-        cap_frac: f32,
-    ) -> Self {
-        let mut board = [0.0f32; BOARD_LEN];
-        for cell in &snap.board_cells {
-            if cell.x >= 0
-                && (cell.x as usize) < BOARD_W
-                && cell.y >= 0
-                && (cell.y as usize) < BOARD_H
-            {
-                board[cell.y as usize * BOARD_W + cell.x as usize] = 1.0;
-            }
-        }
-        Self {
-            board,
-            combo: snap.combo,
-            b2b: snap.back_to_back_active,
-            pending: snap
-                .pending_garbage
-                .iter()
-                .map(|b| (b.lines, b.hole_col))
-                .collect(),
-            rain_frac,
-            cap_frac,
-        }
-    }
-}
-
-/// One encoded observation: the two conv planes + the feature vector. Per
-/// search leaf only the own half varies; `opp_board` is the decision's frozen
-/// [`OppCtx`] plane (a serving layer caches its embedding per decision).
+/// One encoded observation: the conv plane + the feature vector.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Obs {
     /// Own occupancy plane, `board[y * BOARD_W + x]`, `y = 0` floor.
-    pub own_board: [f32; BOARD_LEN],
-    /// The decision's frozen opponent plane.
-    pub opp_board: [f32; BOARD_LEN],
+    pub board: [f32; BOARD_LEN],
     /// The feature vector — see the module table.
     pub features: [f32; FEATURE_LEN],
 }
 
-/// Encode a child afterstate under its decision's frozen opponent context.
+/// Encode a state.
 ///
 /// Reads only public state: board occupancy, active/hold/queue, the bag
 /// draw-set, combo/B2B, the pending-garbage queue — every batch of it, however
 /// long the queue has spilled (what the net sees is never truncated; the shard
 /// stores these encoded values, so it can't disagree).
-pub fn encode(state: &SearchState, opp: &OppCtx) -> Obs {
-    let mut own_board = [0.0f32; BOARD_LEN];
+pub fn encode(state: &SearchState) -> Obs {
+    let mut board = [0.0f32; BOARD_LEN];
     // `occupied` reads false out of bounds, so a narrower test board or the
     // clipped top rows simply stay zero.
     for y in 0..BOARD_H {
         for x in 0..BOARD_W {
             if state.board.occupied(x as isize, y as isize) {
-                own_board[y * BOARD_W + x] = 1.0;
+                board[y * BOARD_W + x] = 1.0;
             }
         }
     }
@@ -227,22 +126,7 @@ pub fn encode(state: &SearchState, opp: &OppCtx) -> Obs {
         }
     }
 
-    f[F_OPP_COMBO] = opp.combo as f32;
-    f[F_OPP_B2B] = if opp.b2b { 1.0 } else { 0.0 };
-    for &(lines, hole_col) in &opp.pending {
-        f[F_OPP_PENDING_TOTAL] += lines as f32;
-        if hole_col < BOARD_W {
-            f[F_OPP_PENDING_COLS + hole_col] += lines as f32;
-        }
-    }
-    f[F_RAIN_FRAC] = opp.rain_frac;
-    f[F_CAP_FRAC] = opp.cap_frac;
-
-    Obs {
-        own_board,
-        opp_board: opp.board,
-        features: f,
-    }
+    Obs { board, features: f }
 }
 
 /// Bit-pack an occupancy plane for storage (row-major, LSB-first within each
@@ -284,7 +168,7 @@ mod tests {
     }
 
     #[test]
-    fn segments_are_contiguous_and_total_85() {
+    fn segments_are_contiguous_and_total_70() {
         assert_eq!(F_ACTIVE, 0);
         assert_eq!(F_HOLD, 7);
         assert_eq!(F_HOLD_EMPTY, 14);
@@ -294,17 +178,13 @@ mod tests {
         assert_eq!(F_B2B, 58);
         assert_eq!(F_PENDING_TOTAL, 59);
         assert_eq!(F_PENDING_COLS, 60);
-        assert_eq!(OWN_FEATURES, 70);
-        assert_eq!(F_OPP_COMBO, 70);
-        assert_eq!(F_RAIN_FRAC, 83);
-        assert_eq!(F_CAP_FRAC, 84);
-        assert_eq!(FEATURE_LEN, 85);
+        assert_eq!(FEATURE_LEN, 70);
     }
 
     #[test]
     fn encode_reads_a_real_spawn() {
         let state = spawned(7);
-        let obs = encode(&state, &OppCtx::default());
+        let obs = encode(&state);
         // Exactly one active one-hot.
         let active: f32 = obs.features[F_ACTIVE..F_HOLD].iter().sum();
         assert_eq!(active, 1.0);
@@ -313,30 +193,7 @@ mod tests {
         let queue: f32 = obs.features[F_QUEUE..F_BAG].iter().sum();
         assert_eq!(queue, QUEUE_SLOTS as f32);
         // A fresh board has no occupied cells.
-        assert!(obs.own_board.iter().all(|&v| v == 0.0));
-        // Neutral opp: the whole opp/clock tail is zero.
-        assert!(obs.features[OWN_FEATURES..].iter().all(|&v| v == 0.0));
-    }
-
-    #[test]
-    fn opp_tail_lands_where_the_table_says() {
-        let state = spawned(3);
-        let opp = OppCtx {
-            combo: 2,
-            b2b: true,
-            pending: vec![(3, 4), (2, 4), (1, 9)],
-            rain_frac: 0.25,
-            cap_frac: 0.5,
-            ..OppCtx::default()
-        };
-        let obs = encode(&state, &opp);
-        assert_eq!(obs.features[F_OPP_COMBO], 2.0);
-        assert_eq!(obs.features[F_OPP_B2B], 1.0);
-        assert_eq!(obs.features[F_OPP_PENDING_TOTAL], 6.0);
-        assert_eq!(obs.features[F_OPP_PENDING_COLS + 4], 5.0);
-        assert_eq!(obs.features[F_OPP_PENDING_COLS + 9], 1.0);
-        assert_eq!(obs.features[F_RAIN_FRAC], 0.25);
-        assert_eq!(obs.features[F_CAP_FRAC], 0.5);
+        assert!(obs.board.iter().all(|&v| v == 0.0));
     }
 
     #[test]

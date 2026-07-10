@@ -3,7 +3,7 @@ name = "tetr-nn"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
-description = "The learned-evaluation subsystem: a two-board observation encoder, a small conv net forward (batched), decision shards that store exactly what was served, and the Evaluator bridge into the beam."
+description = "The learned-evaluation subsystem: an observation encoder, a small conv value net (batched forward), training shards that store exactly what was served, and the Evaluator bridge into the beam."
 
 [lints]
 workspace = true
@@ -25,13 +25,5 @@ blas-src = { version = "0.10", features = ["accelerate"] }
 cblas = { version = "0.4", optional = true }
 blas-src = { version = "0.10", features = ["openblas"], optional = true }
 
-# ANE/GPU backend (the `coreml` feature): ONNX Runtime + the CoreML EP
-# (MLProgram). Opt-in and macOS-only so the default build never pulls ort.
-[dependencies.ort]
-version = "=2.0.0-rc.12"
-features = ["coreml"]
-optional = true
-
 [features]
 openblas = ["dep:cblas", "dep:blas-src"]
-coreml = ["dep:ort"]

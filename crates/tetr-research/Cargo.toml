@@ -40,4 +40,3 @@ workspace = true
 proptest = "1"
 
 [features]
-coreml = ["tetr-nn/coreml"]
