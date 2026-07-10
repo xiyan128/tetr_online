@@ -100,6 +100,10 @@ Key prior evidence the simple design leans on:
   remaining hand constant (`SPEC_DECAY`, a discount on speculative-ply
   *rewards*) inert on the learned path. The deployed net path carries no
   hand-tuned terms; width/depth remain the allowed compute knobs.
+- Self-play datagen cost: CC2 datagen runs ~31k games/hr, net-leaf datagen
+  ~90 games/hr at 6 workers (the net pays a batched forward per sibling
+  group; CC2's linear eval is nearly free). Until that gap earns real perf
+  work, the cadence knob is games-per-round (round 1 ran 200), not width.
 - Single-player from the same net: planned as a same-seed self-race venue
   (two boards, no interaction, more attack wins) so the identical loop covers
   both modes; blocked until versus compounds.
