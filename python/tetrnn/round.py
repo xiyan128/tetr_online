@@ -83,6 +83,12 @@ def main() -> None:
     ap.add_argument("--seed-base", type=int, default=10_000_000)
     ap.add_argument("--duel-base", type=int, default=900_000_000)
     ap.add_argument(
+        "--finetune",
+        action="store_true",
+        help="train --init from the incumbent instead of from scratch "
+        "(round 1's from-scratch-on-mix candidate lost 6-42 to its incumbent)",
+    )
+    ap.add_argument(
         "--allow-dirty",
         action="store_true",
         help="let duels run on a dirty tree (receipts get stamped dirty; "
@@ -98,7 +104,13 @@ def main() -> None:
     net = rdir / "net"
     width, depth = args.wd[1:].split("d")
     t0 = time.time()
-    row: dict = {"round": n, "incumbent": args.incumbent, "games": args.games, "wd": args.wd}
+    row: dict = {
+        "round": n,
+        "incumbent": args.incumbent,
+        "games": args.games,
+        "wd": args.wd,
+        "finetune": args.finetune,
+    }
     if n > 0 and not args.incumbent:
         raise SystemExit("rounds past 0 need --incumbent (the model whose self-play trains next)")
 
@@ -136,11 +148,12 @@ def main() -> None:
             for k in range(n)
             if (scratch / f"r{k}" / "corpus" / "receipt.json").exists()
         ]
+        init = ["--init", args.incumbent] if args.finetune and args.incumbent else []
         sh(
             [
                 "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
                 "tetrnn.train", str(corpus), *replay, str(net),
-                "--epochs", str(args.epochs),
+                "--epochs", str(args.epochs), *init,
             ],
             rdir / "train.log",
         )  # fmt: skip
