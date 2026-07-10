@@ -1,3 +1,7 @@
+> **Naming note (2026-07-10):** the `tetr-nn` crate this postmortem says was
+> removed is unrelated to the CURRENT `crates/tetr-nn` (the learning loop's
+> value net) — the name was reused a month later.
+
 # Value-net post-mortem (`tetr-nn`)
 
 Why the learned-eval path never beat the hand-tuned CC2 evaluator, and how to

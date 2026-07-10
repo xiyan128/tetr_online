@@ -188,9 +188,8 @@ impl BeamPlanner {
     /// The current run's per-root backed-up scores: each ply-1 placement paired
     /// with the best leaf score its subtree has achieved so far (`i32::MIN` =
     /// no scored descendant yet). Empty between decisions or on a topped-out
-    /// root. This is the search-improved read of the root decision — the
-    /// distribution an expert-iteration data pipeline derives its policy
-    /// targets from.
+    /// root. The datagen driver reads this to pick (and record) the argmax
+    /// placement.
     pub fn root_scores(&self) -> impl Iterator<Item = (&Placement, i32)> {
         self.run
             .iter()

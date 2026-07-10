@@ -45,16 +45,36 @@ class Shard:
         return self.decision[:, 0]
 
 
+def _fnv1a(data: bytes) -> int:
+    """FNV-1a 64 — must match `tetr-nn/src/obs.rs::fnv1a` bit for bit."""
+    h = 0xCBF29CE484222325
+    for b in data:
+        h = ((h ^ b) * 0x00000100000001B3) & 0xFFFFFFFFFFFFFFFF
+    return h
+
+
 def read_shard(path: str) -> Shard:
     with safe_open(path, framework="np") as f:
         meta = f.metadata() or {}
         if meta.get("schema") != "2":
             raise ValueError(f"{path}: shard schema {meta.get('schema')!r} != '2'")
-        return Shard(
-            decision=f.get_tensor("decision").reshape(-1, 6),
-            own=f.get_tensor("own").reshape(-1, PACKED_PLANE),
-            feats=f.get_tensor("feats").reshape(-1, FEATURE_LEN),
+        decision = f.get_tensor("decision").reshape(-1, 6)
+        own = f.get_tensor("own").reshape(-1, PACKED_PLANE)
+        feats = f.get_tensor("feats").reshape(-1, FEATURE_LEN)
+        # Verify the writer's payload checksum (XOR of per-tensor FNV-1a over
+        # the little-endian bytes) — a corrupt shard fails loudly here, not as
+        # garbage labels three stages later.
+        computed = (
+            _fnv1a(decision.astype("<i4").tobytes())
+            ^ _fnv1a(own.tobytes())
+            ^ _fnv1a(feats.astype("<f4").tobytes())
         )
+        stored = meta.get("checksum")
+        if stored != f"{computed:016x}":
+            raise ValueError(
+                f"{path}: checksum mismatch (stored {stored}, computed {computed:016x})"
+            )
+        return Shard(decision=decision, own=own, feats=feats)
 
 
 def shard_paths(dir: str) -> list[str]:

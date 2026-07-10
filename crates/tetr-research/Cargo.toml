@@ -7,8 +7,8 @@ description = "Headless research & evaluation harness for the Tetris bot — beh
 publish = false
 
 # Headless research + evaluation for the Tetris bot — Bevy-free, so it compiles
-# and iterates fast. One binary (`tetr-research`, src/main.rs) runs named
-# experiments from the in-code registry: `cargo run -p tetr-research -- list`.
+# and iterates fast. One binary (`tetr-research`, src/main.rs): registry runs
+# (`run <eval> <bots…>`), arm duels/gates, self-play datagen, and solo APP.
 
 [dependencies]
 tetr-core = { path = "../tetr-core" }

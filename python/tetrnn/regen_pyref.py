@@ -3,8 +3,8 @@
 Builds a small, seeded, non-trivially-whitened net, exports its weights +
 config, and dumps its goldens into `crates/tetr-nn/tests/fixtures/pyref/`. The
 Rust test `forward_matches_our_python_package` then proves the Rust forward
-reproduces this Python forward to 1e-4 — on a model we can reproduce from this
-script, unlike the inherited trained `round0` fixture.
+reproduces this Python forward to 1e-4 — on a model anyone can regenerate from
+this script.
 
 Small on purpose (`conv_channels=(1,4,8,4)`): the parity check exercises every
 code path at a fraction of the committed weight bytes. Run from `python/`:

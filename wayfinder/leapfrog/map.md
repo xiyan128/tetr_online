@@ -22,23 +22,38 @@ system.
 1. **Net** — a small convnet: your own board + a few scalar features →
    win/draw/loss. Nothing else: no policy head, no auxiliary heads, no
    opponent input (bots are blind to the opponent's board by rule).
-2. **Search** — the existing transposition beam (`crates/tetr-core`), ranking
-   placements by the net's win probability. The beam enumerates every legal
-   placement, so it needs no learned guidance. Width/depth is the compute
-   knob.
+2. **Search** — the existing beam (`crates/tetr-core/src/ai/search/beam.rs`),
+   ranking placements by the net's win probability. The SAME plain beam runs
+   in datagen and in every duel (a same-seed driver-vs-harness test pins
+   this). The beam enumerates every legal placement, so it needs no learned
+   guidance. Width/depth is the compute knob.
 3. **Data** — self-play games. Each decision stores one row: the board the
    mover chose (post-placement observation) and, once the game ends, who won
    (`z ∈ {+1, 0, −1}` from the mover's perspective). No search scores, no
    counterfactual children, no score-scale bookkeeping — those fields caused
    most of the historical defects and taught nothing the outcome doesn't.
 4. **Gate** — a new net is kept only if it (a) beats the current best net in
-   a seed-paired duel and (b) does not regress against the fixed CC2 anchor
-   (`beam:cc2@w8d5`). Both duels are one command each and reproduce from
-   `(commit, seed)`.
+   a seed-paired duel and (b) clears a fixed floor against the CC2 anchor
+   (`beam:cc2@w8d5`; the floor is calibrated by round 0's baseline read).
+   Both duels are one command each and reproduce from `(commit, seed)`.
 
 A **round** is: play games → train on them (plus a replay of earlier rounds)
-→ gate. One command, tens of minutes. Round 0 trains on CC2-vs-CC2 games
-(the only CC2 supervision); every later round trains on the net's own games.
+→ gate. One command, tens of minutes:
+
+```
+cargo build --release -p tetr-research           # the driver shells out to this
+cd python
+uv run python -m tetrnn.round --round 0 --scratch ~/tetr-rounds
+uv run python -m tetrnn.round --round 1 --scratch ~/tetr-rounds     --incumbent ~/tetr-rounds/r0/net
+```
+
+Round 0 trains on CC2-vs-CC2 games (the only CC2 supervision) and its anchor
+duel is recorded as the BASELINE (it calibrates the anchor floor; there is no
+incumbent to beat yet). Every later round trains on the incumbent's own games
+and passes `--incumbent` explicitly — the previous PROMOTE round's net. Code:
+driver [python/tetrnn/round.py](../../python/tetrnn/round.py), trainer
+[train.py](../../python/tetrnn/train.py), data plant
+[datagen.rs](../../crates/tetr-research/src/datagen.rs).
 
 # Why so simple
 
@@ -76,9 +91,11 @@ Key prior evidence the simple design leans on:
 - Does value-only training on played states compound round over round? (The
   2026-06 solo campaign compounded once, then stalled — replay buffers helped;
   that is the first lever if it stalls here.)
-- Purity endgame: the deployed search still carries the hand-tuned
-  `SPEC_DECAY` garbage-speculation discount; it must be gone (or learned) by
-  any final showdown claim.
+- ~~Purity endgame~~ RESOLVED by the reset: the net bot's search score is
+  `z_scale · z_hat` with zero reward terms, which makes the beam's one
+  remaining hand constant (`SPEC_DECAY`, a discount on speculative-ply
+  *rewards*) inert on the learned path. The deployed net path carries no
+  hand-tuned terms; width/depth remain the allowed compute knobs.
 - Single-player from the same net: planned as a same-seed self-race venue
   (two boards, no interaction, more attack wins) so the identical loop covers
   both modes; blocked until versus compounds.

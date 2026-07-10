@@ -31,10 +31,10 @@ jobs:
         with:
           lfs: true
 
-      # Python owns the learned-model, shard-reader, exporter, and policy-target
-      # contracts.  A Rust-only CI run previously let targets.py's own failing
-      # completed-Q assertion live on master.  Install from the committed lock
-      # and run exactly the checks in scripts/gate.
+      # Python owns the learned-model, trainer, shard-reader, and exporter
+      # contracts. A Rust-only CI run once let a failing Python assertion live
+      # on master. Install from the committed lock and run exactly the checks
+      # in scripts/gate.
       - name: Install uv
         uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
 

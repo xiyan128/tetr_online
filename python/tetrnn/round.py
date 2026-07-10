@@ -3,9 +3,13 @@
     datagen -> train (this round + replay of earlier rounds) -> gate
 
 A candidate is kept only if it (a) beats the incumbent in a seed-paired duel
-AND (b) does not regress against the fixed CC2 anchor (`beam:cc2@w8d5`).
+AND (b) clears a fixed floor against the CC2 anchor (`beam:cc2@w8d5`).
 Round 0 has no incumbent: its corpus comes from CC2 self-play (the only CC2
-supervision in the campaign) and its net is accepted on the anchor read alone.
+supervision in the campaign), its anchor duel is recorded as the BASELINE
+(it calibrates the floor), and its net becomes the first incumbent.
+
+Prerequisite: `cargo build --release -p tetr-research` (the driver shells out
+to that binary). Run from anywhere; paths are absolute.
 
 Seeds: datagen uses `--seed-base + round * 1_000_000` (games consume one seed
 each); duels use a disjoint region derived the same way from `--duel-base`.
@@ -66,8 +70,10 @@ def wins_of(summary: str) -> int:
 
 def main() -> None:
     ap = argparse.ArgumentParser()
-    ap.add_argument("--round", type=int, required=True)
-    ap.add_argument("--scratch", required=True)
+    ap.add_argument("--round", type=int, required=True, help="round number; 0 bootstraps from CC2")
+    ap.add_argument(
+        "--scratch", required=True, help="campaign dir: rN/ per round + rounds.jsonl ledger"
+    )
     ap.add_argument("--incumbent", default=None, help="current best model dir (omit for round 0)")
     ap.add_argument("--games", type=int, default=600)
     ap.add_argument("--workers", type=int, default=6)
@@ -76,6 +82,12 @@ def main() -> None:
     ap.add_argument("--pairs", type=int, default=24, help="seed pairs per duel")
     ap.add_argument("--seed-base", type=int, default=10_000_000)
     ap.add_argument("--duel-base", type=int, default=900_000_000)
+    ap.add_argument(
+        "--allow-dirty",
+        action="store_true",
+        help="let duels run on a dirty tree (receipts get stamped dirty; "
+        "results are then NOT reproducible from (commit, seed))",
+    )
     args = ap.parse_args()
 
     n = args.round
@@ -143,9 +155,10 @@ def main() -> None:
     duel_seeds = args.duel_base + n * 1_000_000
     verdicts = []
     if args.incumbent:
+        dirty = ["--allow-dirty"] if args.allow_dirty else []
         text = sh(
             [str(BIN), "duel", "--a", cand, "--b", f"beam:{args.incumbent}@{args.wd}",
-             "--pairs", str(args.pairs), "--seeds", str(duel_seeds), "--allow-dirty"],
+             "--pairs", str(args.pairs), "--seeds", str(duel_seeds), *dirty],
             rdir / "duel_incumbent.log",
         )  # fmt: skip
         row["vs_incumbent"] = duel_summary(text)
@@ -153,16 +166,22 @@ def main() -> None:
         print(f"vs incumbent: {row['vs_incumbent']}")
     text = sh(
         [str(BIN), "duel", "--a", cand, "--b", "beam:cc2@w8d5",
-         "--pairs", str(args.pairs), "--seeds", str(duel_seeds + 500_000), "--allow-dirty"],
+         "--pairs", str(args.pairs), "--seeds", str(duel_seeds + 500_000),
+         *(["--allow-dirty"] if args.allow_dirty else [])],
         rdir / "duel_anchor.log",
     )  # fmt: skip
     row["vs_anchor"] = duel_summary(text)
     print(f"vs anchor: {row['vs_anchor']}")
     anchor_wins = wins_of(row["vs_anchor"])
     row["anchor_wins"] = anchor_wins
-    # No-regression bar: a third of the anchor games (round 0 calibrates this).
-    verdicts.append(anchor_wins * 3 >= args.pairs * 2)
-    row["verdict"] = "PROMOTE" if all(verdicts) else "KEEP_INCUMBENT"
+    if n == 0:
+        # Round 0 has nothing to beat: its anchor read IS the baseline the
+        # floor is calibrated against, and its net is the first incumbent.
+        row["verdict"] = "BASELINE"
+    else:
+        # Anchor floor: a third of the anchor games (vs the round-0 baseline).
+        verdicts.append(anchor_wins * 3 >= args.pairs * 2)
+        row["verdict"] = "PROMOTE" if all(verdicts) else "KEEP_INCUMBENT"
     row["wall_secs"] = round(time.time() - t0, 1)
 
     with (scratch / "rounds.jsonl").open("a") as f:

@@ -49,6 +49,9 @@
 //! |---|---|
 //! | [`registry`] | named eval specs as code (one of the two configuration surfaces) |
 //! | [`commands`] | the eval executors behind `tetr-research run` |
+//! | [`arm`] | the duel-player grammar (`greedy` / `beam:` / `tp:`) |
+//! | [`instruments`] | `duel` (CRN pairs) and `gate` (pair-GSPRT) over arms |
+//! | [`datagen`] | the learning loop's data plant (self-play → shards) |
 //! | [`marathon`] | solo scoring/APP suite (the original benchmark) |
 //! | [`downstack`] | cheese-clearing suite (digging skill, not gameable by combos) |
 //! | [`pc`] | clean-board perfect-clear suite (PPC + per-PC lock indices) |

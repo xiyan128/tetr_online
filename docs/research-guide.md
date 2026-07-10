@@ -242,3 +242,14 @@ one unrecoverable mistake this map cannot prevent.
   release-profile retune (`opt-level z → 3`, ~1.9× native throughput); match
   results are unaffected (FP stays IEEE at every opt level, golden-gated),
   but cross-era timing comparisons need re-baselining.
+
+## The learning loop (2026-07)
+
+Beyond registry runs, the binary carries the ML loop's instruments: `datagen`
+(self-play shards), `duel` (CRN seed-pair races between two arms — the grammar
+is `greedy` / `beam:cc2@w8d5` / `tp:cc2@w128d9` / `beam:<model-dir>@w8d5`, see
+`src/arm.rs`), `gate` (a latched pair-GSPRT for showdown-grade claims), and
+`solo` (marathon APP for an arm). The loop that ties them together — and the
+one-page plan for the whole learning system — is
+[wayfinder/leapfrog/map.md](../wayfinder/leapfrog/map.md); the round driver is
+`python/tetrnn/round.py`.

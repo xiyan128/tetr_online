@@ -5,9 +5,11 @@
 //! sudden-death venue (outcomes from death, never an attack tiebreak).
 //!
 //! - **duel**: a fixed number of pairs; reports W-L-D for arm A with the
-//!   end-reason split. `duel --a beam:M@w8d5 --b policy:M` *is* the G_π
-//!   probe; any candidate-vs-incumbent strength race is the same command.
-//! - **gate**: the promotion instrument — a trinomial pair-GSPRT whose
+//!   end-reason split. The round loop's promotion checks (candidate vs
+//!   incumbent, candidate vs the CC2 anchor) are both this command.
+//! - **gate**: the sequential-test instrument for showdown-grade claims (the
+//!   round loop does NOT use it — fixed-pair duels are enough at round
+//!   cadence) — a trinomial pair-GSPRT whose
 //!   verdict **latches at the first boundary crossing**. Pairs still in
 //!   flight when the verdict lands are reported (`post_decision_pairs`) but
 //!   never enter the decision statistics — the sequential test's error

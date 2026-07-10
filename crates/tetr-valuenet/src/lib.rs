@@ -10,10 +10,10 @@
 //! a move stays engine-exact via CC2. That is the composition the shipped
 //! weights were trained and tuned under, reproduced here.
 //!
-//! This crate is deliberately separate from `tetr-nn` (the two-board *research*
+//! This crate is deliberately separate from `tetr-nn` (the *research*
 //! net): different architecture, different job, and frozen to reproduce the
 //! deployed weights rather than to evolve. When the research campaign produces a
-//! two-board net worth deploying, the game moves onto `tetr-nn` and this crate
+//! research net worth deploying, the game moves onto `tetr-nn` and this crate
 //! retires.
 
 pub mod encode;

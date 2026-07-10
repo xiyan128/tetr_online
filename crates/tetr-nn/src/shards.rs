@@ -330,16 +330,6 @@ impl Shard {
     }
 }
 
-/// The game ids durably recorded across a dataset dir's shards — the resume
-/// done-set (games are shard-atomic, so presence means complete).
-pub fn recorded_game_ids(dir: impl AsRef<Path>) -> io::Result<std::collections::HashSet<u32>> {
-    let mut gids = std::collections::HashSet::new();
-    for p in shard_paths(dir)? {
-        gids.extend(Shard::read(&p)?.game_ids());
-    }
-    Ok(gids)
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -424,10 +414,6 @@ mod tests {
         };
         assert_eq!(gids(&a), vec![1, 2]);
         assert_eq!(gids(&b), vec![3]);
-        assert_eq!(
-            recorded_game_ids(&dir).unwrap(),
-            [1u32, 2, 3].into_iter().collect()
-        );
 
         // A new writer continues numbering (resume appends, never clobbers).
         let w2 = ShardWriter::create(&dir, 4).unwrap();

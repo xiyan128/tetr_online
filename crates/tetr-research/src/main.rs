@@ -4,14 +4,16 @@
 //! cargo run --release -p tetr-research -- run downstack dt20
 //! cargo run --release -p tetr-research -- run race v3-candidate attack-tuned
 //! cargo run --release -p tetr-research -- run cc2-board-climb --budget-secs 3600
-//! cargo run --release -p tetr-research -- resume runs/20260612-...-cc2-board-climb-123
+//! cargo run --release -p tetr-research -- duel --a beam:cc2@w8d5 --b beam:<model-dir>@w8d5 --pairs 24 --seeds 900000000
+//! cargo run --release -p tetr-research -- datagen --games 600 --seeds 10000000 --out <dir>
 //! ```
 //!
-//! Everything is a name: evals live in [`tetr_research::registry`], bots in
+//! Registered evals live in [`tetr_research::registry`], bots in
 //! [`tetr_research::bots`] — read those files for the catalogs (there is no
-//! `list`; the registries are code). A recorded result reproduces from
-//! `(commit, eval, bots…)`, all stamped into the run receipt. The flags are
-//! machine-local circumstances (budgets, paths), never experiment identity.
+//! `list`; the registries are code). A recorded result reproduces from what
+//! the receipt stamps: `(commit, eval, bots…)` for registry runs, and the
+//! arm strings + seeds + venue for `duel`/`gate`/`datagen` (those flags ARE
+//! the experiment's identity).
 
 use std::path::PathBuf;
 
@@ -67,9 +69,9 @@ enum Command {
         #[command(flatten)]
         rt: RuntimeArgs,
     },
-    /// CRN pair duel between two arms under the sudden-death venue.
-    /// `duel --a beam:M@w8d5 --b policy:M` is the G_pi probe; any
-    /// candidate-vs-incumbent race is the same command.
+    /// CRN pair duel between two arms under the sudden-death venue — the
+    /// round loop's gate primitive (candidate-vs-incumbent and the CC2
+    /// anchor are both this command with fixed pairs).
     Duel {
         /// Arm A (see src/arm.rs for the grammar).
         #[arg(long)]
@@ -465,6 +467,8 @@ fn main() -> std::io::Result<()> {
                     "experiment": "datagen",
                     "eval": net.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "cc2".into()),
                     "width": width, "depth": depth, "games": games, "seeds": seeds,
+                    "workers": n_workers,
+                    "venue": { "max_plies": venue.max_plies, "rain": venue.rain },
                     "out": out.display().to_string(),
                     "wall_secs": secs,
                     "games_per_hr": games as f64 * 3600.0 / secs,

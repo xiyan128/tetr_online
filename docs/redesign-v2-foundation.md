@@ -1,3 +1,7 @@
+> **HISTORICAL (superseded 2026-07-10).** This describes the pre-simplification
+> two-board P+V design, which was retired; the live system is the one-page
+> [wayfinder/leapfrog/map.md](../wayfinder/leapfrog/map.md).
+
 # v2/foundation — redesign map
 
 Fresh implementations off master of the four components the rl/strike review
