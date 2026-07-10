@@ -88,7 +88,12 @@ Key prior evidence the simple design leans on:
   against the old design's 5+ hours. Baseline: holdout CE 0.679 / accuracy
   0.56; **anchor 0-48 vs CC2** — outcome-only value from 600 games is a thin
   evaluator, which is exactly the open question the loop now measures.
-  Ledger: `<scratch>/rounds.jsonl`. Round 1 (first self-play round) follows.
+  Ledger: `<scratch>/rounds.jsonl`.
+- **Round 1 (200 self-play games, from-scratch on mix): KEEP_INCUMBENT** —
+  the candidate lost 6-42 to its own incumbent, replicating the 2026-06
+  finding that from-scratch-on-mix regresses. The gate did its job on the
+  first try. Round 2 pulls the one lever (`--finetune`: train `--init` from
+  the incumbent) with everything else unchanged.
 
 # Open questions (one lever at a time)
 
