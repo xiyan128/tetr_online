@@ -95,11 +95,25 @@ Key prior evidence the simple design leans on:
   first try.
 - **Round 2 (same, + `--finetune`): KEEP_INCUMBENT, 3-45** — fine-tuning
   didn't rescue it and holdout CE rose: the weak self-play rows themselves
-  degrade the evaluator. Conclusion so far: self-play compounding needs a
-  competent base net, and 600 CC2 games (anchor 0-48) isn't one. Next lever:
-  scale the CC2 corpus (a 5000-game round-0 costs ~10 minutes of datagen)
-  and race it against the 600-game net — climb the cheap teacher-data curve
-  before spending on self-play.
+  degrade the evaluator.
+- **The scale probe + the phase diagnostic (the night's finding):** a
+  5000-game round-0 (8.3× data) moved holdout accuracy only 0.559→0.567,
+  still anchored 0-48, and **lost 8-40 head-to-head to the 600-game net**.
+  Why: measuring the net's cross-entropy by game phase shows the outcome
+  label is a **pure coin flip for the first 60% of a mirror game**
+  (CE ≈ 0.694/acc 0.50) and only becomes informative near death (acc 0.81
+  in the last fifth). The net learns everything the labels contain — but
+  mid-game board ranking, which is what the beam's evaluator does at move
+  time, is exactly where balanced-mirror outcomes carry no information.
+  **Outcome-only z from balanced mirror games is an information-starved
+  target for a move-ranking evaluator.** This subsumes rounds 1-2's
+  failures and closes the data-scaling path.
+- Next levers, one at a time, both env-truth and machinery-free: (a) a more
+  decisive venue for datagen (e.g. rain period 4 — every state sits closer
+  to the outcome, and games get cheaper); (b) unbalanced game pairs (e.g.
+  CC2@w8 vs CC2@w2 — a mid-game advantage then shows in the outcome, so
+  mid-game boards become predictive). If neither lifts mid-game signal,
+  the principled escalation is TD-style bootstrapped value targets.
 
 # Open questions (one lever at a time)
 
