@@ -2,9 +2,9 @@
 id: T07
 title: Gate-0b — clean-seed low-width G_π for the actual Gumbel operator
 labels: [wayfinder:task]
-status: closed
-assignee: fable-lead
-blocked-by: []
+status: open
+assignee:
+blocked-by: [T05, T18, T22, T25, T26]
 ---
 
 ## Question
@@ -32,3 +32,10 @@ Deep search crushes the raw round0 policy on clean seeds. This **re-confirms (an
 **What this does NOT settle (the definitive test is downstream):** beating a *weak* policy (round0 top-1 0.639) with deep search is expected; the hard question the panel flagged is whether training on the search's **completed-Q targets** improves the net *without the R1 entropy-injection trap*. That is a **training-time test = campaign round 1**, post-design-freeze — not a duel. The remaining refinements (the low-width w4/w8/w16 curve; the SH-efficient operator) are throughput optimizations (T12/T13), not premise questions.
 
 **Verdict:** the expert-iteration premise is real on clean seeds. Proceed to the design freeze; the decisive remaining risk moves to target-extraction (campaign) and deployment-parity at matched wall-clock (needs the forward fix).
+
+## Validity reset — 2026-07-09
+
+Reopened. The 31-1 read compared an unrestricted legacy beam with a weak raw
+policy at one width; it did not run the required pure Gumbel/completed-Q
+operator, width/simulation curve, paired confidence interval, or original
+`CI_lower > 0.55` acceptance rule. Re-run only after T05/T18/T22/T25/T26.

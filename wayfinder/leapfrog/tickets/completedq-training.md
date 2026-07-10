@@ -51,3 +51,12 @@ Battery ran 2026-07-08 (pre-registered interpretation above; seed regions 810M/8
 **Round-1 trainer note (pre-staged):** round-1 targets must include the CURRENT net's logits (π' = softmax(logit + c·qnorm) — the reanalyze form). `targets.py` already takes `logits=`; the trainer computes child policy logits in-batch (`heads[:,3]`) — wire those in for round-1 (per-batch live targets instead of precomputed). Also: ε-sampling for datagen diversity still deferred (seed diversity carried round-0).
 
 Remaining in-flight (T12 v1, not T15): round0_v3 retrain with the 104-slot action head on the regenerated parent+slot corpus → guided-vehicle throughput + strength measurements.
+
+## Invalidated — T18, 2026-07-09
+
+Closed as forensic history only. `c=12` fails its own adversarial support
+assertion; top-m shards omit actions needed for completion; frozen generator
+logits/visits/raw value are absent; legal terminal loss was conflated with an
+invalid mask; and the proposed trainee-live target has no finite fixed point.
+The old “round-1 authorized” verdict is withdrawn. T18 is the repaired contract
+and T23 is the missing data path.

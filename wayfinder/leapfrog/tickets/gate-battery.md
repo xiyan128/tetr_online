@@ -2,9 +2,9 @@
 id: T04
 title: SOTA gate battery — pre-register the final showdown
 labels: [wayfinder:grilling]
-status: closed
+status: open
 assignee:
-blocked-by: []
+blocked-by: [T20, T21, T22, T26]
 ---
 
 ## Question
@@ -22,3 +22,11 @@ Output: a frozen gate contract (linked asset) that the campaign cannot move afte
 ## Resolution
 
 Ratified + folded into the frozen design 2026-07-08: [T08 design freeze](../assets/T08-design-freeze-PROPOSED.md) (§RATIFIED). User delegated all four flagged decisions; explicit steer = balanced rigor/velocity, invest in research-velocity infra before grinding rounds.
+
+## Validity reset — 2026-07-09
+
+Reopened. The earlier freeze did not pin the registered attack-tuned champion
+identity, deterministic seed prefix, raw-pair persistence, matched-wall-clock
+calibration, solo endpoints/margins, or untouched confirmation policy. Its old
+resolution is historical, not an authorization for a final claim. T20-T22 and
+T26 must make those quantities executable before this contract can close.

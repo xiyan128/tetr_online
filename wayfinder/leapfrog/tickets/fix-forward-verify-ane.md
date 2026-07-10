@@ -4,7 +4,7 @@ title: Forward throughput fix — ANE fusion (datagen) + BNNS/ANE (deployed)
 labels: [wayfinder:prototype]
 status: open
 assignee:
-blocked-by: []
+blocked-by: [T26]
 ---
 
 ## Question

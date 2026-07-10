@@ -3,8 +3,8 @@ id: T14
 title: Self-play datagen driver (writes shards + root scores)
 labels: [wayfinder:prototype]
 status: open
-assignee: fable-lead
-blocked-by: []
+assignee:
+blocked-by: [T27, T28]
 ---
 
 ## Question
@@ -28,3 +28,10 @@ Correctness-first (small scale, verify shards round-trip + root scores align wit
 ## CLI wired (2026-07-08)
 
 `tetr-research datagen --width W --depth D --games N --seeds BASE --out DIR [--net <model-dir>]` — reproducible instrument. Verified: `datagen --width 8 --depth 5 --games 40 --seeds 100000` → 40 CC2 games in 22s (6494 games/hr single-thread), balanced 20-20 mirror, 10 shards (268 MB — the store-what-you-serve cost; ~13 GB for a 2000-game corpus, compression is a v1 concern). No `--net` = CC2 round-0 BC corpus; `--net dir` = net self-play. Gate-clean (fmt + clippy). T14 v0 COMPLETE.
+
+## Validity reset — 2026-07-09
+
+The v0 throughput result remains useful, but T14 is open: its rows lack schema
+v2 provenance and frozen targets, `OppCtx` is neutral, grounded games couple
+net seat to opener, both actors remain learnable, resume is not manifest-safe,
+and caller-owned seeds overlap other purposes. T27/T28 supply the repair.

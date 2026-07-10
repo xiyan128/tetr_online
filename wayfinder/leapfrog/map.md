@@ -2,77 +2,133 @@
 title: Leapfrog strike — SOTA bot from a fully learned system
 labels: [wayfinder:map]
 created: 2026-07-07
+updated: 2026-07-09
 ---
 
 ## Destination
 
-A bot whose deployed decision-making is **entirely learned** — learned policy + learned value driving a *generic* search, zero hand-tuned eval terms or search heuristics — that **beats the champion `probe-tp128d9`** head-to-head in versus (pre-registered pair-GSPRT at champion-comparable per-move wall-clock) **and matches-or-beats it on the single-player battery**. The system runs small experiments on the Mac and scales to cloud (provider-agnostic) without redesign. CC2 is permitted only as round-0 warm start and as opponent/yardstick.
+A bot whose deployed decisions are entirely learned: learned policy and learned
+terminal-WDL value drive one generic search, with no CC2 evaluator, hand-tuned
+board/attack term, `SPEC_DECAY`, or hidden vehicle selection. At a matched
+champion-comparable per-move wall-clock it must beat the registered
+`probe-tp128d9` under a frozen pair-GSPRT and match or beat the same champion on
+the frozen single-player battery. The same system must run small experiments on
+the Mac and scale provider-neutrally without redesign. CC2 action supervision
+is permitted only for round 0; later CC2 use is opponent/yardstick only.
 
-## Notes
+## Current truth — validity reset
 
-- **Domain**: tetr_online (Rust, Bevy game + `tetr-core` engine + `tetr-research` platform). Diffbase = **master** (v2 foundation landed at 575be51: `tetr-nn` two-board P+V net, sudden-death venue, Arm grammar, `duel`/`gate` latched pair-GSPRT, `evaluate_leaves` batch seam). The `../tetr_online-rl` worktree (branch `rl/strike`) is **reference only**; its round 1 aborted at 206/2000 games with no verdict. Graveyard evidence: `docs/` labnotes + postmortems, `autoresearch/rl-strike-260702/` ledgers in the rl worktree.
-- **Champion**: `tp:cc2@w128d9`, ~100 ms/move, 0.8225 APP held-out, moat = brute width-as-survival-hedge + bag speculation; leaf-eval edges compress to EVEN at its config.
-- **Execution override**: research decisions here require running measurements — Task tickets that run experiments or build instruments are in-map when they unblock a decision. Full campaign rounds (train→gate→promote→repeat) start *after* the design freeze and get charted as tickets then.
-- **Standing preferences**: one change per experiment, no pseudo-reward hacks (memory: research-principles-generality); experiments via the tetr-research platform + ledger receipts, never bespoke binaries; bound every long job (TIME_BUDGET_SECS); `scripts/gate` before any push; campaign work in a separate git worktree off master; treat prior notes as evidence, not gospel.
-- **Method**: grill via AskUserQuestion; use ultracode workflows for surveys and design panels; pre-registration weight is itself a decision (see the rigor/velocity ticket).
+- **No accepted incumbent or clean lineage exists.** Round-0 v2-v4 and rounds
+  1-11 are forensic artifacts, not promotion evidence. Rounds 1-10 are void;
+  round 11 was already training when the reset was declared and may finish as
+  an exploratory diagnostic only.
+- New `tetrnn.round`, `tetrnn.train`, and slot-fitting invocations fail closed.
+  The pause is removed only after their replacement contracts are executable.
+- The old registered-arm shorthand resolves the wrong CC2 weight profile;
+  Gate-0a mixed generator/scorer identities; Gate-0b did not run the specified
+  operator/curve/CI; the final gate was not fully frozen.
+- Legacy guided shards omit discarded actions and frozen generator logits,
+  reuse an out-of-scale `-1e8` terminal sentinel, and cannot reconstruct
+  completed-Q. The old `c=12` target fails its own adversarial test.
+- The deployed net path is not pure: hand attack composition and
+  `SPEC_DECAY` remain, while production versus/datagen paths keep opponent and
+  venue context neutral.
+- Gate/round evidence is not reproducible enough for a claim: seed domains
+  overlap, parallel gates consume completion order, event streams are empty,
+  resume is existence-based, mixes are mutable symlinks, and artifacts live in
+  ephemeral `/private/tmp` paths from dirty builds.
 
-## Decisions so far
+## Decisions that remain valid
 
-- [Name the destination](tickets/destination.md) — SOTA bar = dethrone probe-tp128d9 (versus SPRT win + solo match-or-beat, practical budget); purity = fully learned deployed bot, CC2 only as round-0 warm start + yardstick; compute = Mac-small / cloud-scalable, provider-agnostic; deployment = native research bot, shipping later.
-- [Algorithm-family survey](tickets/algorithm-survey.md) — recommend **Gumbel Expectimax-AlphaZero on the true model** (policy-guided Gumbel-top-m + Sequential Halving with completed-Q targets — *not* PUCT/visit-counts, which dodges the near-deterministic-backup collapse; exact enumerated chance nodes with a **survival-CVaR backup** replacing SPEC_DECAY; terminal-WDL value; factored two-board value). Native Rust on the SearchState/Mind seam, ANE eval. Win is **honestly unproven** at matched wall-clock → gated behind **Gate-0** (zero-training falsification). Surfaced the **R4 structural fix** (deployed net bot must consume the policy prior; retire value-only `compose()`). Full memo + kill criteria in the [T02 memo](assets/T02-algorithm-family-memo.md).
-- [Throughput budget model](tickets/throughput-budget.md) — measured on master (corrected memory 2×): the tetr-nn forward is **glue-bound at ~6.9k evals/s** (memory said 20.5k), ~99% im2col/transpose, batch-invariant; the prior starvation multiplier is `evals/move × s/eval` for a net search (champion 278 games/hr with cheap eval; `beam:round0@w8d5` <100/hr). **Floor: ≥200 games/hr for a strong-ish agent before any campaign.** Gumbel-n64 is marginal on the current forward, comfortable (~300–600/hr) once it's fixed → fixing the forward is a **prerequisite**. Numbers in [T03 measurements](assets/T03-throughput-measurements.md).
-- [Gate-0a — survival-recall](tickets/gate0a-survival-recall.md) — **built + ran** (harness `crates/tetr-research/src/gate0a.rs`). The cheap zero-training falsification **did NOT kill the thesis**. Measurement corrected the panel's metric: binary d9-survival is trivial (72/72 states: every non-instakill placement survives the horizon — survivors are abundant, not a sparse hedge). On the redefined **agreement@k** (net top-k ∩ champion-beam top-k-by-score), even the *weak* round0 prior hits **0.657 @ k=6 vs 0.209 random = 3.1× lift** — the champion's preferred near-death moves already sit in the weak net's top-6. Green-light (not verdict): the barrier relocates from root-survival coverage to value-discrimination-among-survivors = **Gate-0b**. Detail in [T11 findings](assets/T11-gate0a-findings.md).
-- [Gate-0b — search-gain premise](tickets/search-gain-verification.md) — **CONFIRMED on clean seeds.** `beam:round0@w8d5 vs policy:round0` = **31-1-0 / 32 games (~0.97)** on a fresh seed region → deep search crushes the raw policy, re-confirming (exceeding) the prior campaign's *contaminated* G_π=0.900 and retiring that doubt. **Both preconditions of the thesis are now green** (search-gain + Gate-0a coverage). Not yet settled: whether completed-Q *target training* compounds (campaign round-1, post-freeze) and deployment-parity at matched wall-clock (needs the forward fix). Also: T12 rescoped — the beam is the sound v0 operator, no from-scratch MCTS needed pre-freeze.
-- [Purity contract](tickets/purity-contract.md) — classified every fixed component (environment truth / budget knobs / training machinery = ALLOWED; CC2 eval, SPEC_DECAY, Z_SCALE/W/λ composition = FORBIDDEN in the deployed bot; terminal-WDL value eliminates composition by design). One flagged judgment call (hand-chosen search budget = allowed knob, user may veto). [Contract](assets/T01-purity-contract.md).
-- [Design freeze (PROPOSED)](tickets/design-freeze.md) — the whole route synthesized into a ratifiable design ([doc](assets/T08-design-freeze-PROPOSED.md)): policy-guided completed-Q search on the true model, terminal-WDL value, survival-CVaR chance backup, factored two-board value, R4 fix, champion-pinned self-play, forward-fix-then-campaign throughput plan, proposed gate battery + lighter rigor contract. **Four genuine user decisions flagged** (purity budget-knob veto; gate hardware/ANE fairness; rigor/velocity trade; gate sensitivity). On ratification, the strike moves from planning to campaign execution.
-- **RATIFIED 2026-07-08** (all four delegated; explicit steer: balanced rigor, **infra-first** — invest in research velocity before grinding rounds). See the §RATIFIED block in the [design doc](assets/T08-design-freeze-PROPOSED.md). Gate battery (T04) + rigor contract (T06) folded in and closed.
-- [Self-play datagen driver](tickets/datagen-driver.md) — **BUILT + VERIFIED + CLI** (`crates/tetr-research/src/datagen.rs`; `tetr-research datagen --games N --seeds BASE --out DIR [--net dir]`). Drives the beam directly (captures `root_scores` = the completed-Q source), applies moves via `placement_to_inputs` replay, writes game-aligned shards with z backfill. **5,392 games/hr single-thread (CC2 w8d5)** — driver overhead negligible; net datagen bottlenecked purely by the forward (T13), as predicted. Full 2000-game round-0 corpus generated (482 shards, 13 GB, 1002-998 balanced).
-- [Port spec-dedup](tickets/port-spec-dedup.md) — **verified no-op**: the v2 landing's PR1 (d151054) already re-derived it on master (`expand_speculative` commits once per placement, fans the bag with cheap clones). Five minutes of verification saved a core-code port.
-- **T15 in flight**: Python side built + verified — shard reader (Rust→Python seam proven on 710k children), **completed-Q target transform** (7 self-checks: scale-free, non-degenerate at near-deterministic argmax, dead-masking; **C_SCALE=12 calibrated once** to the pre-registered N_eff band [2.5,6], softest-in-band per the A5 discipline), streaming trainer (game-level split by shard alignment, grouped-softmax policy CE + played-child WDL CE, whitening from train stats, per-epoch export). Dev round-trip CLOSED: Rust datagen → Python train → Rust `policy:` arm plays. Full round-0 training running (3 epochs, ~5h).
+- [T00 — Destination](tickets/destination.md): the bar is the registered
+  in-repo champion in versus plus single-player, under practical compute, from
+  one fully learned system.
+- [T01 — Purity contract](tickets/purity-contract.md): environment rules and
+  compute budgets are allowed; CC2 evaluation, hand reward/value composition,
+  and speculative preference heuristics are forbidden in the deployed path.
+- [T02 — Algorithm survey](tickets/algorithm-survey.md): Gumbel-style policy
+  improvement on the true model remains a research hypothesis, not an
+  authorized implementation or evidence of strength.
+- [T03 — Throughput model](tickets/throughput-budget.md): local experimentation
+  needs a real-vehicle floor near 200 games/hour; throughput must be measured on
+  realistic game lengths and the actual pure vehicle.
+- [T06 — Rigor/velocity contract](tickets/rigor-contract.md): freeze validity
+  and promotion rules, keep one-variable research levers explicit, and record
+  negative results without relabeling them as progress.
+- [T17 — Spec-dedup](tickets/port-spec-dedup.md): verified already present on
+  master; no port was required.
+- [T18 — Completed-Q repair](tickets/repair-completedq-contract.md): reference
+  Mctx semantics are separated from legacy rank distillation; frozen logits,
+  legal/invalid separation, finite-scale terminal Q, pytest/CI, and fail-closed
+  legacy training are now the load-bearing contract.
+
+## Superseded or reopened decisions
+
+- [T08 — old design freeze](tickets/design-freeze.md) is historical and
+  superseded by T30.
+- [T12 — old operator](tickets/gumbel-operator.md) is historical/retracted;
+  T25/T26 replace it.
+- [T15 — old completed-Q training](tickets/completedq-training.md) is
+  historical/invalidated; its “round-1 authorized” conclusion is withdrawn.
+- [T04 — final gate](tickets/gate-battery.md), [T07 — Gate-0b](tickets/search-gain-verification.md),
+  and [T11 — Gate-0a](tickets/gate0a-survival-recall.md) are reopened.
+- T05, T09, T10, T13, T14, and T16 remain open under repaired blockers.
+
+## Execution DAG before another campaign round
+
+Current frontier:
+
+1. Resolve [T19 — evidence quarantine](tickets/evidence-quarantine.md).
+2. After T19, run [T20 — immutable arm identity](tickets/immutable-arm-identity.md)
+   and [T21 — seed allocator integration](tickets/seed-allocator-integration.md)
+   in parallel.
+3. T20 + T21 unlock [T22 — deterministic-prefix instruments](tickets/deterministic-prefix-instruments.md)
+   and [T23 — provenance shard v2](tickets/provenance-shard-v2.md).
+4. T18 unlocks [T25 — pure search specification](tickets/pure-search-spec.md);
+   T20 + T23 unlock [T24 — opponent/venue context](tickets/opponent-venue-context.md).
+5. T24 + T25 unlock [T26 — pure learned search](tickets/pure-learned-search.md).
+6. T20 + T21 + T23 + T24 + T26 unlock
+   [T27 — counterbalanced datagen](tickets/counterbalanced-datagen-repair.md).
+7. T22 + T23 + T27 unlock [T28 — authoritative manifests/resume](tickets/authoritative-manifests-resume.md).
+8. T18 + T23 + T24 + T26 + T28 unlock
+   [T29 — cross-language learning CI](tickets/cross-language-learning-ci.md).
+9. T18 + T27 + T29 unlock the clean [T05 — round-0 net](tickets/round0-net.md).
+10. With the clean stack, rerun T04/T07/T11 and finish T13 on the actual pure
+    vehicle. Their evidence unlocks
+    [T30 — validity-restored design freeze](tickets/validity-restored-design-freeze.md).
+11. Close repaired T14 and certify [T16 — one-command round driver](tickets/round-driver.md)
+    twice, including crash/resume. Only then may a clean round-1 ticket exist.
+
+Every ticket closes on evidence, including a valid negative result. No ticket
+may infer that a downstream experiment will pass.
+
+## After the clean driver is certified
+
+Chart one task per clean expert-iteration round. A candidate advances only on
+the frozen deterministic incumbent gate, registered-champion no-regression,
+purity, provenance, start-gate, and solo-smoke requirements. After three valid
+rounds, audit compounding before choosing a fixed wall-clock capacity/search
+point or scaling out the provider-neutral actor/artifact store.
+
+Only a validation-qualified, statically/runtime-audited pure artifact may be
+frozen for untouched confirmation. Final versus and solo confirmation use the
+same model/config hash. A failed confirmation remains a valid negative result;
+any modified candidate receives a new claim id and fresh confirmation region.
 
 ## Not yet specified
 
-**The design is FROZEN (2026-07-08) — the strike is in EXECUTION, ordered infra-first per the ratified rigor/velocity steer.** The planning fog has graduated into the execution DAG below; what remains as fog is downstream of round 1.
-
-Execution frontier (charted tickets):
-- **Velocity infra FIRST** (ratified): [T13 forward throughput fix](tickets/fix-forward-verify-ane.md) (im2col is memory-bandwidth-bound — confirmed; fix = ANE fusion for datagen + BNNS/ANE for deployed) and ~~T17 spec-dedup~~ (**verified already on master**, PR1 d151054 — closed no-op).
-- **Data plant: T14 DONE** ([driver + CLI](tickets/datagen-driver.md), 5,392 games/hr CC2 single-thread; full 2000-game round-0 corpus generated). [T09 datagen architecture](tickets/datagen-architecture.md) (cloud scale-out seam) still open.
-- **Training: T15 RESOLVED — all three battery reads GREEN, round-1 authorized.** The completed-Q round-0 net **beats the prior campaign's round0 fixture 35-29 (BC-vs-BC) and 11-5 (beam-vs-beam @w8d5), with G_π = 16-0 on fresh seeds** — entropy-injection refuted at BC scale; the new pipeline strictly improves on the old one. Guided m12 restriction = **6-6 dead even** vs the full beam (costs nothing). Details + round-1 trainer notes on [the T15 ticket](tickets/completedq-training.md).
-- **Vehicle (T12): RESOLVED — built, fast, strength-neutral.** The slot-head guided vehicle (one parent forward ranks all placements via the 104-slot action head; top-12 committed+evaluated at every node) runs net self-play datagen at **1,370 games/hr single-thread — 14× the full net beam, 7× the campaign floor, without the ANE port** — at **exact strength parity** (8-8 vs the full beam at matched width; per-child variant 6-6). The measurement chain that got here (root-filtering alone useless → per-child heads can't cheapen search → action-indexed head is THE lever) is on [the T12 ticket](tickets/gumbel-operator.md). Deferred: SH sims, survival-CVaR (SPEC_DECAY still in the training vehicle — must be gone by the showdown per purity), ANE (multiplicative).
-- **ROUNDS 1-10 RUN AND RECKONED (2026-07-08/09):** the full arc — five defect-mechanized rounds, a voided first promotion, the anchor-veto hardening, then the instrument forensic that voided rounds 6-10 wholesale — lives in the campaign logs below and on [the round-driver ticket](tickets/round-driver.md). **Current frontier: round0_v4 (union-whitening retrain) validation → round-11, the first consistent-vehicle round.** The unproven link is unchanged: does the loop COMPOUND on self-generated data?
-- **Loop:** [T16 round driver](tickets/round-driver.md) (one resumable command/round; balanced-rigor amendment log).
-- **R4 fix** — retire value-only `compose()` for the net bot (the `guided:` arm is the vehicle seed; completes with the action head).
-
-Still fog (downstream of round 1):
-- **Net scale ladder / obs v3** — tower size, do venue clocks stay in obs (they bind the net to the venue). After round 1 shows the loop compounds.
-- **[Single-player from the same system](tickets/single-player-story.md)** (T10) — multi-task vs finetune; after the versus loop works.
-- **Rounds 1..N and the final showdown** — the SPRT vs the champion at matched ~100 ms; end-game distillation if matched wall-clock favors less-search-bigger-net. Charted round by round as the loop compounds.
+- Whether the pure completed-Q/Gumbel operator passes the repaired Gate-0b.
+- Which network capacity/search budget is optimal at matched wall-clock.
+- How many clean rounds are needed, if compounding exists at all.
+- The final solo multitask mixture and venue conditioning, to be resolved in
+  T10 only after a valid versus loop exists.
+- Cloud provider and scale, intentionally deferred behind the provider-neutral
+  worker/artifact contract in T09.
 
 ## Out of scope
 
-- **Shipping the bot in-game** (wasm/browser distillation, real-time budgets) — destination grilling ruled it a follow-up effort.
-- **Beating external CC2-at-full-strength as a bar** — CC2 remains an opponent/yardstick only; the bar is the in-repo champion.
-- **Game/UI features and TETR.IO fidelity** — dropped in the 2026-06 SOTA-plan decision; unchanged here.
-
-## Campaign log — 2026-07-08/09 (rounds 1-5 + the vehicle reconciliation)
-
-- **MILESTONE:** the fully-learned vehicle **beats its CC2 teacher config 21-11** (`guided:round0_v3@m12w8d5` vs `beam:cc2@w8d5`, trusted harness) and goes 9-7 vs the attack-tuned TP variant. First measured head-to-head win of a zero-CC2-eval bot over the hand-tuned eval at matched search budget.
-- **Five expert-iteration rounds, zero promotions, every failure mechanized** (full ledger on [the round-driver ticket](tickets/round-driver.md)): from-scratch regresses (5-59); fine-tune extracts real policy signal (40-24) but search washes it out at the vehicle level (gates split); a value bootstrap hit the pre-registered C6 scale trap (shards lack generator-eval-scale metadata); SSL aux gives the best fine-tuned value (23-41) but still no promotion; per-shard A3 masking = catastrophic interference. **Binding constraint: value-learnable self-play data** (mirror games are short fast-kill blitzes; net-vs-CC2 games are long and value-rich → round-6 = two-arm grounded datagen, built + committed).
-- **The "driver divergence" postmortem resolved in three acts:** (1) filtered-root index misalignment (corrupted round-1 — fixed + regression test); (2) last-tie vs first-tie argmax (CC2 ties ~55% — fixed); (3) the driver was then INNOCENT — the harness's `guided:` arm was silently left on the per-child filter (a no-op edit), racing a *different vehicle* than the datagen driver. One-line fix; **seed-matched probe now proves driver ≡ harness ply-for-ply** (kept as a permanent regression instrument). All prior guided gates measured the per-child vehicle (internally consistent; the milestone stands); rounds 1-5 additionally suffered datagen-vehicle ≠ gate-vehicle inconsistency — retro-explaining part of the no-compounding. Round-6 reruns with consistent vehicles end-to-end.
-- **Velocity infra banked:** parallel datagen (5,000 games/hr), ~1h round cycles, TETR_DATAGEN_TRACE, the divergence probe, per-source/SSL/fine-tune trainer modes.
-
-## Campaign log — 2026-07-09 (the compounding arc)
-
-- **Round-6** (driver-run, grounded data, consistent vehicle): gate H0 but the **value sign flipped** (31-17 for the candidate — the campaign's first value improvement). Amendment **A-r7**: training lineage chains from the newest net; the incumbent advances only on promotion.
-- **Round-7: H1Accepted (llr +3.05) — then VOIDED by anchor evidence.** The lineage evolved a parent-exploiting glass cannon (beats v3 head-to-head; **0-32 vs the CC2 teacher** that v3 beats 24-8). The pre-registered non-transitivity tripwire, observed for real. Amendment **A-r8**: promotion = incumbent gate PASS **and** fixed-anchor no-regression; self-play pool diversified (half CC2-grounded, half mirror). Incumbent rolled back to v3; round-8 running under the hardened rule.
-- **True-vehicle reads:** slot-guided beats the full net beam **12-4** at matched width (learned selectivity > brute breadth — the leapfrog mechanism, measured) and the CC2 teacher **24-8**.
-- **Solo baseline (T10):** the versus vehicle = **0.0 APP, 16/16 topouts** (champion local ref 0.787) — versus→solo transfer is zero; a real second axis with a `solo` instrument now in the CLI.
-- **T13 groundwork:** ONNX export (leaf + slot graphs); parity median fp16-scale, tail ~1e-1 unresolved.
-- **Method receipts:** the round driver's ledger (`rounds.jsonl`), anchor-gated promotion, pool diversity — each amendment logged before the round that uses it.
-
-## Campaign log — 2026-07-09 (the instrument forensic)
-
-- **ALL r6-r10 verdicts VOID — the hidden vehicle chooser.** `guided_filter` silently dispatched on `has_slot_head()`: once v3's export carried a slot head, datagen AND every anchor/gate quietly swapped from the per-child ranker to the slot ranker under the same arm string. The slot head (sCE ~4.0, two epochs) collapses play — v3 slot-guided anchors **0-16 in 7-second suicide games** on the seeds where per-child v3 reads strong. The "glass cannon lineage" and "LR too hot" narratives were artifacts of measuring (and training on) the wrong vehicle. Full forensic + evidence chain on [the round-driver ticket](tickets/round-driver.md).
-- **Retractions:** the 24-8 teacher read and the 12-4 slot-beats-full-beam read were a stale binary (still per-child). The **21-11 per-child milestone stands** (pre-chooser, sha-verified weights). The slot vehicle's 1,370 games/hr datagen figure was real but measured on degenerate (short) games — per-child datagen cost being re-measured now.
-- **Fix (commit 0cebd90):** rankers are explicit in the arm grammar — `guided:` = per-child (validated), `sguided:` = slot (experimental until the slot head trains stronger). No hidden dispatch on model contents may ever select a vehicle. A-r8's anchor-veto machinery is what caught this; it stays.
-- **Round-11 = the true first consistent round:** per-child vehicle end-to-end, diversified pool, anchor veto, pre-registered LR (the 1e-4 hypothesis was never cleanly tested).
+- Shipping the bot in the browser/game UI; the first destination is a native
+  research bot with defensible evidence.
+- Treating an external CC2 release as the claim bar; the bar is the immutable
+  in-repo `probe-tp128d9` champion.
+- Game/UI features or broad TETR.IO fidelity unrelated to the frozen venues.

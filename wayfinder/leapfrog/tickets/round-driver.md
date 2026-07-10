@@ -4,7 +4,7 @@ title: Round driver — one resumable command per round
 labels: [wayfinder:prototype]
 status: open
 assignee:
-blocked-by: [T14, T15]
+blocked-by: [T05, T14, T18, T20, T21, T22, T23, T24, T26, T27, T28, T29, T30]
 ---
 
 ## Question
@@ -179,3 +179,12 @@ Slot-collapse forensics (all exonerating code, indicting distribution): Rust `fo
 ## Round-11 in flight (2026-07-09): datagen receipts
 
 First consistent-vehicle round (guided per-child, v4 lineage, v3 incumbent, 600 games). Datagen receipts: grounded half **net-seat 161-139 over driver-CC2** (53.7% — the v4 lineage is competitive in its own data plant; the new `net_opp_draw` field's first read); mirror half 159-141 seat-split (stagger fair), **111 shards vs the grounded half's 72 — mirror net-vs-net games run LONG** (healthy competitive play; the r1-era 63-ply suicide blitzes are gone with the honest vehicle). Cost: grounded 236 games/hr, mirror 92 games/hr at 6 workers — the serial halves cost ~4.5h wall, so round.py now runs the halves CONCURRENTLY on split workers (banked for round-12). Training on the 324-shard mix in progress; duels + gate next. Post-round protocol: ledger verdict per the pre-registered tree, then `requalify_slots.sh r11/net r11/corpus` (on-policy slot healing thesis — hit@k on the round's own shards + the 45s sguided anchor). CAVEAT: r11 shards store only the per-child filter's kept 12 children, so on-policy hit@k = agreement-with-the-per-child-vehicle-within-its-kept-set (the right transfer target: can the slot head mimic the validated vehicle on real play states) — NOT global placement ranking; the sguided anchor duel remains the ground-truth qualification.
+
+## Validity reset — 2026-07-09
+
+Rounds 1-10 are void and round 11 is exploratory only. In addition to the
+target defect, the driver has overlapping seed regions, existence-only resume,
+mutable symlink mixes, post-round-0 CC2 teaching/base replay, parity-coupled
+opener/net seat, dirty/empty receipts, and completion-order gate censoring. New
+invocations now fail before datagen. T16 remains open until its full repaired
+blocker stack is certified twice including crash/resume.

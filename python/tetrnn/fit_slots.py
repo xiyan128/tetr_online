@@ -10,8 +10,9 @@ net's leaf eval stays BIT-IDENTICAL (only the filter changes). This also
 measures the linear ceiling exactly: if hit@12 plateaus low, the head needs
 capacity (net.rs change) or joint fine-tuning, and we know without guessing.
 
-Targets are the same completed-Q pi' as train.py, scattered into slot space
-(collided slots sum). Holdout = the lexicographically-last shards.
+Legacy targets are still readable for audits, but this command is fail-closed:
+the old shards cannot prove complete roots/frozen logits and mix the `-1e8`
+terminal sentinel with finite-scale scores. It must not produce another model.
 
 Usage: uv run python -m tetrnn.fit_slots <corpus-dir> <model-dir> <out-dir>
        [--epochs 200] [--holdout 24]
@@ -29,8 +30,7 @@ import torch
 from safetensors.torch import load_file, save_file
 
 from .export_onnx import load_model
-from .shards import read_shard, shard_paths, unpack_plane
-from .targets import completed_q_target
+from .shards import shard_paths
 
 N_SLOTS = 104
 
@@ -38,29 +38,8 @@ N_SLOTS = 104
 def cache_embeddings(model, files: list[str]) -> tuple[torch.Tensor, torch.Tensor, np.ndarray]:
     """One trunk pass per parent decision ->
     (emb [D, TRUNK], slot_target [D, N_SLOTS], best_slot [D])."""
-    embs, targets, bests = [], [], []
-    for f in files:
-        sh = read_shard(f)
-        if sh.parent_own is None or sh.child_slot is None:
-            continue
-        with torch.no_grad():
-            emb = model.trunk(
-                torch.as_tensor(unpack_plane(sh.parent_own)).unsqueeze(1).float(),
-                torch.as_tensor(unpack_plane(sh.opp_plane)).unsqueeze(1).float(),
-                torch.as_tensor(sh.parent_feats).float(),
-            )
-        st = np.zeros((sh.n_decisions, N_SLOTS), dtype=np.float32)
-        bs = np.zeros(sh.n_decisions, dtype=np.int64)
-        for k in range(sh.n_decisions):
-            c = sh.children_of(k)
-            t = completed_q_target(sh.child_score[c].astype(np.float64))
-            slots = sh.child_slot[c]
-            np.add.at(st[k], slots, t.astype(np.float32))
-            bs[k] = slots[np.argmax(t)]
-        embs.append(emb)
-        targets.append(torch.as_tensor(st))
-        bests.append(bs)
-    return torch.cat(embs), torch.cat(targets), np.concatenate(bests)
+    del model, files
+    raise RuntimeError("legacy slot targets are audit-only; shard-v2 frozen targets are required")
 
 
 def hit_at(logits: torch.Tensor, best: np.ndarray, k: int) -> float:
@@ -76,6 +55,10 @@ def main() -> None:
     ap.add_argument("--epochs", type=int, default=200)
     ap.add_argument("--holdout", type=int, default=24, help="last-N shards held out")
     args = ap.parse_args()
+    ap.error(
+        "slot fitting is paused: legacy shards lack reconstructible frozen targets; "
+        "complete shard-v2 first"
+    )
 
     model = load_model(Path(args.model_dir))
     files = shard_paths(args.corpus)

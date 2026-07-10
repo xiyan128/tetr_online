@@ -4,7 +4,7 @@ title: Datagen + training architecture — Mac-small, cloud-scalable
 labels: [wayfinder:prototype]
 status: open
 assignee:
-blocked-by: [T02, T03]
+blocked-by: [T23, T28]
 ---
 
 ## Question

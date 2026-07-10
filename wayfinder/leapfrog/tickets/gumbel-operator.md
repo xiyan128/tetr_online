@@ -61,3 +61,11 @@ Final receipts (2026-07-08, round0_v3 = the slot-head net @ epoch 1):
 - Slot head learns cleanly (holdout sCE 21.8 → 4.24 in 2 epochs) alongside unchanged policy/value trajectories.
 
 **Status:** the deployed-vehicle seed exists (`guided:` arm), the R4 fix is in motion (the vehicle consumes the policy prior), and round-1 self-play datagen is running on it. Deferred to post-round-1: Sequential-Halving sims, survival-CVaR chance backup (still SPEC_DECAY in v1 — an allowed-during-training crutch that must be gone by the showdown per the purity contract), the ANE per-eval fix (multiplicative, T13).
+
+## Retracted — validity reset 2026-07-09
+
+Closed as historical evidence, not as a valid operator. The implemented path
+was a policy-filtered beam, not the specified Gumbel/Sequential-Halving search;
+its slot strength reads came from stale/hidden vehicle selection and its speed
+benefited from suicide-short games. It also retained forbidden `SPEC_DECAY` and
+hand attack composition. T25/T26 supersede the implementation claim.

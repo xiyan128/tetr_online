@@ -1,5 +1,14 @@
 """One resumable command per expert-iteration round (leapfrog T16).
 
+VALIDITY RESET: new invocations are intentionally blocked.  Legacy rounds
+omit the frozen generator policy and discarded legal actions needed by the
+repaired target contract, and their other validity defects are tracked in the
+Wayfinder map. Round 11 was already in flight when the reset was declared; its
+loaded pre-guard process may still finish and write a legacy verdict, but that
+receipt is exploratory and T19 must mechanically quarantine it from future
+selection. Remove ``require_validity_stack`` only after the replacement shard,
+instrument, purity, and manifest tickets are closed.
+
 Encodes the campaign's burned-in lessons: consistent vehicle end-to-end (the
 guided beam drives datagen AND the gates), a DIVERSIFIED self-play pool (half
 grounded net-vs-CC2, half mirror — homogeneous pools bred a parent-exploiting
@@ -40,6 +49,15 @@ from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[2]
 BIN = REPO / "target/release/tetr-research"
+
+
+def require_validity_stack() -> None:
+    """Fail before datagen: legacy rounds cannot produce promotable evidence."""
+    raise RuntimeError(
+        "expert-iteration campaign paused by the validity reset: complete the "
+        "shard-v2, immutable-arm, seed, deterministic-gate, opponent-context, "
+        "pure-search, manifest, and cross-language CI repairs first"
+    )
 
 
 def sh(cmd: list[str], log: Path | None = None) -> str:
@@ -101,6 +119,7 @@ def main() -> None:
         "first). The hidden chooser is how rounds 6-10 died (0cebd90).",
     )
     args = ap.parse_args()
+    require_validity_stack()
 
     n = args.round
     scratch = Path(args.scratch)

@@ -4,7 +4,7 @@ title: Single-player from the same system
 labels: [wayfinder:grilling]
 status: open
 assignee:
-blocked-by: [T04, T08]
+blocked-by: [T04, T24, T26, T30]
 ---
 
 ## Question
@@ -43,3 +43,10 @@ Why this is the right shape:
 Decision experiments (in order): (1) does mixed training (versus + solo-race shards) hold the versus anchor while lifting solo APP off 0.0; (2) mix ratio sweep only if (1) regresses; (3) venue-feature ablation (do the clocks/rain dims suffice for the net to separate the modes). Bar: solo APP > 0 and climbing toward the champion refs (0.787@150 / 0.8194@600) without versus-anchor regression.
 
 Blocked behind: the versus loop compounding honestly (round-11+, post-v4). This is the design-on-the-shelf so the axis starts the day the loop closes.
+
+## Validity reset — 2026-07-09
+
+The recorded `0.0 APP` was measured after the hidden slot-vehicle switch and is
+not an honest baseline for the validated per-child or future pure vehicle. The
+solo-race idea remains a hypothesis; no single-player claim is valid until the
+same pure, venue-conditioned artifact is measured under T04's frozen battery.

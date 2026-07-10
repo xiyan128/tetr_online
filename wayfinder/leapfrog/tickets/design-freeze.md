@@ -22,3 +22,10 @@ Output: the frozen system design (the leapfrog's STAGE1-DESIGN equivalent, writt
 ## Resolution
 
 Ratified + folded into the frozen design 2026-07-08: [T08 design freeze](../assets/T08-design-freeze-PROPOSED.md) (§RATIFIED). User delegated all four flagged decisions; explicit steer = balanced rigor/velocity, invest in research-velocity infra before grinding rounds.
+
+## Superseded — validity reset 2026-07-09
+
+Historical only. Its vehicle, target, opponent-context, purity, seed, and gate
+premises were not satisfied by the implementation. T30 is the only ticket that
+can establish a new authoritative freeze; this document must not authorize a
+round or final claim.

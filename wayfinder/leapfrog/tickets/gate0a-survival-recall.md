@@ -2,9 +2,9 @@
 id: T11
 title: Gate-0a — survival-recall@k on champion near-death rollouts
 labels: [wayfinder:task]
-status: closed
-assignee: fable-lead
-blocked-by: []
+status: open
+assignee:
+blocked-by: [T05, T20, T21, T22]
 ---
 
 ## Question
@@ -45,3 +45,10 @@ Built + ran 2026-07-07 (harness `crates/tetr-research/src/gate0a.rs`, `gate0a_sm
 2. **Redefined metric — agreement@k (net top-k ∩ champion-beam top-k-by-score)/k — is positive even for a WEAK prior.** round0 (policy top-1 0.639): agree@6 = 0.657 vs random 0.209 = **3.1× lift**, strongest at low k (the Gumbel-top-m regime). The champion's preferred near-death moves already sit in the weak net's top-6 at ~66%, ~3× over chance.
 
 **Verdict:** the root-survival moat is not the barrier (survivors abundant; even a weak prior covers the champion's picks 3× over random). The barrier, if any, relocates to **value discrimination among survivors under chance** — exactly what Gate-0b (low-width Gumbel G_π + survival-CVaR backup) measures. Proceed. Caveats pre-registered: agreement is partly imitation (round0 was BC'd on champion-ish data) and agreement ≠ improvement; a stronger prior (T05) should raise the number and is the definitive read; Gate-0b (T07) tests whether the covered set actually yields search improvement.
+
+## Validity reset — 2026-07-09
+
+Reopened. Position generation used default CC2 while scoring used the
+attack-tuned profile, so the claimed champion-distribution recall is not an
+identity-consistent experiment. Preserve the old states as exploratory only;
+T20-T22 and clean T05 must precede the actual-champion rerun.

@@ -1,10 +1,8 @@
-"""Round-0 trainer (leapfrog T15): BC on datagen shards with completed-Q
-policy targets + terminal-WDL value.
+"""Legacy-shard trainer: explicit beam-rank distillation + terminal-WDL value.
 
 Losses per decision (a sibling group of children):
   * policy: CE(pi', softmax over the group of per-child policy logits), where
-    pi' = completed_q_target(child_score) — see targets.py. Dead-coded roots
-    carry pi'=0 and contribute no gradient mass.
+    pi' = rank_distillation_target(child_score, frozen_generator_logits).
   * value: CE on the PLAYED child's WDL logits vs z (win=0 / draw=1 / loss=2)
     from the mover's perspective — the state actually visited gets the label;
     counterfactual siblings do not.
@@ -14,8 +12,11 @@ The corpus streams SHARD BY SHARD (a full 2000-game corpus is ~13 GB unpacked
 shards and a shard-level split IS a game-level split (the postmortem lesson —
 decision-level splits leak). Holdout = every 10th shard.
 
-Usage:
-  uv run python -m tetrnn.train <corpus-dir> <out-model-dir> [epochs]
+The current shard schema does not store frozen generator logits, prove that
+filtered shards contain every legal root, or encode terminal Q on the
+evaluator's finite scale. Consequently this entry point is fail-closed. Clean
+campaign training remains paused until the provenance-rich shard schema lands;
+legacy corpora remain readable for audits but cannot produce another model.
 """
 
 from __future__ import annotations
@@ -30,7 +31,7 @@ import torch
 from .export import export
 from .model import N_SLOTS, TetrNet
 from .shards import FEATURE_LEN, Shard, read_shard, shard_paths, unpack_plane
-from .targets import completed_q_target, n_eff
+from .targets import BEAM_RANK_BETA, n_eff
 
 BATCH_DECISIONS = 64
 LR = 1e-3
@@ -58,7 +59,6 @@ def run_batch(
     dec_idx: np.ndarray,
     device: torch.device,
     metrics: bool,
-    live_logits: bool = False,
     boot_value: bool = False,
     ssl: bool = False,
     policy_heads: bool = True,
@@ -99,20 +99,7 @@ def run_batch(
     ex = torch.exp(logit - gmax[groups_t])
     gsum = torch.zeros(n_groups, device=device).scatter_add_(0, groups_t, ex)
     logp = logit - gmax[groups_t] - torch.log(gsum[groups_t])
-    if live_logits:
-        # Round-1 reanalyze form: pi' = softmax(CURRENT logits + c*qnorm),
-        # logits detached (the target must not chase its own gradient).
-        lg_np = logit.detach().cpu().numpy()
-        live_targets: list[np.ndarray] = []
-        pos = 0
-        for d in dec_idx:
-            n_ch = int(shard.child_offset[d + 1]) - int(shard.child_offset[d])
-            sc = shard.child_score[shard.children_of(int(d))]
-            live_targets.append(completed_q_target(sc, logits=lg_np[pos : pos + n_ch]))
-            pos += n_ch
-        batch_targets = {int(d): t for d, t in zip(dec_idx, live_targets, strict=True)}
-    else:
-        batch_targets = {int(d): targets[d] for d in dec_idx}
+    batch_targets = {int(d): targets[d] for d in dec_idx}
     pi = torch.as_tensor(
         np.concatenate([batch_targets[int(d)] for d in dec_idx]).astype(np.float32),
         device=device,
@@ -191,11 +178,12 @@ def run_batch(
     return total, m
 
 
-def shard_targets(shard: Shard) -> list[np.ndarray]:
-    return [
-        completed_q_target(shard.child_score[shard.children_of(d)])
-        for d in range(shard.n_decisions)
-    ]
+def legacy_uniform_shard_targets(shard: Shard) -> list[np.ndarray]:
+    """Removed legacy model-producing seam; use ``target_audit`` for forensics."""
+    del shard
+    raise RuntimeError(
+        "legacy uniform shard targets are audit-only; shard-v2 frozen targets are required"
+    )
 
 
 def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
@@ -228,10 +216,24 @@ def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
     return mean.astype(np.float32), np.sqrt(var).astype(np.float32)
 
 
+def require_target_contract(args: list[str]) -> None:
+    """Fail closed until shards carry a reconstructible frozen target."""
+    if "live" in args or "--live" in args:
+        raise RuntimeError(
+            "live trainee-logit targets are invalid: they have no finite fixed point; "
+            "store and use frozen generator logits instead"
+        )
+    raise RuntimeError(
+        "policy training is paused: current shards lack frozen generator logits, "
+        "complete legal-action provenance, visits, finite-scale terminal Q, and raw "
+        "root values; legacy corpora are audit-only"
+    )
+
+
 def main() -> None:
+    require_target_contract(sys.argv[1:])
     corpus_dir, out_dir = sys.argv[1], Path(sys.argv[2])
     epochs = int(sys.argv[3]) if len(sys.argv) > 3 else 3
-    live = len(sys.argv) > 4 and sys.argv[4] == "live"
     init_dir = None
     boot_value = False
     for a in sys.argv[4:]:
@@ -251,28 +253,17 @@ def main() -> None:
         print("SSL aux: trunk reconstructs the own plane (BCE, all child rows)")
     if boot_value:
         print("value bootstrap: z_hat -> tanh(played root score / Z_SCALE) + z CE")
-    if live:
-        # ROUND-1 POSTMORTEM (2026-07-08): this mode is UNSOUND as implemented —
-        # it re-mixes the stored (old) search Q with the TRAINEE's ever-changing
-        # logits each batch, a self-amplifying runaway (policy collapsed 0-64 vs
-        # its round-0 parent; gate H0Accepted llr -2.97). The sound reanalyze
-        # form needs the GENERATOR net's frozen logits (store child_gen_logit in
-        # shards at datagen time). Kept only as evidence; do not use for rounds.
-        print(
-            "WARNING: live-logit mode is UNSOUND (round-1 postmortem) — "
-            "training anyway for A/B use only"
-        )
-
     paths = shard_paths(corpus_dir)
     assert paths, f"no shards in {corpus_dir}"
     hold_paths = paths[HOLDOUT_EVERY - 1 :: HOLDOUT_EVERY]
     train_paths = [p for p in paths if p not in set(hold_paths)]
     print(f"corpus: {len(paths)} shards ({len(train_paths)} train / {len(hold_paths)} holdout)")
 
-    # Target sharpness read on the first shard (the calibration sanity gate).
+    # Target telemetry is descriptive, not an authorization gate.  A fixed
+    # effective-support promise does not follow from completed-Q.
     s0 = read_shard(paths[0])
-    effs = np.array([n_eff(t) for t in shard_targets(s0)])
-    print(f"targets: N_eff median={np.median(effs):.2f} (band [2.5,6])")
+    effs = np.array([n_eff(t) for t in legacy_uniform_shard_targets(s0)])
+    print(f"targets: beta={BEAM_RANK_BETA:g}, N_eff median={np.median(effs):.2f}")
 
     import os
 
@@ -328,7 +319,7 @@ def main() -> None:
         rng.shuffle(shard_order)
         for sp in shard_order:
             shard = read_shard(str(sp))
-            targets = shard_targets(shard)
+            targets = legacy_uniform_shard_targets(shard)
             ph = not (a3 and "shard-r0" in str(sp))
             for b in shard_batches(shard, rng):
                 loss, m = run_batch(
@@ -338,7 +329,6 @@ def main() -> None:
                     b,
                     device,
                     metrics=False,
-                    live_logits=live,
                     boot_value=boot_value,
                     ssl=ssl,
                     policy_heads=ph,
@@ -355,7 +345,7 @@ def main() -> None:
         with torch.no_grad():
             for sp in hold_paths:
                 shard = read_shard(sp)
-                targets = shard_targets(shard)
+                targets = legacy_uniform_shard_targets(shard)
                 for b in shard_batches(shard, None):
                     _, m = run_batch(
                         model,
@@ -364,7 +354,6 @@ def main() -> None:
                         b,
                         device,
                         metrics=True,
-                        live_logits=live,
                         boot_value=boot_value,
                         ssl=ssl,
                     )
