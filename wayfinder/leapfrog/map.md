@@ -92,8 +92,14 @@ Key prior evidence the simple design leans on:
 - **Round 1 (200 self-play games, from-scratch on mix): KEEP_INCUMBENT** —
   the candidate lost 6-42 to its own incumbent, replicating the 2026-06
   finding that from-scratch-on-mix regresses. The gate did its job on the
-  first try. Round 2 pulls the one lever (`--finetune`: train `--init` from
-  the incumbent) with everything else unchanged.
+  first try.
+- **Round 2 (same, + `--finetune`): KEEP_INCUMBENT, 3-45** — fine-tuning
+  didn't rescue it and holdout CE rose: the weak self-play rows themselves
+  degrade the evaluator. Conclusion so far: self-play compounding needs a
+  competent base net, and 600 CC2 games (anchor 0-48) isn't one. Next lever:
+  scale the CC2 corpus (a 5000-game round-0 costs ~10 minutes of datagen)
+  and race it against the 600-game net — climb the cheap teacher-data curve
+  before spending on self-play.
 
 # Open questions (one lever at a time)
 
