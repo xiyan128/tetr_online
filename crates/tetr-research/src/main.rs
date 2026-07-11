@@ -128,6 +128,11 @@ enum Command {
         /// Beam depth.
         #[arg(long, default_value_t = 5)]
         depth: u8,
+        /// Unbalanced-pair teacher mode: one seat searches at this NARROWER
+        /// width (alternating seats by game parity). Makes mid-game boards
+        /// outcome-predictive; omit for balanced mirror games.
+        #[arg(long)]
+        opp_width: Option<usize>,
         /// Parallel workers (games partitioned round-robin; each worker owns
         /// out/wN/ so shard numbering never collides).
         #[arg(long, default_value_t = 1)]
@@ -411,6 +416,7 @@ fn main() -> std::io::Result<()> {
             net,
             width,
             depth,
+            opp_width,
             games,
             seeds,
             out,
@@ -445,6 +451,7 @@ fn main() -> std::io::Result<()> {
                                 &mut writer,
                                 &*eval,
                                 cfg,
+                                opp_width,
                                 venue_ref,
                                 seeds + i,
                                 (seeds + i) as u32,
@@ -466,7 +473,7 @@ fn main() -> std::io::Result<()> {
                 json!({
                     "experiment": "datagen",
                     "eval": net.as_ref().map(|d| d.display().to_string()).unwrap_or_else(|| "cc2".into()),
-                    "width": width, "depth": depth, "games": games, "seeds": seeds,
+                    "width": width, "depth": depth, "opp_width": opp_width, "games": games, "seeds": seeds,
                     "workers": n_workers,
                     "venue": { "max_plies": venue.max_plies, "rain": venue.rain },
                     "out": out.display().to_string(),

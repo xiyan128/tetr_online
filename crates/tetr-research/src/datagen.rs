@@ -132,12 +132,18 @@ fn play_decision(
     (Some(record), attack, topped)
 }
 
-/// Play one mirror self-play game (both seats = the same beam config + eval),
-/// pushing every decision to `writer` and sealing the game with its outcome.
+/// Play one self-play game, pushing every decision to `writer` and sealing
+/// the game with its outcome. Both seats share the evaluator; `opp_width`
+/// (when set) gives one seat a NARROWER beam — the unbalanced-pair teacher
+/// mode, which makes mid-game boards outcome-predictive (balanced mirror
+/// games are decided late by piece luck, so their z labels are coin flips
+/// for the first ~60% of a game — measured 2026-07-10). Which seat gets the
+/// wide beam alternates by game parity so z stays seat-balanced.
 pub fn datagen_game(
     writer: &mut ShardWriter,
     eval: &dyn Evaluator,
     cfg: BeamConfig,
+    opp_width: Option<usize>,
     venue: &VersusFormat,
     seed: u64,
     game_id: u32,
@@ -146,7 +152,15 @@ pub fn datagen_game(
         Engine::new(marathon_config(), seed),
         Engine::new(marathon_config(), seed),
     ];
-    let mut beams = [planner(cfg), planner(cfg)];
+    let narrow = BeamConfig {
+        width: opp_width.unwrap_or(cfg.width),
+        depth: cfg.depth,
+    };
+    let mut beams = if game_id.is_multiple_of(2) {
+        [planner(cfg), planner(narrow)]
+    } else {
+        [planner(narrow), planner(cfg)]
+    };
     let mut attack = [0u32; 2];
     let mut topped = [false; 2];
     let mut ply_of = [0u16; 2];
@@ -266,7 +280,7 @@ mod tests {
         {
             let mut writer = ShardWriter::create(&dir, 64).expect("writer");
             for seed in 1..=4u64 {
-                let out = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32)
+                let out = datagen_game(&mut writer, &eval, cfg, None, &venue, seed, seed as u32)
                     .expect("game writes");
                 assert!(out.plies_total > 0, "game {seed} made no moves");
             }
@@ -323,7 +337,7 @@ mod tests {
         let eval = Cc2Evaluator::new(Cc2Weights::attack_tuned());
         let cfg = BeamConfig { width: 6, depth: 4 };
         let mut writer = ShardWriter::create(&tmp, 100_000).unwrap();
-        let out_d = datagen_game(&mut writer, &eval, cfg, &venue, seed, seed as u32).unwrap();
+        let out_d = datagen_game(&mut writer, &eval, cfg, None, &venue, seed, seed as u32).unwrap();
         let _ = std::fs::remove_dir_all(&tmp);
 
         assert_eq!(out_h.plies, out_d.plies_total as u32, "ply count diverged");
