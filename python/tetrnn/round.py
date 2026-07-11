@@ -83,6 +83,14 @@ def main() -> None:
     ap.add_argument("--seed-base", type=int, default=10_000_000)
     ap.add_argument("--duel-base", type=int, default=900_000_000)
     ap.add_argument(
+        "--rank",
+        type=float,
+        default=1.0,
+        help="pairwise ranking-loss weight (the standard recipe since the "
+        "2026-07-11 breakthrough: outcome CE alone cannot rank sibling "
+        "placements; rank pairs took the anchor from 0-48 to 24-24)",
+    )
+    ap.add_argument(
         "--finetune",
         action="store_true",
         help="train --init from the incumbent instead of from scratch "
@@ -110,6 +118,7 @@ def main() -> None:
         "games": args.games,
         "wd": args.wd,
         "finetune": args.finetune,
+        "rank": args.rank,
     }
     if n > 0 and not args.incumbent:
         raise SystemExit("rounds past 0 need --incumbent (the model whose self-play trains next)")
@@ -153,7 +162,7 @@ def main() -> None:
             [
                 "uv", "run", "--directory", str(REPO / "python"), "python", "-m",
                 "tetrnn.train", str(corpus), *replay, str(net),
-                "--epochs", str(args.epochs), *init,
+                "--epochs", str(args.epochs), "--rank", str(args.rank), *init,
             ],
             rdir / "train.log",
         )  # fmt: skip
