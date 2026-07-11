@@ -108,12 +108,26 @@ Key prior evidence the simple design leans on:
   **Outcome-only z from balanced mirror games is an information-starved
   target for a move-ranking evaluator.** This subsumes rounds 1-2's
   failures and closes the data-scaling path.
-- Next levers, one at a time, both env-truth and machinery-free: (a) a more
-  decisive venue for datagen (e.g. rain period 4 — every state sits closer
-  to the outcome, and games get cheaper); (b) unbalanced game pairs (e.g.
-  CC2@w8 vs CC2@w2 — a mid-game advantage then shows in the outcome, so
-  mid-game boards become predictive). If neither lifts mid-game signal,
-  the principled escalation is TD-style bootstrapped value targets.
+- **Lever (b) ran — unbalanced pairs (`datagen --opp-width`, CC2 w8 vs w2,
+  2026-07-11): the signal lifted, the play didn't.** Wide seat wins 94.5%,
+  labels became learnable everywhere (holdout acc 0.559→0.666; mid-game
+  phase acc 0.49→0.62, late 0.81→0.92) — and the net still lost 0-48 to the
+  anchor AND 0-48 to the balanced round-0 net. Diagnosis: unbalanced z is
+  *across-game* signal ("does this board look like the stronger player's")
+  — a beam needs *within-decision* contrast between sibling placements.
+  Meanwhile the balanced net's one strong region (death recognition, acc
+  0.81 late) acts as a survival heuristic — which is why it sweeps every
+  net trained since.
+- **The TD escalation ran (`train --td`, TD-Gammon-style bootstrapped
+  targets, trainer-only): no play gain either** at α=0.5/4 epochs on the
+  2k-game unbalanced corpus (0-48 anchor; 16-32 vs its plain sibling).
+- Untested cheap combination now running: **scale × TD** — unbalanced data
+  is nearly free (120k games/hr), and the "more data is flat" result was
+  measured on balanced labels only. If 20k unbalanced games + TD still
+  don't move play, outcome-only supervision at Mac scale is dead, and the
+  one-thing-to-add is within-decision supervision (a single search-value
+  column in the shards — the minimal, scale-honest version of what the old
+  design did with full counterfactual children).
 
 # Open questions (one lever at a time)
 
