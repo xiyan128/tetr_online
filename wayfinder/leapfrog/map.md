@@ -135,8 +135,15 @@ Key prior evidence the simple design leans on:
   comes from CC2's search (purity: round-0 teaching only); every later
   round's pairs are ranked by the net's OWN search — expert iteration with
   the search as the improvement operator.
-- Next: scale the teacher round (pairs are nearly free), then restart the
-  self-play loop on schema 3 with `--rank` in the standard recipe.
+- **The scale probe (20k games + rank pairs): the learned net BEATS the
+  teacher — 38-10 vs `beam:cc2@w8d5`** (and 37-11 over the 2k-game rank
+  net). Progression: 0-48 → 24-24 (2k) → 38-10 (20k). First decisive win
+  of a fully-learned evaluator over the hand eval at matched search on the
+  clean stack.
+- Now: the self-play campaign proper (fresh scratch, schema 3, `--rank`
+  recipe): round 0 = 20k CC2 teacher games; round 1+ = the incumbent's own
+  self-play with pairs ranked by its own search. Champion ladder
+  (`tp:cc2` at wider/deeper configs) begins once the loop compounds.
 
 # Open questions (one lever at a time)
 
