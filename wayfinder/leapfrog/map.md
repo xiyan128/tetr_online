@@ -121,13 +121,22 @@ Key prior evidence the simple design leans on:
 - **The TD escalation ran (`train --td`, TD-Gammon-style bootstrapped
   targets, trainer-only): no play gain either** at α=0.5/4 epochs on the
   2k-game unbalanced corpus (0-48 anchor; 16-32 vs its plain sibling).
-- Untested cheap combination now running: **scale × TD** — unbalanced data
-  is nearly free (120k games/hr), and the "more data is flat" result was
-  measured on balanced labels only. If 20k unbalanced games + TD still
-  don't move play, outcome-only supervision at Mac scale is dead, and the
-  one-thing-to-add is within-decision supervision (a single search-value
-  column in the shards — the minimal, scale-honest version of what the old
-  design did with full counterfactual children).
+- **Scale × TD closed the outcome-only story**: 20k unbalanced games + TD
+  = best classifier yet (holdout acc 0.693) and still 0-48 in play. Every
+  outcome-only configuration failed identically: classifiers improve, play
+  never does.
+- **⭐ 2026-07-11 — ranking supervision works.** Shards (schema 3) now store
+  ONE random non-best sibling per decision; training adds a logistic loss on
+  `z_hat(played) − z_hat(sibling)` (`train --rank`). Unit-free, no scores,
+  within-decision by construction. First run (2000 balanced CC2 games, CE +
+  rank): **24-24 vs the CC2 anchor** (every prior net: 0-48) and **48-0 vs
+  the best outcome-only net**. The beam's evaluator needs exactly this
+  signal; outcomes alone measurably cannot supply it. Round 0's ranking
+  comes from CC2's search (purity: round-0 teaching only); every later
+  round's pairs are ranked by the net's OWN search — expert iteration with
+  the search as the improvement operator.
+- Next: scale the teacher round (pairs are nearly free), then restart the
+  self-play loop on schema 3 with `--rank` in the standard recipe.
 
 # Open questions (one lever at a time)
 
