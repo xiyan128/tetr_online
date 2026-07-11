@@ -2,9 +2,16 @@
 
 One row per played decision:
 
-    decision [d, 6] i32   game_id, seat, ply, z, end_reason, plies_total
-    own      [d, 50] u8   packed 40x10 occupancy plane (LSB-first bits)
-    feats    [d, 70] f32  served feature vector
+    decision  [d, 6] i32   game_id, seat, ply, z, end_reason, plies_total
+    own       [d, 50] u8   packed 40x10 occupancy plane (LSB-first bits)
+    feats     [d, 70] f32  served feature vector
+    alt_own   [d, 50] u8   a random NON-best sibling's post-placement plane
+    alt_feats [d, 70] f32  that sibling's feature vector
+    has_alt   [d]     u8   1 when the decision had >=2 placements
+
+The alt pair carries "the search preferred own over alt_own" — unit-free
+within-decision ranking supervision (outcome-only labels measurably cannot
+rank sibling placements).
 
 Shard flushes are game-aligned (a game never spans shards), so a shard-level
 train/holdout split IS a game-level split. The writer stamps a schema tag and
@@ -30,6 +37,9 @@ class Shard:
     decision: np.ndarray  # [d, 6] i32
     own: np.ndarray  # [d, 50] u8
     feats: np.ndarray  # [d, 70] f32
+    alt_own: np.ndarray  # [d, 50] u8
+    alt_feats: np.ndarray  # [d, 70] f32
+    has_alt: np.ndarray  # [d] u8
 
     @property
     def n_rows(self) -> int:
@@ -56,11 +66,14 @@ def _fnv1a(data: bytes) -> int:
 def read_shard(path: str) -> Shard:
     with safe_open(path, framework="np") as f:
         meta = f.metadata() or {}
-        if meta.get("schema") != "2":
-            raise ValueError(f"{path}: shard schema {meta.get('schema')!r} != '2'")
+        if meta.get("schema") != "3":
+            raise ValueError(f"{path}: shard schema {meta.get('schema')!r} != '3'")
         decision = f.get_tensor("decision").reshape(-1, 6)
         own = f.get_tensor("own").reshape(-1, PACKED_PLANE)
         feats = f.get_tensor("feats").reshape(-1, FEATURE_LEN)
+        alt_own = f.get_tensor("alt_own").reshape(-1, PACKED_PLANE)
+        alt_feats = f.get_tensor("alt_feats").reshape(-1, FEATURE_LEN)
+        has_alt = f.get_tensor("has_alt").reshape(-1)
         # Verify the writer's payload checksum (XOR of per-tensor FNV-1a over
         # the little-endian bytes) — a corrupt shard fails loudly here, not as
         # garbage labels three stages later.
@@ -68,13 +81,23 @@ def read_shard(path: str) -> Shard:
             _fnv1a(decision.astype("<i4").tobytes())
             ^ _fnv1a(own.tobytes())
             ^ _fnv1a(feats.astype("<f4").tobytes())
+            ^ _fnv1a(alt_own.tobytes())
+            ^ _fnv1a(alt_feats.astype("<f4").tobytes())
+            ^ _fnv1a(has_alt.tobytes())
         )
         stored = meta.get("checksum")
         if stored != f"{computed:016x}":
             raise ValueError(
                 f"{path}: checksum mismatch (stored {stored}, computed {computed:016x})"
             )
-        return Shard(decision=decision, own=own, feats=feats)
+        return Shard(
+            decision=decision,
+            own=own,
+            feats=feats,
+            alt_own=alt_own,
+            alt_feats=alt_feats,
+            has_alt=has_alt,
+        )
 
 
 def shard_paths(dir: str) -> list[str]:

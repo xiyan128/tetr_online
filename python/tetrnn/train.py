@@ -17,7 +17,12 @@ per (game, seat, ply) inside a shard, so TD needs no schema change.
 
 Usage:
   uv run python -m tetrnn.train <corpus-dir> [<corpus-dir> ...] <out-model-dir>
-      [--epochs 3] [--init <model-dir>] [--lr 1e-3] [--td 0.5]
+      [--epochs 3] [--init <model-dir>] [--lr 1e-3] [--td 0.5] [--rank 1.0]
+
+`--rank W` adds a pairwise ranking loss over the stored (played, sibling)
+pairs: the search preferred the played placement, so z_hat(played) should
+exceed z_hat(sibling). Unit-free within-decision supervision — the signal
+outcome labels measurably lack.
 
 Multiple corpus dirs concatenate (the replay-buffer form: pass the current
 round's corpus plus earlier rounds').
@@ -82,6 +87,7 @@ def epoch_pass(
     rng: np.random.Generator | None,
     td: float = 0.0,
     frozen: TetrNet | None = None,
+    rank: float = 0.0,
 ) -> tuple[float, float]:
     """One pass over `paths` (shard-streamed). With `opt` it trains; without it
     it evaluates (always against the plain z labels — the grounded metric).
@@ -104,6 +110,25 @@ def epoch_pass(
                     ce = torch.nn.functional.cross_entropy(logits, target)
             else:
                 logits = model.serve(board, feats)
+                rank_loss = torch.zeros((), device=device)
+                if rank > 0:
+                    # Pairwise ranking: the search preferred `own` over `alt`.
+                    # z_hat difference through a logistic loss — unit-free
+                    # within-decision supervision (outcome labels can't rank
+                    # siblings; absolute scores carry generator units).
+                    live = shard.has_alt[rows] > 0
+                    if live.any():
+                        ab = torch.as_tensor(
+                            unpack_plane(shard.alt_own[rows[live]]), device=device
+                        ).unsqueeze(1)
+                        af = torch.as_tensor(shard.alt_feats[rows[live]], device=device)
+                        alt_logits = model.serve(ab, af)
+                        zh = lambda lg: (  # noqa: E731 — p_win − p_loss
+                            torch.softmax(lg, dim=1)[:, 0] - torch.softmax(lg, dim=1)[:, 2]
+                        )
+                        mask = torch.as_tensor(live, device=device)
+                        gap = zh(logits[mask]) - zh(alt_logits)
+                        rank_loss = -torch.nn.functional.logsigmoid(5.0 * gap).mean()
                 if succ is not None and frozen is not None:
                     # TD target: soft successor belief mixed with the outcome;
                     # terminal rows stay hard-grounded at z.
@@ -122,8 +147,9 @@ def epoch_pass(
                     ce = -(soft * torch.log_softmax(logits, dim=1)).sum(dim=1).mean()
                 else:
                     ce = torch.nn.functional.cross_entropy(logits, target)
+                total = ce if rank <= 0 else ce + rank * rank_loss
                 opt.zero_grad()
-                ce.backward()
+                total.backward()
                 opt.step()
             total_ce += float(ce.detach()) * len(rows)
             total_hit += int((logits.argmax(dim=1) == target).sum())
@@ -143,6 +169,13 @@ def main() -> None:
         default=0.0,
         help="bootstrap weight: target = td*frozen_probs(next) + (1-td)*onehot(z); "
         "0 = plain outcome CE",
+    )
+    ap.add_argument(
+        "--rank",
+        type=float,
+        default=0.0,
+        help="weight of the pairwise ranking loss (search preferred played over "
+        "the stored sibling); 0 = off",
     )
     args = ap.parse_args()
     *corpora, out_dir = args.dirs
@@ -173,7 +206,7 @@ def main() -> None:
 
     print(
         f"corpus: {len(train_paths)} train / {len(holdout_paths)} holdout shards, "
-        f"lr={args.lr}, td={args.td}"
+        f"lr={args.lr}, td={args.td}, rank={args.rank}"
     )
     for epoch in range(args.epochs):
         frozen = None
@@ -185,7 +218,7 @@ def main() -> None:
             frozen = copy.deepcopy(model).eval()
             for q in frozen.parameters():
                 q.requires_grad_(False)
-        tr_ce, tr_acc = epoch_pass(model, train_paths, device, opt, rng, args.td, frozen)
+        tr_ce, tr_acc = epoch_pass(model, train_paths, device, opt, rng, args.td, frozen, args.rank)
         model.eval()
         ho_ce, ho_acc = epoch_pass(model, holdout_paths, device, None, None)
         model.train()

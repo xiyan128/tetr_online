@@ -9,9 +9,17 @@
 //!
 //! | tensor | shape | dtype | |
 //! |---|---|---|---|
-//! | `decision` | `[d, 6]`  | i32 | `game_id, seat, ply, z, end_reason, plies_total` |
-//! | `own`      | `[d, 50]` | u8  | packed plane of the played (post-placement) state |
-//! | `feats`    | `[d, 70]` | f32 | served feature vector of that state |
+//! | `decision`  | `[d, 6]`  | i32 | `game_id, seat, ply, z, end_reason, plies_total` |
+//! | `own`       | `[d, 50]` | u8  | packed plane of the played (post-placement) state |
+//! | `feats`     | `[d, 70]` | f32 | served feature vector of that state |
+//! | `alt_own`   | `[d, 50]` | u8  | a random NON-best sibling's post-placement plane |
+//! | `alt_feats` | `[d, 70]` | f32 | that sibling's feature vector |
+//! | `has_alt`   | `[d]`     | u8  | 1 when a sibling existed (row had ≥2 placements) |
+//!
+//! The alt row carries the implicit label "the search preferred `own` over
+//! `alt_own`" — pairwise, unit-free ranking supervision (outcome-only labels
+//! measurably cannot rank sibling placements; absolute search scores carry
+//! generator-specific units that once poisoned a training run).
 //!
 //! Game-aligned flushes (a game's rows never span shards — so a shard-level
 //! train/holdout split is a game-level split), atomic writes (tmp + rename — a
@@ -29,7 +37,7 @@ use std::path::{Path, PathBuf};
 use crate::obs::{FEATURE_LEN, Obs, PACKED_PLANE, fnv1a, pack_plane};
 
 /// Shard schema tag written to (and required from) every shard file.
-pub const SHARD_SCHEMA: &str = "2";
+pub const SHARD_SCHEMA: &str = "3";
 
 /// One played decision (the `decision` tensor row + its observation).
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
@@ -48,20 +56,30 @@ pub struct DecisionMeta {
     pub plies_total: u16,
 }
 
-/// One row: meta + the served bytes of the state the mover chose.
+/// One row: meta + the served bytes of the state the mover chose, plus a
+/// randomly-chosen non-best sibling for ranking supervision.
 pub struct DecisionRecord {
     pub meta: DecisionMeta,
     pub own: [u8; PACKED_PLANE],
     pub feats: [f32; FEATURE_LEN],
+    pub alt_own: [u8; PACKED_PLANE],
+    pub alt_feats: [f32; FEATURE_LEN],
+    pub has_alt: bool,
 }
 
 impl DecisionRecord {
-    /// Build from the served observation of the played state.
-    pub fn from_served(meta: DecisionMeta, obs: &Obs) -> Self {
+    /// Build from the served observations: the played state, and (when the
+    /// decision had ≥2 placements) one non-best sibling.
+    pub fn from_served(meta: DecisionMeta, obs: &Obs, alt: Option<&Obs>) -> Self {
         Self {
             meta,
             own: pack_plane(&obs.board),
             feats: obs.features,
+            alt_own: alt
+                .map(|a| pack_plane(&a.board))
+                .unwrap_or([0; PACKED_PLANE]),
+            alt_feats: alt.map(|a| a.features).unwrap_or([0.0; FEATURE_LEN]),
+            has_alt: alt.is_some(),
         }
     }
 }
@@ -141,6 +159,9 @@ impl ShardWriter {
         let mut decision = Vec::with_capacity(d * 6);
         let mut own = Vec::with_capacity(d * PACKED_PLANE);
         let mut feats: Vec<f32> = Vec::with_capacity(d * FEATURE_LEN);
+        let mut alt_own = Vec::with_capacity(d * PACKED_PLANE);
+        let mut alt_feats: Vec<f32> = Vec::with_capacity(d * FEATURE_LEN);
+        let mut has_alt: Vec<u8> = Vec::with_capacity(d);
         for r in &self.buf {
             let m = &r.meta;
             decision.extend_from_slice(&[
@@ -153,6 +174,9 @@ impl ShardWriter {
             ]);
             own.extend_from_slice(&r.own);
             feats.extend_from_slice(&r.feats);
+            alt_own.extend_from_slice(&r.alt_own);
+            alt_feats.extend_from_slice(&r.alt_feats);
+            has_alt.push(r.has_alt as u8);
         }
 
         let i32_bytes = |v: &[i32]| -> Vec<u8> { v.iter().flat_map(|x| x.to_le_bytes()).collect() };
@@ -171,6 +195,19 @@ impl ShardWriter {
                 vec![d, FEATURE_LEN],
                 f32_bytes(&feats),
             ),
+            (
+                "alt_own",
+                safetensors::Dtype::U8,
+                vec![d, PACKED_PLANE],
+                alt_own,
+            ),
+            (
+                "alt_feats",
+                safetensors::Dtype::F32,
+                vec![d, FEATURE_LEN],
+                f32_bytes(&alt_feats),
+            ),
+            ("has_alt", safetensors::Dtype::U8, vec![d], has_alt),
         ];
         let checksum = {
             let mut h = 0u64;
@@ -244,6 +281,9 @@ pub struct Shard {
     pub decisions: Vec<DecisionMeta>,
     pub own: Vec<[u8; PACKED_PLANE]>,
     pub feats: Vec<[f32; FEATURE_LEN]>,
+    pub alt_own: Vec<[u8; PACKED_PLANE]>,
+    pub alt_feats: Vec<[f32; FEATURE_LEN]>,
+    pub has_alt: Vec<u8>,
 }
 
 impl Shard {
@@ -277,7 +317,14 @@ impl Shard {
         let stored = get("checksum")
             .ok_or_else(|| io::Error::other(format!("{}: no checksum", path.display())))?;
         let mut h = 0u64;
-        for name in ["decision", "own", "feats"] {
+        for name in [
+            "decision",
+            "own",
+            "feats",
+            "alt_own",
+            "alt_feats",
+            "has_alt",
+        ] {
             h ^= fnv1a(raw(name)?);
         }
         if format!("{h:016x}") != stored {
@@ -303,24 +350,29 @@ impl Shard {
                 plies_total: r[5] as u16,
             })
             .collect();
-        let own = raw("own")?
-            .chunks_exact(PACKED_PLANE)
-            .map(|c| c.try_into().expect("chunk size"))
-            .collect();
-        let feats = raw("feats")?
-            .chunks_exact(4 * FEATURE_LEN)
-            .map(|row| {
-                let mut f = [0.0f32; FEATURE_LEN];
-                for (i, c) in row.chunks_exact(4).enumerate() {
-                    f[i] = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
-                }
-                f
-            })
-            .collect();
+        let planes = |b: &[u8]| -> Vec<[u8; PACKED_PLANE]> {
+            b.chunks_exact(PACKED_PLANE)
+                .map(|c| c.try_into().expect("chunk size"))
+                .collect()
+        };
+        let feat_rows = |b: &[u8]| -> Vec<[f32; FEATURE_LEN]> {
+            b.chunks_exact(4 * FEATURE_LEN)
+                .map(|row| {
+                    let mut f = [0.0f32; FEATURE_LEN];
+                    for (i, c) in row.chunks_exact(4).enumerate() {
+                        f[i] = f32::from_le_bytes([c[0], c[1], c[2], c[3]]);
+                    }
+                    f
+                })
+                .collect()
+        };
         Ok(Self {
             decisions,
-            own,
-            feats,
+            own: planes(raw("own")?),
+            feats: feat_rows(raw("feats")?),
+            alt_own: planes(raw("alt_own")?),
+            alt_feats: feat_rows(raw("alt_feats")?),
+            has_alt: raw("has_alt")?.to_vec(),
         })
     }
 
@@ -352,6 +404,7 @@ mod tests {
                 ..Default::default()
             },
             &obs_with(gid as usize + ply as usize, ply as f32 + 0.5),
+            Some(&obs_with(gid as usize + ply as usize + 13, ply as f32)),
         )
     }
 
