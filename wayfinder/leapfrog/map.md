@@ -175,3 +175,31 @@ Key prior evidence the simple design leans on:
 - Single-player from the same net: planned as a same-seed self-race venue
   (two boards, no interaction, more attack wins) so the identical loop covers
   both modes; blocked until versus compounds.
+
+# Round-time perf (2026-07-11 audit)
+
+Measured round-1 breakdown (600 games, ~11.4h wall): datagen ~4.9h (123
+games/hr), train whitening+epoch0 ~5.6h (cold read + pure-Python checksum over
+the 3.8GB 20k-game r0 replay, ×4 passes), warm epochs ~12min, duels ~32min.
+A 44-agent adversarial cross-stack audit (all findings verified) ranked the
+levers:
+
+- **LANDED (pure-infra, byte-identical results):**
+  - *Work-stealing datagen* (shared atomic game counter, not static
+    round-robin) — killed a 5h straggler where one worker ground the long
+    competitive games while nine idled.
+  - *feats-only whitening + verify-once checksum* — the FNV checksum was
+    99.6% of `read_shard` (85ms vs 0.3ms); it ran ×4 over the immutable
+    replay. Now: whitening reads only feats, checksum verifies once (epoch 0).
+    ~15% off each round.
+- **QUEUED science-touching levers (need an A/B before adoption), by leverage:**
+  1. *Cheaper datagen search* — decouple `datagen --wd` from the gate and run
+     e.g. w4d3: ~2.6-3.1× datagen (~3h/round). A/B: does w4d3-ranked pair data
+     still gate-beat the anchor / compound? Highest single lever.
+  2. *Subsample the replay* (old design kept every-4th-shard = 25%): ~1-1.5h
+     marginal after the read-once fix. A/B: same promotion verdict at 25%?
+  3. *ANE/CoreML leaf backend revival* (~3-6× datagen) — large effort +
+     the complexity we deliberately deleted; only if 1-2 aren't enough.
+- **REJECTED as <1% or micro-churn:** per-parent Vec preallocs, SmallVec
+  lock_clear, batched-per-generation net eval, im2col split, movegen bit-packs
+  — real but sub-1%, not worth the churn (the audit's own verified estimates).
