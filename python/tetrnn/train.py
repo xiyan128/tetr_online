@@ -181,6 +181,13 @@ def main() -> None:
     ap.add_argument("--init", default=None, help="fine-tune from this exported model dir")
     ap.add_argument("--lr", type=float, default=1e-3)
     ap.add_argument(
+        "--channels",
+        default="1,16,32,32",
+        help="conv channels for a from-scratch net (must start with 1); e.g. "
+        "1,32,64,64 for the capacity lever. The whole stack (net.rs, export, "
+        "forward) already reads conv_channels from config — only ignored with --init.",
+    )
+    ap.add_argument(
         "--td",
         type=float,
         default=0.0,
@@ -210,7 +217,8 @@ def main() -> None:
         model = load(Path(args.init))
         print(f"init from {args.init} (whitening kept)")
     else:
-        model = TetrNet()
+        model = TetrNet(tuple(int(c) for c in args.channels.split(",")))
+        print(f"from scratch, conv_channels={model.conv_channels}")
         # Whitening over all rows — feature normalization stats carry no label
         # information, so including holdout rows is not a leak.
         mean, std = whitening_stats(paths)
