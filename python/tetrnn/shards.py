@@ -132,7 +132,7 @@ def _summary(dir: str) -> None:
     games: set[int] = set()
     z_counts = {-1: 0, 0: 0, 1: 0}
     for p in paths:
-        s = read_shard(p)
+        s = read_shard(p, verify=False)  # a summary is just counting — skip the FNV pass
         rows += s.n_rows
         games.update(int(g) for g in np.unique(s.game_id))
         for z, n in zip(*np.unique(s.z, return_counts=True), strict=True):
