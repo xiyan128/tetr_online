@@ -203,3 +203,29 @@ levers:
 - **REJECTED as <1% or micro-churn:** per-parent Vec preallocs, SmallVec
   lock_clear, batched-per-generation net eval, im2col split, movegen bit-packs
   — real but sub-1%, not worth the churn (the audit's own verified estimates).
+
+## Is there a pure-infra ORDER-OF-MAGNITUDE datagen speedup? Measured: NO (2026-07-12)
+
+Direct question: can we 10× datagen purely-infra (incl. hidden bugs)? Answer,
+by measurement — no, and there is no hidden pathology:
+- **Datagen is 100% the net forward** (CC2 datagen 31k games/hr vs net 123 = a
+  250× gap that IS the forward; the throughput model closes exactly).
+- **No BLAS oversubscription**: `VECLIB_MAXIMUM_THREADS=1` vs default at 10
+  workers = 29342 vs 29669 ev/s, identical. The 2.2× per-worker collapse at 10
+  workers is genuine 12-core (8P+4E) saturation + memory bandwidth.
+- **No redundant evals**: a w8d5 decision scores 2222 leaves — legitimate for
+  the config, identical net-path vs cc2-path (board_only sharing saves nothing
+  at d5/5-piece-queue). No bug (`tests/eval_count.rs`).
+- **All three inference backends converge at a hardware floor of ~3-9k
+  evals/s** at datagen's batch~67 (`tests/forward_bench.rs` + a throwaway ORT
+  bench): Rust BLAS ~6500, ORT-CPU ~4000, ORT-CoreML/ANE ~4400-5200. **The ANE
+  does NOT give the 5-15× the old memory promised** — that was a larger net at
+  batch 480-3840; this tiny net at batch 67 is dispatch-overhead-bound and the
+  ANE can't beat CPU BLAS. Even at batch 1024 no backend exceeds ~9k (≈1.4× over
+  batch 67), so batching buys ~1.5×, not 10×.
+- **Verdict:** the ~150-250µs/eval forward is a floor for this net on this
+  hardware. Pure-infra realistic ceiling ~1.5-2× (fused conv/layout — risky,
+  sub-1.3× per the audit, NOT pursued). The only ~3× lever is **science-touching
+  cheaper search (w4d3, ⅓ the evals)** — the queued A/B. An order of magnitude
+  would require a fundamentally cheaper evaluator (smaller net = science) or a
+  different search paradigm, not an infra fix.
