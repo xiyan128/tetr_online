@@ -51,6 +51,12 @@ def z_class(z: np.ndarray) -> np.ndarray:
     return (1 - z).astype(np.int64)
 
 
+def z_hat(logits: torch.Tensor) -> torch.Tensor:
+    """The deployed value p_win − p_loss (matches net.rs Heads::z_hat)."""
+    p = torch.softmax(logits, dim=1)
+    return p[:, 0] - p[:, 2]
+
+
 def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
     """Mean/std over every training row's features, one streaming pass."""
     n, s, s2 = 0, None, None
@@ -137,11 +143,8 @@ def epoch_pass(
                         ).unsqueeze(1)
                         af = torch.as_tensor(shard.alt_feats[rows[live]], device=device)
                         alt_logits = model.serve(ab, af)
-                        zh = lambda lg: (  # noqa: E731 — p_win − p_loss
-                            torch.softmax(lg, dim=1)[:, 0] - torch.softmax(lg, dim=1)[:, 2]
-                        )
                         mask = torch.as_tensor(live, device=device)
-                        gap = zh(logits[mask]) - zh(alt_logits)
+                        gap = z_hat(logits[mask]) - z_hat(alt_logits)
                         rank_loss = -torch.nn.functional.logsigmoid(5.0 * gap).mean()
                 if succ is not None and frozen is not None:
                     # TD target: soft successor belief mixed with the outcome;
