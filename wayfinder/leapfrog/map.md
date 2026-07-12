@@ -297,3 +297,25 @@ ceiling. This points at a **capacity or data ceiling**, not replay.
 + vs r1 — one change (net size) on the cleanest data, no new datagen. If it
 exceeds 35-13, capacity was the limit; if not, the ceiling is CC2's ranking
 quality (→ deeper datagen search to out-teach CC2 is the next axis).
+
+## Capacity probe: modest lever, near-ceiling (2026-07-12)
+
+Bigger net (1,32,64,64 = ~4x params) on r1's exact training data (r0 full +
+r1 self-play), one change (net size). Holdout acc IDENTICAL to the small net
+(0.554) — but (holdout misled again, the campaign's core lesson) the DUELS
+show: **big-net beats r1 29-19** (p~0.09, marginal) and edges the anchor
+**37-11** (vs r1's 35-13, within noise). So capacity is a REAL but MODEST lever:
+the bigger net is ≈ r1, maybe slightly better, at 4x the eval cost.
+
+**Consolidated plateau finding (three levers tested):** the w8d5 self-play loop
++ net has plateaued at "net beats CC2@w8d5 ~35-13". Self-play rounds don't
+improve it (r2,r3 KEEP); capping the r0 replay HURTS (r0 CC2 pairs are the
+grounding); 4x capacity barely dents it. **The ceiling is the CC2@w8d5 TEACHER
+QUALITY** — CC2@w8d5's ranking pairs can only teach a student to ~CC2@w8d5
+level. To exceed it, a STRONGER teacher is needed — deeper CC2 search
+(tp/w16d7+) for datagen — which points directly at the champion CC2@tp128d9 as
+both the teacher to distill AND the destination bar. The destination (does the
+best net beat CC2@tp128d9 at matched config) remains UNTESTED; prior-campaign
+caution = leaf edges compress at deep search, but this net is ranking-trained
+(new). Next branch (expensive, strategic): distill a deeper CC2 teacher, or run
+the champion race.
