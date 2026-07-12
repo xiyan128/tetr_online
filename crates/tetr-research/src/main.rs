@@ -433,6 +433,15 @@ fn main() -> std::io::Result<()> {
             };
             let t0 = std::time::Instant::now();
             let n_workers = workers.max(1);
+            // Work-stealing over a shared game counter, NOT a static
+            // round-robin stride: net-leaf games vary wildly in length (a
+            // competitive net-vs-net game can run to the 240-ply cap while a
+            // quick topout ends in seconds), so a fixed `i += n_workers`
+            // partition left one worker grinding long games for hours while
+            // the rest sat idle (round-1 datagen: one 5h straggler, nine done
+            // in ~30m). game `i` still uses seed `seeds+i` whoever plays it —
+            // reproducibility is untouched, only the load balances.
+            let next_game = std::sync::atomic::AtomicU64::new(0);
             std::thread::scope(|scope| -> std::io::Result<()> {
                 let mut handles = Vec::new();
                 for w in 0..n_workers {
@@ -442,11 +451,15 @@ fn main() -> std::io::Result<()> {
                     let out_w = out.join(format!("w{w}"));
                     let net_ref = &net;
                     let venue_ref = &venue_fmt;
+                    let next_game = &next_game;
                     handles.push(scope.spawn(move || -> std::io::Result<()> {
                         let eval = load_eval(net_ref.as_deref());
                         let mut writer = tetr_nn::shards::ShardWriter::create(&out_w, 1024)?;
-                        let mut i = w as u64;
-                        while i < games {
+                        loop {
+                            let i = next_game.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+                            if i >= games {
+                                break;
+                            }
                             tetr_research::datagen::datagen_game(
                                 &mut writer,
                                 &*eval,
@@ -456,7 +469,6 @@ fn main() -> std::io::Result<()> {
                                 seeds + i,
                                 (seeds + i) as u32,
                             )?;
-                            i += n_workers as u64;
                         }
                         writer.flush()?;
                         Ok(())
