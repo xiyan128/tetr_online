@@ -1,0 +1,33 @@
+#!/usr/bin/env bash
+# End-to-end smoke of the learning loop: a tiny round 0 (bootstrap + BASELINE)
+# and round 1 (self-play + candidate-vs-incumbent + anchor gate) through the
+# real round.py. Validates the datagen -> train -> gate GLUE — the layer this
+# project's bugs live in (index misalignment, schema mismatch, split leaks).
+# Not a strength test (a few games / 1 epoch trains a weak net); a glue test.
+# Uses the cheap w4d3 search so the net-leaf round-1 datagen stays fast.
+#
+# Prereq: cargo build --release -p tetr-research. Runs in ~5 min on CPU.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+
+SMOKE="${TMPDIR:-/tmp}/tetr-loop-smoke-$$"
+trap 'rm -rf "$SMOKE"' EXIT
+run() { TETRNN_DEVICE=cpu uv run --directory python python -m tetrnn.round "$@"; }
+
+# --allow-dirty: a smoke runs mid-development on a dirty tree; it never records
+# an experiment, so it needn't refuse an uncommitted working tree.
+echo "== round 0 (bootstrap) =="
+run --round 0 --scratch "$SMOKE" --games 40 --workers 6 --epochs 1 --pairs 3 --wd w4d3 --allow-dirty
+echo "== round 1 (self-play + gate vs incumbent) =="
+run --round 1 --scratch "$SMOKE" --incumbent "$SMOKE/r0/net" \
+    --games 16 --workers 6 --epochs 1 --pairs 3 --wd w4d3 --allow-dirty
+
+python3 - "$SMOKE/rounds.jsonl" <<'PY'
+import json, sys
+rows = [json.loads(l) for l in open(sys.argv[1])]
+assert len(rows) == 2, f"expected 2 ledger rows, got {len(rows)}"
+assert rows[0]["verdict"] == "BASELINE", rows[0]["verdict"]
+assert rows[1]["verdict"] in ("PROMOTE", "KEEP_INCUMBENT"), rows[1]["verdict"]
+assert rows[1]["vs_incumbent"].startswith("duel |"), "round 1 ran the incumbent duel"
+print("LOOP SMOKE GREEN:", rows[0]["verdict"], "->", rows[1]["verdict"])
+PY
