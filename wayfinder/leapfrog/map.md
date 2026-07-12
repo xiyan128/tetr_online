@@ -191,7 +191,8 @@ levers:
   - *feats-only whitening + verify-once checksum* — the FNV checksum was
     99.6% of `read_shard` (85ms vs 0.3ms); it ran ×4 over the immutable
     replay. Now: whitening reads only feats, checksum verifies once (epoch 0).
-    ~15% off each round.
+    ~15% off each round. **CONFIRMED in production: round-2 whitening ran in
+    11s vs round-1's 6414s; whole-train ~47min vs ~5.9h.**
 - **QUEUED science-touching levers (need an A/B before adoption), by leverage:**
   1. *Cheaper datagen search* — decouple `datagen --wd` from the gate and run
      e.g. w4d3: ~2.6-3.1× datagen (~3h/round). A/B: does w4d3-ranked pair data
