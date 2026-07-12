@@ -229,3 +229,15 @@ by measurement — no, and there is no hidden pathology:
   cheaper search (w4d3, ⅓ the evals)** — the queued A/B. An order of magnitude
   would require a fundamentally cheaper evaluator (smaller net = science) or a
   different search paradigm, not an infra fix.
+
+## Campaign-velocity dynamic (2026-07-12): datagen cost GROWS as the net improves
+
+Round 2 datagen (r1 incumbent self-play) runs slower than round 1's (r0): the
+stronger net plays longer, more competitive games that reach the 240-ply cap,
+so evals/game rises. The gate duels lengthen too (r1's vs-incumbent duel was
+22min/48 games). Since there is NO pure-infra 10× (measured above), and per-
+round cost climbs with net strength, the **cheaper-search A/B (w4d3, ~3× fewer
+evals, applied identically in datagen AND gate so driver≡harness holds) is now
+the load-bearing velocity lever**, not an optional nicety — without a per-decision
+cost reduction the campaign slows unboundedly as it compounds. Queued to run
+once round 2 frees the machine.
