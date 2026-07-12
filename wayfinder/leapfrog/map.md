@@ -241,3 +241,20 @@ evals, applied identically in datagen AND gate so driver≡harness holds) is now
 the load-bearing velocity lever**, not an optional nicety — without a per-decision
 cost reduction the campaign slows unboundedly as it compounds. Queued to run
 once round 2 frees the machine.
+
+## Code-review of the ranking pipeline (2026-07-12): 2 bugs fixed, quantified low-impact
+
+A 7-angle adversarial review (commit 7094bb7) of the ranking/TD/whitening/
+work-stealing changes found two real bugs, both fixed forward:
+- **Ranking mislabel on tied scores** — the alt-sibling was any non-argmax
+  placement; on tie-heavy CC2 data it could pair `played` against a *tied-best*
+  sibling, teaching a movegen-order preference. Fixed to strictly-worse only.
+  Measured: ~0.2% of rows fully-tied (the effect floor), has_alt 100%→99.8% —
+  a tiny data change. **Decision: apply round 3+, do NOT regenerate r0/restart**
+  (the campaign compounds through the noise; r1 promoted 38-10).
+- **Work-stealing broke holdout reproducibility** — the every-10th-SHARD split
+  depended on shard layout (work-stealing randomizes it). Fixed: split by
+  game_id (% 10), reproducible under work-stealing. Applies round 3+.
+Both are pure improvements for future rounds; the running round-2 verdict is
+unaffected (its duels don't touch datagen/train changes). Also: schema-3 alt
+tensors now have round-trip test coverage; stale docstrings swept.
