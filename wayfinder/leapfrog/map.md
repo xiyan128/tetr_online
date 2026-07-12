@@ -140,10 +140,23 @@ Key prior evidence the simple design leans on:
   net). Progression: 0-48 → 24-24 (2k) → 38-10 (20k). First decisive win
   of a fully-learned evaluator over the hand eval at matched search on the
   clean stack.
-- Now: the self-play campaign proper (fresh scratch, schema 3, `--rank`
-  recipe): round 0 = 20k CC2 teacher games; round 1+ = the incumbent's own
-  self-play with pairs ranked by its own search. Champion ladder
-  (`tp:cc2` at wider/deeper configs) begins once the loop compounds.
+- **Campaign proper (fresh scratch `~/leapfrog-rounds`, schema 3, `--rank`).**
+  r0 = 20k CC2 teacher games → anchor **35-13** (BASELINE, ledgered).
+- **⭐ ROUND 1 PROMOTED — THE LOOP COMPOUNDS (2026-07-11).** The r0 net's own
+  self-play (600 games, pairs ranked by its own search) trained an r1 net that
+  **beats its parent 30-18** and holds the CC2 floor **35-13**. First honest
+  promotion of a self-improving loop on the clean stack — the whole campaign's
+  central question, answered yes. r1 is the new incumbent; round 2 chains from
+  it. (Anchor flat vs r0, both 35-13, but head-to-head decisive: self-play
+  sharpens net-vs-net, as expected.) Caveat: the driver crashed at the anchor
+  step because an infra edit left the tree dirty (the enforced clean-tree
+  reproducibility check fired); both duels ran for real and the ledger row was
+  reconstructed from the actual results.
+- **Infra: datagen work-steals now** (shared atomic game counter, not static
+  round-robin) — round-1 datagen ran a 5h straggler (one worker on the long
+  competitive games while nine idled); game i still uses seed seeds+i, so
+  reproducibility is untouched. Champion ladder (`tp:cc2` upward) begins as the
+  loop keeps compounding.
 
 # Open questions (one lever at a time)
 
