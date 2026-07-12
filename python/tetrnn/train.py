@@ -40,7 +40,7 @@ import torch
 
 from .export import export, load
 from .model import TetrNet
-from .shards import read_shard, shard_paths, unpack_plane
+from .shards import read_feats, read_shard, shard_paths, unpack_plane
 
 BATCH = 512
 HOLDOUT_EVERY = 10  # every 10th shard is holdout (game-aligned => game-level)
@@ -55,7 +55,7 @@ def whitening_stats(paths: list[str]) -> tuple[np.ndarray, np.ndarray]:
     """Mean/std over every training row's features, one streaming pass."""
     n, s, s2 = 0, None, None
     for p in paths:
-        f = read_shard(p).feats.astype(np.float64)
+        f = read_feats(p).astype(np.float64)
         n += f.shape[0]
         s = f.sum(axis=0) if s is None else s + f.sum(axis=0)
         s2 = (f * f).sum(axis=0) if s2 is None else s2 + (f * f).sum(axis=0)
@@ -88,13 +88,14 @@ def epoch_pass(
     td: float = 0.0,
     frozen: TetrNet | None = None,
     rank: float = 0.0,
+    verify: bool = False,
 ) -> tuple[float, float]:
     """One pass over `paths` (shard-streamed). With `opt` it trains; without it
     it evaluates (always against the plain z labels — the grounded metric).
     Returns (mean CE, accuracy of the WDL argmax vs z)."""
     total_ce, total_hit, total_n = 0.0, 0, 0
     for p in paths:
-        shard = read_shard(p)
+        shard = read_shard(p, verify=verify)
         succ = successor_of(shard) if td > 0 and frozen is not None else None
         order = np.arange(shard.n_rows)
         if rng is not None:
@@ -218,9 +219,14 @@ def main() -> None:
             frozen = copy.deepcopy(model).eval()
             for q in frozen.parameters():
                 q.requires_grad_(False)
-        tr_ce, tr_acc = epoch_pass(model, train_paths, device, opt, rng, args.td, frozen, args.rank)
+        # Verify checksums once (epoch 0): the corpus is immutable, so later
+        # epochs trust it — the point of read_shard(verify=False).
+        verify = epoch == 0
+        tr_ce, tr_acc = epoch_pass(
+            model, train_paths, device, opt, rng, args.td, frozen, args.rank, verify
+        )
         model.eval()
-        ho_ce, ho_acc = epoch_pass(model, holdout_paths, device, None, None)
+        ho_ce, ho_acc = epoch_pass(model, holdout_paths, device, None, None, verify=verify)
         model.train()
         # Export every epoch: a partial run still yields a loadable model.
         export(model.to("cpu").eval(), out)
