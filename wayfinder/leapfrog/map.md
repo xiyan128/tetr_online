@@ -259,3 +259,23 @@ work-stealing changes found two real bugs, both fixed forward:
 Both are pure improvements for future rounds; the running round-2 verdict is
 unaffected (its duels don't touch datagen/train changes). Also: schema-3 alt
 tensors now have round-trip test coverage; stale docstrings swept.
+
+
+## Round 2: KEEP_INCUMBENT — the loop plateaued after one compounding step (2026-07-12)
+
+r1's self-play (600 games) + 20k r0 replay → r2 net: **lost 21-27 to r1** (≈ a
+tie: within ~1.7σ of even over 48 games), held the anchor 35-13 (same as r1).
+So r2 ≈ r1 — the loop compounded ONCE (r0→r1, 30-18) then stalled, exactly the
+map's pre-registered "compounds once then stalls" concern. Both r1 and r2 hold
+the anchor 35-13, so r2 isn't broken — it just didn't improve.
+
+**Diagnosis: the replay is 33:1 imbalanced** — every round trains on 20k r0 CC2
+games + ~600 new self-play, so the self-play signal (the only NEW information)
+is drowned by the frozen bootstrap corpus. The net converges back to ~r1 each
+round.
+**Next lever (pre-registered "replay buffers helped; first lever if it stalls"):
+rebalance the replay — keep recent self-play in full, CAP the r0 bootstrap to a
+grounding budget so self-play dominates the gradient.** Round 3 tests it (one
+change; incumbent stays r1). Also a velocity win (less to train on). If a
+rebalanced round still doesn't compound, the plateau is deeper (net capacity →
+a bigger net, a separate science bet).
