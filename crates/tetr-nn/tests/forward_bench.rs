@@ -41,7 +41,7 @@ fn forward_evals_per_second() {
 
     // Warm caches / branch predictors.
     let (wb, wf) = synthetic(64);
-    let witems: Vec<_> = wb.iter().zip(&wf).map(|(b, f)| (b, f)).collect();
+    let witems: Vec<_> = wb.iter().zip(&wf).collect();
     for _ in 0..20 {
         net.forward(&witems, &mut s);
     }
@@ -50,7 +50,7 @@ fn forward_evals_per_second() {
     eprintln!("  {:>6}  {:>12}  {:>10}", "batch", "evals/s", "us/eval");
     for &n in &[1usize, 8, 34, 68, 128, 480, 1024] {
         let (boards, feats) = synthetic(n);
-        let items: Vec<_> = boards.iter().zip(&feats).map(|(b, f)| (b, f)).collect();
+        let items: Vec<_> = boards.iter().zip(&feats).collect();
         // Enough iterations that each batch runs ~0.3s.
         let mut iters = 0u64;
         let t0 = Instant::now();
@@ -93,8 +93,7 @@ fn forward_evals_per_second() {
                         let net = Net::load(&dir).expect("net");
                         let mut s = Scratch::default();
                         let (boards, feats) = synthetic(50);
-                        let items: Vec<_> =
-                            boards.iter().zip(&feats).map(|(b, f)| (b, f)).collect();
+                        let items: Vec<_> = boards.iter().zip(&feats).collect();
                         let mut iters = 0u64;
                         let t0 = Instant::now();
                         while t0.elapsed().as_secs_f64() < 0.5 {
@@ -117,10 +116,8 @@ fn forward_evals_per_second() {
 
 /// Minimal `~` expansion (no dep).
 fn shellexpand(p: &str) -> String {
-    if let Some(rest) = p.strip_prefix("~/") {
-        if let Ok(home) = std::env::var("HOME") {
-            return format!("{home}/{rest}");
-        }
+    if let (Some(rest), Ok(home)) = (p.strip_prefix("~/"), std::env::var("HOME")) {
+        return format!("{home}/{rest}");
     }
     p.to_string()
 }
