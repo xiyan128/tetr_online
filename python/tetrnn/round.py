@@ -102,6 +102,15 @@ def main() -> None:
         help="let duels run on a dirty tree (receipts get stamped dirty; "
         "results are then NOT reproducible from (commit, seed))",
     )
+    ap.add_argument(
+        "--ground-cap",
+        type=int,
+        default=0,
+        help="cap the round-0 bootstrap corpus in the replay to this many shards "
+        "(even stride), keeping later self-play rounds full — rebalances the "
+        "replay so the ~600-game self-play isn't drowned by the 20k CC2 base "
+        "(0 = uncapped; round 2 plateaued at the 33:1 imbalance)",
+    )
     args = ap.parse_args()
 
     n = args.round
@@ -119,6 +128,7 @@ def main() -> None:
         "wd": args.wd,
         "finetune": args.finetune,
         "rank": args.rank,
+        "ground_cap": args.ground_cap,
     }
     if n > 0 and not args.incumbent:
         raise SystemExit("rounds past 0 need --incumbent (the model whose self-play trains next)")
@@ -148,15 +158,35 @@ def main() -> None:
         row["datagen"] = last_json(text)
         receipt.write_text(json.dumps(row["datagen"]))
 
-    # 2. train: this round's corpus + a replay of every earlier round's.
+    # 2. train: this round's corpus + a replay of every earlier round's. The
+    # round-0 bootstrap (20k CC2 games) is optionally CAPPED so it grounds
+    # without drowning the self-play signal — round 2 plateaued at a 33:1
+    # replay imbalance (self-play is the only new information each round).
     if (net / "config.json").exists():
         print(f"train: {net} exists — skipping")
     else:
-        replay = [
-            str(scratch / f"r{k}" / "corpus")
-            for k in range(n)
-            if (scratch / f"r{k}" / "corpus" / "receipt.json").exists()
-        ]
+        replay = []
+        for k in range(n):
+            ck = scratch / f"r{k}" / "corpus"
+            if not (ck / "receipt.json").exists():
+                continue
+            if k == 0 and args.ground_cap > 0:
+                shards = sorted(ck.glob("**/shard-*.safetensors"))
+                if len(shards) > args.ground_cap:
+                    stride = len(shards) / args.ground_cap
+                    shards = [shards[int(i * stride)] for i in range(args.ground_cap)]
+                # Symlink the strided subset into rN/ground/ (real dir, so the
+                # trainer's `**/shard-*.safetensors` glob finds the linked files).
+                gdir = rdir / "ground"
+                gdir.mkdir(exist_ok=True)
+                for i, sp in enumerate(shards):
+                    link = gdir / f"shard-{i:05d}.safetensors"
+                    if not link.exists():
+                        link.symlink_to(sp.resolve())
+                replay.append(str(gdir))
+                print(f"replay: r0 capped to {len(shards)} shards (ground); r1..r{n - 1} full")
+            else:
+                replay.append(str(ck))
         init = ["--init", args.incumbent] if args.finetune and args.incumbent else []
         sh(
             [
