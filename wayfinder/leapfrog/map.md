@@ -279,3 +279,21 @@ grounding budget so self-play dominates the gradient.** Round 3 tests it (one
 change; incumbent stays r1). Also a velocity win (less to train on). If a
 rebalanced round still doesn't compound, the plateau is deeper (net capacity →
 a bigger net, a separate science bet).
+
+## Round 3 REFUTES the replay-imbalance hypothesis — r0 CC2 grounding is load-bearing (2026-07-12)
+
+Round 3 (r1 self-play + replay with r0 CAPPED to 500 shards) lost **10-38 to r1**
+(worse than round-2's 21-27) and its anchor DROPPED to **26-22** (from the
+standing 35-13). Capping the 20k r0 CC2 corpus HURT — so the imbalance
+diagnosis was WRONG: r0's CC2 search-ranked pairs are the load-bearing grounding,
+not noise drowning the self-play. (Measurement corrected the hypothesis, cleanly:
+full replay > capped.)
+**Sharper picture: anchor strength plateaued at ~35-13 from ROUND 0 itself**
+(pure CC2 BC) — r0=r1=r2 all ~35-13; r1 beats r0 30-18 head-to-head but not vs
+CC2. Self-play adds head-to-head diversity but doesn't raise the CC2-anchored
+ceiling. This points at a **capacity or data ceiling**, not replay.
+**Next lever (pre-registered): net capacity.** Cleanest probe: a BIGGER net
+(--channels 1,32,64,64) trained on JUST r0 (20k CC2, full), gated vs the anchor
++ vs r1 — one change (net size) on the cleanest data, no new datagen. If it
+exceeds 35-13, capacity was the limit; if not, the ceiling is CC2's ranking
+quality (→ deeper datagen search to out-teach CC2 is the next axis).
