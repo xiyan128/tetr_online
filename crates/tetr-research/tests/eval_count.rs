@@ -51,34 +51,37 @@ fn spawned(seed: u64) -> SearchState {
 
 #[test]
 #[ignore]
-fn evals_per_w8d5_decision() {
-    eprintln!("\nleaves scored per w8d5 decision (avg over 20 spawned states):");
-    for &(tag, board_only) in &[
-        ("net path (board_only=false)", false),
-        ("cc2 path (board_only=true)", true),
-    ] {
-        let (mut tot_leaves, mut tot_calls) = (0usize, 0usize);
+fn evals_per_decision() {
+    // Configs to compare: the gate/datagen default and the cheaper-search
+    // candidate. Override with TETR_BENCH_WD="w8d5,w4d3,w6d4" to sweep others.
+    let wds = std::env::var("TETR_BENCH_WD").unwrap_or_else(|_| "w8d5,w4d3".into());
+    eprintln!("\nleaves scored per decision (net path, avg over 20 spawned states):");
+    let mut base: Option<f64> = None;
+    for wd in wds.split(',') {
+        let (w, d) = wd[1..].split_once('d').expect("wWdD");
+        let (w, d): (usize, u8) = (w.parse().unwrap(), d.parse().unwrap());
+        let mut tot = 0usize;
         for seed in 0..20u64 {
             let state = spawned(seed * 7 + 1);
             let ev = Counter {
                 leaves: AtomicUsize::new(0),
                 calls: AtomicUsize::new(0),
-                board_only,
+                board_only: false,
             };
-            let mut beam = BeamPlanner::new(8);
-            think_to_completion(&mut beam, &state, &ev, SearchBudget::beam(5));
-            tot_leaves += ev.leaves.load(Ordering::Relaxed);
-            tot_calls += ev.calls.load(Ordering::Relaxed);
+            let mut beam = BeamPlanner::new(w);
+            think_to_completion(&mut beam, &state, &ev, SearchBudget::beam(d));
+            tot += ev.leaves.load(Ordering::Relaxed);
         }
+        let per = tot as f64 / 20.0;
+        let b = *base.get_or_insert(per);
         eprintln!(
-            "  {tag:<30}  {:>7.0} leaves/decision  ({:>6.0} forward-calls)",
-            tot_leaves as f64 / 20.0,
-            tot_calls as f64 / 20.0
+            "  {wd:<6}  {per:>7.0} leaves/decision   ({:.2}x cheaper than {})",
+            b / per,
+            wds.split(',').next().unwrap()
         );
     }
     eprintln!(
-        "  (net/cc2 ratio = the speculation-sharing penalty the queue-conditioned\n   \
-         net pays. At ~150µs/eval and ~300 decisions/game, leaves/decision*300\n   \
-         *150µs = the datagen wall per game.)"
+        "  (leaves/decision * ~300 decisions/game * ~150µs/eval = the datagen wall/game.\n   \
+         The cheaper-search ratio bounds the w4d3 A/B's datagen speedup.)"
     );
 }
