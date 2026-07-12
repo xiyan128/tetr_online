@@ -429,10 +429,15 @@ mod tests {
         // z backfilled per seat.
         assert_eq!(shard.decisions[0].z, 1);
         assert_eq!(shard.decisions[1].z, -1);
-        // Served bytes exact: re-derive one row and compare.
+        // Served bytes exact: re-derive one row and compare — the played
+        // state AND its ranking sibling (the schema-3 additions).
         let expect = record(5, 0, 0);
         assert_eq!(shard.own[0], expect.own);
         assert_eq!(shard.feats[0], expect.feats);
+        assert_eq!(shard.alt_own[0], expect.alt_own);
+        assert_eq!(shard.alt_feats[0], expect.alt_feats);
+        assert_eq!(shard.has_alt[0], expect.has_alt as u8);
+        assert!(expect.has_alt, "the test record stores a sibling");
         let _ = std::fs::remove_dir_all(&dir);
     }
 

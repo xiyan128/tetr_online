@@ -1,10 +1,10 @@
 """The value trainer: win/draw/loss cross-entropy on played states.
 
 Each shard row is one played state + the game outcome from the mover's
-perspective; the loss is plain 3-class CE. Whitening stats come from the
-training rows (one row role — every row is served the same way). Holdout is
-every 10th shard; shard flushes are game-aligned, so that is a game-level
-split.
+perspective; the loss is plain 3-class CE. Holdout = games where
+`game_id % 10 == 0` — a game-level split (all of a game's rows share game_id)
+that is reproducible regardless of which worker/shard datagen's work-stealing
+packed the game into.
 
 `--td ALPHA` switches to TD-style bootstrapped targets (the TD-Gammon move):
 each row's target becomes `alpha * frozen_probs(next state) + (1-alpha) *
@@ -43,7 +43,7 @@ from .model import TetrNet
 from .shards import read_feats, read_shard, shard_paths, unpack_plane
 
 BATCH = 512
-HOLDOUT_EVERY = 10  # every 10th shard is holdout (game-aligned => game-level)
+HOLDOUT_EVERY = 10  # holdout = games where game_id % 10 == 0 (game-level, reproducible)
 
 
 def z_class(z: np.ndarray) -> np.ndarray:
@@ -89,15 +89,28 @@ def epoch_pass(
     frozen: TetrNet | None = None,
     rank: float = 0.0,
     verify: bool = False,
+    subset: str = "all",
 ) -> tuple[float, float]:
     """One pass over `paths` (shard-streamed). With `opt` it trains; without it
     it evaluates (always against the plain z labels — the grounded metric).
+    `subset` selects rows by game_id: "train" (game_id % HOLDOUT_EVERY != 0),
+    "holdout" (== 0), or "all" — a game-level split that is reproducible
+    regardless of which worker/shard work-stealing packed a game into (a
+    shard-position split was non-reproducible once datagen work-steals).
     Returns (mean CE, accuracy of the WDL argmax vs z)."""
     total_ce, total_hit, total_n = 0.0, 0, 0
     for p in paths:
         shard = read_shard(p, verify=verify)
         succ = successor_of(shard) if td > 0 and frozen is not None else None
-        order = np.arange(shard.n_rows)
+        ho = (shard.game_id % HOLDOUT_EVERY) == 0
+        if subset == "train":
+            order = np.where(~ho)[0]
+        elif subset == "holdout":
+            order = np.where(ho)[0]
+        else:
+            order = np.arange(shard.n_rows)
+        if len(order) == 0:
+            continue
         if rng is not None:
             rng.shuffle(order)
         for lo in range(0, len(order), BATCH):
@@ -185,8 +198,6 @@ def main() -> None:
     paths = [p for d in corpora for p in shard_paths(d)]
     if not paths:
         raise SystemExit(f"no shards under {corpora}")
-    train_paths = [p for i, p in enumerate(paths) if i % HOLDOUT_EVERY != 0]
-    holdout_paths = [p for i, p in enumerate(paths) if i % HOLDOUT_EVERY == 0]
 
     device = torch.device(
         os.environ.get("TETRNN_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu")
@@ -197,18 +208,17 @@ def main() -> None:
         print(f"init from {args.init} (whitening kept)")
     else:
         model = TetrNet()
-        mean, std = whitening_stats(train_paths)
+        # Whitening over all rows — feature normalization stats carry no label
+        # information, so including holdout rows is not a leak.
+        mean, std = whitening_stats(paths)
         model.feat_mean.copy_(torch.as_tensor(mean))
         model.feat_std.copy_(torch.as_tensor(std))
-        print(f"whitening from {len(train_paths)} train shards [{time.time() - t0:.0f}s]")
+        print(f"whitening from {len(paths)} shards [{time.time() - t0:.0f}s]")
     model.to(device).train()
     opt = torch.optim.Adam(model.parameters(), lr=args.lr)
     rng = np.random.default_rng(0)
 
-    print(
-        f"corpus: {len(train_paths)} train / {len(holdout_paths)} holdout shards, "
-        f"lr={args.lr}, td={args.td}, rank={args.rank}"
-    )
+    print(f"corpus: {len(paths)} shards, lr={args.lr}, td={args.td}, rank={args.rank}")
     for epoch in range(args.epochs):
         frozen = None
         if args.td > 0:
@@ -223,10 +233,12 @@ def main() -> None:
         # epochs trust it — the point of read_shard(verify=False).
         verify = epoch == 0
         tr_ce, tr_acc = epoch_pass(
-            model, train_paths, device, opt, rng, args.td, frozen, args.rank, verify
+            model, paths, device, opt, rng, args.td, frozen, args.rank, verify, subset="train"
         )
         model.eval()
-        ho_ce, ho_acc = epoch_pass(model, holdout_paths, device, None, None, verify=verify)
+        # Holdout reads the same shards the train pass just verified — don't
+        # re-checksum.
+        ho_ce, ho_acc = epoch_pass(model, paths, device, None, None, verify=False, subset="holdout")
         model.train()
         # Export every epoch: a partial run still yields a loadable model.
         export(model.to("cpu").eval(), out)

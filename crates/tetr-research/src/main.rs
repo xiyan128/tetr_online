@@ -133,8 +133,8 @@ enum Command {
         /// outcome-predictive; omit for balanced mirror games.
         #[arg(long)]
         opp_width: Option<usize>,
-        /// Parallel workers (games partitioned round-robin; each worker owns
-        /// out/wN/ so shard numbering never collides).
+        /// Parallel workers (games work-stolen from a shared counter; each
+        /// worker owns out/wN/ so shard numbering never collides).
         #[arg(long, default_value_t = 1)]
         workers: usize,
         /// Number of games (seeds `base..base+games`).
@@ -439,8 +439,11 @@ fn main() -> std::io::Result<()> {
             // quick topout ends in seconds), so a fixed `i += n_workers`
             // partition left one worker grinding long games for hours while
             // the rest sat idle (round-1 datagen: one 5h straggler, nine done
-            // in ~30m). game `i` still uses seed `seeds+i` whoever plays it —
-            // reproducibility is untouched, only the load balances.
+            // in ~30m). game `i` still uses seed `seeds+i` whoever plays it, so
+            // the per-game data is reproducible; only WHICH worker/shard packs
+            // a game varies with scheduling. The trainer therefore splits
+            // train/holdout by game_id (not shard position), so that split
+            // stays reproducible under work-stealing.
             let next_game = std::sync::atomic::AtomicU64::new(0);
             std::thread::scope(|scope| -> std::io::Result<()> {
                 let mut handles = Vec::new();

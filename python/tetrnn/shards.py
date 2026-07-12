@@ -1,4 +1,4 @@
-"""Reader for training shards (schema 2) written by the Rust datagen driver.
+"""Reader for training shards (schema 3) written by the Rust datagen driver.
 
 One row per played decision:
 
@@ -13,9 +13,10 @@ The alt pair carries "the search preferred own over alt_own" — unit-free
 within-decision ranking supervision (outcome-only labels measurably cannot
 rank sibling placements).
 
-Shard flushes are game-aligned (a game never spans shards), so a shard-level
-train/holdout split IS a game-level split. The writer stamps a schema tag and
-an FNV checksum; this reader rejects anything else loudly.
+Shard flushes are game-aligned (a game never spans shards). The trainer splits
+train/holdout by game_id (not shard position) so the split survives datagen's
+work-stealing. The writer stamps a schema tag and an FNV checksum; this reader
+rejects anything else loudly.
 """
 
 from __future__ import annotations

@@ -116,20 +116,27 @@ fn play_decision(
     }
 
     // Record the played (post-placement) state exactly as the net would see
-    // it, plus one deterministically-chosen NON-best sibling (the ranking
-    // pair: "the search preferred played over alt"). Deterministic pick — no
-    // RNG in the driver, reproducible from (seed, ply).
+    // it, plus one deterministically-chosen sibling that scored STRICTLY WORSE
+    // (the ranking pair: "the search preferred played over alt"). Pairing must
+    // express a real preference — tied-best siblings are NOT one: CC2 ties the
+    // top score on ~55% of decisions, and argmax is the FIRST such tie, so
+    // pairing `played` against an equal-scored sibling would teach the net a
+    // movegen-order bias the search never expressed. Deterministic pick (no
+    // driver RNG), reproducible from (seed, ply); no alt when nothing is
+    // strictly worse (a fully-tied decision).
     let best = &placements[argmax];
     let mut played = state.clone();
     played.commit_placement(best);
-    let alt_obs = (placements.len() > 1).then(|| {
+    let worse: Vec<usize> = (0..placements.len())
+        .filter(|&i| scores[i] < scores[argmax])
+        .collect();
+    let alt_obs = (!worse.is_empty()).then(|| {
         let k = (meta.game_id as usize)
             .wrapping_mul(31)
             .wrapping_add(meta.ply as usize * 7 + meta.seat as usize)
-            % (placements.len() - 1);
-        let alt_idx = if k >= argmax { k + 1 } else { k };
+            % worse.len();
         let mut alt = state.clone();
-        alt.commit_placement(&placements[alt_idx]);
+        alt.commit_placement(&placements[worse[k]]);
         encode(&alt)
     });
     let record = DecisionRecord::from_served(meta, &encode(&played), alt_obs.as_ref());

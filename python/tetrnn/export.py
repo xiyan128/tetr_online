@@ -19,7 +19,7 @@ from .model import TetrNet
 
 # Version tags, for the curious: the weights FILE keeps its historical name
 # (net_v2.safetensors); the model CONTRACT is config schema_version 3 (the
-# value-only net); training SHARDS are schema "2". Each guards its own reader.
+# value-only net); training SHARDS are schema "3". Each guards its own reader.
 Z_SCALE = 10_000.0
 
 
